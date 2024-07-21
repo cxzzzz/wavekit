@@ -11,9 +11,13 @@ def test_vcdreader():
     )
 
     print(j_state)
+    assert (j_state.signal == "tb.u0.J_state[3:0]")
+    assert (j_state.width == 4)
+    assert (j_state.signed == True)
 
-    j_state = vcd_reader.load_waves(
-        "tb.u0.J_<[a-z]+>", "tb.tck", signed=True, sample_on_posedge=False
+    j_regex = vcd_reader.load_waves(
+        "tb.u0.@J_([a-z]+)\[3:0\]", "tb.tck", signed=True, sample_on_posedge=False
     )
 
-    print(j_state)
+    print(j_regex)
+    assert len(j_regex) == 2

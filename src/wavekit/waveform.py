@@ -645,7 +645,6 @@ class Waveform:
         zero = self.value[:-1] == 0
         one = self.value[1:] == 1
         new_indices = np.concatenate(([False], one & zero))
-        print(">>>>>>>>>>>>>>", zero, one, new_indices)
         return self.take(new_indices)
 
     def count_one(self) -> Waveform:

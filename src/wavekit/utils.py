@@ -1,11 +1,13 @@
 import re
 from typing import Any
 
-def split_by_range_expr(pattern:str):
+
+def split_by_range_expr(pattern: str):
     match = re.search(r'(\[(\d+:\d+|\d+)\])*$', pattern)
     pattern = pattern[:match.span()[0]]
     range_expr = match[0]
     return pattern, range_expr
+
 
 def split_by_hierarchy(pattern: str) -> list[str]:
     import re
@@ -13,6 +15,8 @@ def split_by_hierarchy(pattern: str) -> list[str]:
 
 # just like shell brace expansion
 # or regex pattern
+
+
 def expand_brace_pattern(pattern: str) -> dict[tuple, str]:
     # 数字范围模式
     range_pattern = re.compile(r"\{(\d+)\.\.(\d+)(?:\.\.(\d+))?\}")
@@ -62,17 +66,17 @@ def expand_brace_pattern(pattern: str) -> dict[tuple, str]:
     # 分割输入模式
     parts = []
     i = 0
-    expand_pattern_pairs = {"{": "}", "<": ">"}
     while i < len(pattern):
         if pattern[i] == '{':
             j = pattern.find('}', i)
             if j == -1:
-                raise ValueError(f"Unmatched pattern delimiter: {pattern[i]}, {pattern} ")
-            parts.append(pattern[i : j + 1])
+                raise ValueError(f"Unmatched pattern delimiter: {
+                                 pattern[i]}, {pattern} ")
+            parts.append(pattern[i: j + 1])
             i = j + 1
         else:
             j = i
-            while j < len(pattern) and pattern[j] not in expand_pattern_pairs:
+            while j < len(pattern) and pattern[j] != '{':
                 j += 1
             parts.append(pattern[i:j])
             i = j
