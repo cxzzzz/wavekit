@@ -1,7 +1,7 @@
 from __future__ import annotations
 import numpy as np
 from numba import jit
-from typing import Union, Callable
+from typing import Union, Callable, List
 
 
 class Waveform:
