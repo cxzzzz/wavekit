@@ -3,10 +3,6 @@ from wavekit.reader import VcdReader
 
 
 def test_vcdreader():
-    """
-    This defines the expected usage, which can then be used in various test cases.
-    Pytest will not execute this code directly, since the function does not contain the suffex "test"
-    """
 
     vcd_reader = VcdReader("tests/testdata/jtag.vcd")
 
