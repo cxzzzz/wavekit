@@ -2,7 +2,7 @@
 name = "wavekit"
 version = "0.1.0"
 description = ""
-authors = ["cxzzzz <cxz19961010@163.com>"]
+authors = ["cxzzzz <cxz19961010@outlook.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
