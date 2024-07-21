@@ -450,7 +450,7 @@ class Waveform:
         )
 
     def __rand__(self, other: WaveformOrScalar) -> Waveform:
-        return self.__and__(other, width)
+        return self.__and__(other)
 
     @staticmethod
     # @jit
