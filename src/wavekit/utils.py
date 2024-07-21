@@ -1,16 +1,23 @@
 import re
 from typing import Any
 
+def split_by_range_expr(pattern:str):
+    match = re.search(r'(\[(\d+:\d+|\d+)\])*$', pattern)
+    pattern = pattern[:match.span()[0]]
+    range_expr = match[0]
+    return pattern, range_expr
+
+def split_by_hierarchy(pattern: str) -> list[str]:
+    import re
+    return re.split(r'(?<!\.)\.(?!\.)', pattern)
 
 # just like shell brace expansion
 # or regex pattern
-def expand_pattern(pattern: str) -> dict[tuple, str]:
+def expand_brace_pattern(pattern: str) -> dict[tuple, str]:
     # 数字范围模式
     range_pattern = re.compile(r"\{(\d+)\.\.(\d+)(?:\.\.(\d+))?\}")
     # 字符串列表模式
     list_pattern = re.compile(r"\{([^\{\}]+)\}")
-    # 正则表达式模式
-    regex_pattern = re.compile(r"<(.+)>")
 
     # 处理数字范围模式
     def expand_range(match):
@@ -24,6 +31,7 @@ def expand_pattern(pattern: str) -> dict[tuple, str]:
         return match.group(1).split(",")
 
     def expand_regex(match):
+        raise NotImplementedError()
         return f"({match.group(1)})"
 
     # 递归解析模式
@@ -40,8 +48,6 @@ def expand_pattern(pattern: str) -> dict[tuple, str]:
             expanded_first = {(p,): str(p) for p in expand_range(match)}
         elif match := list_pattern.match(first_part):
             expanded_first = {(p,): p for p in expand_list(match)}
-        elif match := regex_pattern.match(first_part):
-            expanded_first = {(None,): expand_regex(match)}
         else:
             expanded_first = {(): first_part}
 
@@ -57,20 +63,18 @@ def expand_pattern(pattern: str) -> dict[tuple, str]:
     parts = []
     i = 0
     expand_pattern_pairs = {"{": "}", "<": ">"}
-    print(pattern)
     while i < len(pattern):
-        if pattern[i] in expand_pattern_pairs:
-            print(">>>>>>>>>>>>",expand_pattern_pairs[pattern[i]], pattern[i:])
-            j = pattern.find(expand_pattern_pairs[pattern[i]], i)
+        if pattern[i] == '{':
+            j = pattern.find('}', i)
             if j == -1:
-                raise ValueError("Unmatched pattern delimiter: " + pattern[i])
+                raise ValueError(f"Unmatched pattern delimiter: {pattern[i]}, {pattern} ")
             parts.append(pattern[i : j + 1])
             i = j + 1
         else:
             j = i
             while j < len(pattern) and pattern[j] not in expand_pattern_pairs:
                 j += 1
-            parts.append(pattern[i:j].replace("[", r"\[").replace("]", r"\]"))
+            parts.append(pattern[i:j])
             i = j
 
     return recursive_expand(parts)
