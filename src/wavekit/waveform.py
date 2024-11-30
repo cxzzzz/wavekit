@@ -1,6 +1,5 @@
 from __future__ import annotations
 import numpy as np
-from numba import jit
 from typing import Union, Callable, List
 
 
@@ -507,6 +506,17 @@ class Waveform:
 
     @staticmethod
     # @jit
+    def _ne(a, b):
+        return a != b
+
+    def __ne__(self, other: WaveformOrScalar) -> Waveform:
+        self._check_sign(other)
+        return self.map(
+            lambda x: self._ne(x, self._get_value(other)), width=1, signed=False
+        )
+
+    @staticmethod
+    # @jit
     def _fast_bitsel(value, start: int, width: int):
         return (value >> np.uint64(start)) & (
             (np.uint64(1) << np.uint64(width)) - np.uint64(1)
@@ -636,16 +646,28 @@ class Waveform:
             raise Exception("raising only support 1-bit waveform")
         one = self.value[:-1] == 1
         zero = self.value[1:] == 0
-        new_indices = np.concatenate(([False], one & zero))
-        return self.take(new_indices)
+        new_value = np.concatenate(([False], one & zero))
+        return Waveform(
+            value=new_value,
+            clock=np.copy(self.clock),
+            time=np.copy(self.time),
+            width=1,
+            signed=False,
+        )
 
     def rise(self) -> Waveform:
         if self.width != 1:
             raise Exception("raising only support 1-bit waveform")
         zero = self.value[:-1] == 0
         one = self.value[1:] == 1
-        new_indices = np.concatenate(([False], one & zero))
-        return self.take(new_indices)
+        new_value = np.concatenate(([False], one & zero))
+        return Waveform(
+            value=new_value,
+            clock=np.copy(self.clock),
+            time=np.copy(self.time),
+            width=1,
+            signed=False,
+        )
 
     def count_one(self) -> Waveform:
         return self.map(

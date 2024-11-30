@@ -70,8 +70,7 @@ def expand_brace_pattern(pattern: str) -> dict[tuple, str]:
         if pattern[i] == '{':
             j = pattern.find('}', i)
             if j == -1:
-                raise ValueError(f"Unmatched pattern delimiter: {
-                                 pattern[i]}, {pattern} ")
+                raise ValueError(f"Unmatched pattern delimiter: {pattern[i]}, {pattern} ")
             parts.append(pattern[i: j + 1])
             i = j + 1
         else:

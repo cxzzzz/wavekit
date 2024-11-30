@@ -1,5 +1,5 @@
 import pytest
-from wavekit.reader import VcdReader
+from wavekit import VcdReader
 
 
 def test_vcdreader():

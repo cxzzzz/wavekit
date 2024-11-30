@@ -8,4 +8,8 @@ from __future__ import annotations
 __version__ = "0.0.1"
 
 from .waveform import Waveform
-from .reader import FsdbReader, VcdReader
+from .vcd_reader import VcdReader
+try:
+    from .fsdb_reader import FsdbReader
+except ImportError:
+    pass

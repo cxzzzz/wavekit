@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+src/wavekit/*.cpp
+src/wavekit/*.c
+
 # C extensions
 *.so
 

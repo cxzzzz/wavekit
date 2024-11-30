@@ -4,15 +4,15 @@ version = "0.1.0"
 description = ""
 authors = ["cxzzzz <cxz19961010@outlook.com>"]
 readme = "README.md"
+build = "build.py"
+include = ["src/wavekit/*.so"]
 
 [tool.poetry.dependencies]
 python = "^3.9"
 numpy = "^2.0.0"
-numba = "^0.60.0"
 vcdvcd = "^2.3.5"
 pytest = "^8.2.2"
 
-
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core", "Cython", "setuptools", "wheel", "numpy>=2.0.0"]
 build-backend = "poetry.core.masonry.api"
