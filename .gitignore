@@ -9,6 +9,9 @@ src/wavekit/*.c
 # C extensions
 *.so
 
+# iverilog
+*.vvp
+
 # Distribution / packaging
 .Python
 build/
