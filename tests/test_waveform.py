@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from src.wavekit.waveform import Waveform
+from wavekit.waveform import Waveform
 
 
 def test_waveform():
@@ -162,14 +162,14 @@ def test_waveform():
     time = clock*10
     a = Waveform(value, clock, time, width=width, signed=False)
     b = a.rise()
-    assert np.all(b.value == np.array([1, 1, 1]))
-    assert np.all(b.clock == np.array([1, 3, 10]))
-    assert np.all(b.time == np.array([1, 3, 10]) * 10)
+    assert np.all(b.value == np.array([0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0]))
+    assert np.all(b.clock == a.clock)
+    assert np.all(b.time == a.time)
 
     b = a.fall()
-    assert np.all(b.value == np.array([0, 0, 0]))
-    assert np.all(b.clock == np.array([2, 7, 11]))
-    assert np.all(b.time == np.array([2, 7, 11]) * 10)
+    assert np.all(b.value == np.array([0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1]))
+    assert np.all(b.clock == a.clock)
+    assert np.all(b.time == a.time)
 
     assert (np.all(a.compress().value == np.array([0, 1, 0, 1, 0, 1, 0])))
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 import numpy as np
 import re
-from functools import reduce
+from functools import reduce, cached_property
 from abc import abstractmethod
 from typing import Optional
 from .waveform import Waveform
@@ -34,7 +34,7 @@ def traverse_signal(
                         key = (match.groups(),)
                         if key in res:
                             raise Exception(
-                                f"pattern {pattern} match more than one signal")
+                                f"pattern {p[1:]} match more than one signal")
                         res[key] = f"{signal}{range_expr}"
                 elif p == signal:
                     key = k
@@ -61,7 +61,7 @@ def traverse_scope(
                 depth = 1
 
             module_scopes = scope._module_cache[p] if (
-                p in scope._module_cache) else scope.find_module_scope(module_name=module_name, depth=depth)
+                p in scope._module_cache) else scope.find_scope_by_module(module_name=module_name, depth=depth)
             scope._module_cache[p] = module_scopes
 
             if len(module_scopes) == 1 and module_scopes[0] == scope:
@@ -100,7 +100,7 @@ def traverse_scope(
                     key = new_k + sk
                     if key in res:
                         raise Exception(
-                            f"pattern {pattern} match more than one signal")
+                            f"pattern {p} match more than one signal")
                     res[key] = f"{scope.name}.{ss}"
 
                 for child_scope in scope.child_scope_list:
@@ -108,7 +108,7 @@ def traverse_scope(
                         key = new_k + ck
                         if key in res:
                             raise Exception(
-                                f"pattern {pattern} match more than one signal")
+                                f"pattern {p} match more than one signal")
                         res[key] = f"{scope.name}.{cs}"
     return res
 
@@ -120,9 +120,14 @@ class Scope:
         self.name = name
         self._module_cache = dict()
 
-    @property
+    @cached_property
     @abstractmethod
     def signal_list(self) -> list[str]:
+        pass
+
+    @cached_property
+    @abstractmethod
+    def child_scope_list(self) -> list[Scope]:
         pass
 
     def full_name(self, root: Scope = None) -> list[str]:
@@ -134,7 +139,7 @@ class Scope:
             parent = parent.parent_scope
         return ".".join([x.name for x in reversed(ancestors)])
 
-    def find_module_scope(self, module_name: str, depth: int = 0) -> list[Scope]:
+    def find_scope_by_module(self, module_name: str, depth: int = 0) -> list[Scope]:
         raise NotImplementedError()
 
     @property

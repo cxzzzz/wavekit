@@ -1,48 +1,27 @@
 from __future__ import annotations
 import re
 import numpy as np
+from functools import cached_property
 from vcdvcd import VCDVCD, Scope as VcdVcdScope, Signal as VcdVcdSignal
 from typing import Optional
 from .waveform import Waveform
 from .reader import Reader, Scope
 
 class VcdScope(Scope):
-    @staticmethod
-    def from_signal_list(signal_list: list, scope_list: list) -> list[VcdScope]:
-        scopes = {}
-        for scope in scope_list:
-            ancestors = scope.split(".")
-            full_name = ""
-            parent_scope = None
-            for scope_name in ancestors:
-                full_name = full_name + scope_name
-                if full_name not in scopes:
-                    if full_name not in scopes:
-                        new_scope = VcdScope(
-                            scope_name, parent_scope=parent_scope)
-                        if parent_scope is not None:
-                            parent_scope._child_scopes[scope_name] = new_scope
-                        scopes[full_name] = new_scope
-
-                parent_scope = scopes[full_name]
-                full_name = full_name + "."
-
-        for signal in signal_list:
-            scope_name = ".".join(signal.split(".")[:-1])
-            scopes[scope_name]._signals.add(signal.split(".")[-1])
-
-        return [scope for scope in scopes.values() if scope.parent_scope is None]
-
-    def __init__(self, name: str, parent_scope: VcdScope):
-        super().__init__(name=name)
+    def __init__(self, vcdvcd_scope: VcdVcdScope, parent_scope: Scope):
+        super().__init__(name = vcdvcd_scope.name.split(".")[-1])
+        self.vcdvcd_scope = vcdvcd_scope
         self.parent_scope = parent_scope
         self._child_scopes = {}
         self._signals = set()
-        self.child_scope_list =  list(self._child_scopes.values())
 
-    @property
+    @cached_property
     def signal_list(self) -> list[str]:
-        return list(self._signals)
+        return [k for k,v in self.vcdvcd_scope.subElements.items() if isinstance(v, str)]
+
+    @cached_property
+    def child_scope_list(self) -> list[Scope]:
+        return [VcdScope(v, self) for k,v in self.vcdvcd_scope.subElements.items() if isinstance(v, VcdVcdScope)]
 
 class VcdReader(Reader):
 
@@ -50,9 +29,7 @@ class VcdReader(Reader):
         super().__init__()
         self.file = file
         self.file_handle = VCDVCD(file, store_scopes=True)
-        self._top_scope_list = VcdScope.from_signal_list(
-            self.file_handle.signals, self.file_handle.scopes
-        )
+        self._top_scope_list = [VcdScope(v, None) for k,v in self.file_handle.scopes.items() if '.' not in k]
 
     def top_scope_list(self) -> list[Scope]:
         return self._top_scope_list
@@ -81,8 +58,8 @@ class VcdReader(Reader):
         if end_time is not None:
             raise NotImplementedError("end_time is not supported")
 
-        width = int(signal_handle.size)
         signal_handle = self.file_handle[signal]
+        width = int(signal_handle.size)
         signal_value_change = np.array([
             (v[0], int(re.sub(r"[xXzZ]", str(xz_value), v[1]), 2))
             for v in signal_handle.tv

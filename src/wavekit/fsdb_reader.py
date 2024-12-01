@@ -2,6 +2,7 @@ from __future__ import annotations
 import importlib
 from collections import defaultdict
 from typing import Optional
+from functools import cached_property
 from .waveform import Waveform
 from .reader import Reader, Scope
 from .npi_fsdb_reader import NpiFsdbReader, NpiFsdbScope
@@ -12,11 +13,14 @@ class FsdbScope(Scope):
         super().__init__(name=handle.name())
         self.handle = handle
         self.parent_scope = parent_scope
-        self.child_scope_list = [FsdbScope(c, self) for c in self.handle.child_scope_list()]
 
-    @property
+    @cached_property
     def signal_list(self) -> list[str]:
         return [s for s in self.handle.signal_list()]
+
+    @cached_property
+    def child_scope_list(self) -> list[FsdbScope]:
+        return [FsdbScope(c, self) for c in self.handle.child_scope_list()]
 
     @property
     def type(self) -> str:
@@ -30,13 +34,7 @@ class FsdbScope(Scope):
             self._def_name = self.handle.def_name()
         return self._def_name
 
-    def find_module_scope(self, module_name: str, depth: int = 0) -> list[Scope]:
-        #if self.type == 'npiFsdbScopeSvModule' and self.def_name == module_name:
-        #    return [self]
-        #elif depth == 1:
-        #    return []
-        #else:  # depth == 0 or depth > 1
-        #    return list(reduce(lambda a, b: a + b, [c.find_module_scope(module_name, depth - 1) for c in self.child_scope_list], []))
+    def find_scope_by_module(self, module_name: str, depth: int = 0) -> list[Scope]:
         if not hasattr(self, '_preloaded_module_scope'):
             self.preload_module_scope()
         return self._preloaded_module_scope[module_name]
