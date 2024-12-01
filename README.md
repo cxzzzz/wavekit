@@ -12,6 +12,8 @@ Wavekit is a fundamental Python package for digital circuit waveform analysis th
 
 Install Wavekit with Python 3.9 or later.
 
+If you want to read FSDB files, please ensure that **"VERDI_HOME" environment variable is set** before installing the library.
+
 ### Using PIP
 
 You can install the library using pip:
