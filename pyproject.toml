@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "wavekit"
-version = "0.1.1"
+version = "0.1.2"
 description = "a fundamental package for digital circuit waveform analysis"
 authors = ["cxzzzz <cxz19961010@outlook.com>"]
 readme = "README.md"
