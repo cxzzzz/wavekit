@@ -48,6 +48,8 @@ def traverse_scope(
 ) -> dict[tuple, str]:
 
     res = dict()
+    if len(descendant_scope_pattern_list) == 0:
+        return res
 
     for k, p in descendant_scope_pattern_list[0].items():
 
