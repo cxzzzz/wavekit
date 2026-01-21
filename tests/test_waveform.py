@@ -148,35 +148,37 @@ def test_bitsel_and_slice_errors():
 
 def test_sampling_and_filter():
     wave = build_waveform([1, 2, 3, 4, 5, 6], width=8)
-    sampled = wave.sample(2)
+    sampled = wave.downsample(2)
     assert np.allclose(sampled.value, np.array([1.5, 3.5, 5.5]))
     assert sampled.width is None
 
-    filtered = wave.filter(lambda x: x > 4)
-    assert np.all(filtered.value == np.array([5, 6]))
+    masked = wave.mask(wave.value > 4)
+    assert np.all(masked.value == np.array([5, 6]))
+    compressed = wave.compress(lambda v: v > 4)
+    assert np.all(compressed.value == np.array([5, 6]))
 
 
 def test_rise_fall_and_compress():
     wave = build_waveform([0, 1, 0, 1, 1, 0], width=1)
-    assert np.all(wave.rise().value == np.array([0, 1, 0, 1, 0, 0]))
-    assert np.all(wave.fall().value == np.array([0, 0, 1, 0, 0, 1]))
+    assert np.all(wave.rising_edge().value == np.array([0, 1, 0, 1, 0, 0]))
+    assert np.all(wave.falling_edge().value == np.array([0, 0, 1, 0, 0, 1]))
 
     repeated = build_waveform([0, 0, 1, 1, 0, 0], width=1)
-    assert np.all(repeated.compress().value == np.array([0, 1, 0, 0]))
+    assert np.all(repeated.unique_consecutive().value == np.array([0, 1, 0, 0]))
     empty = build_waveform([], width=1)
-    assert np.all(empty.compress().value == np.array([]))
+    assert np.all(empty.unique_consecutive().value == np.array([]))
 
 
 def test_count_one_and_bits():
     value = np.array([1, 2, 3, 4, 2**32 - 1], dtype=np.uint64)
     wave = build_waveform(value, width=64)
-    assert np.all(wave.count_one().value == np.array([1, 1, 2, 1, 32]))
+    assert np.all(wave.bit_count().value == np.array([1, 1, 2, 1, 32]))
     assert np.all(wave[1].value == np.array([0, 1, 1, 0, 1]))
     assert np.all(wave[2:1].value == np.array([0, 1, 1, 2, 3]))
 
     wide_values = np.array([0, (1 << 65) + 3], dtype=np.object_)
     wide_wave = build_waveform(wide_values, width=128)
-    assert np.all(wide_wave.count_one().value == np.array([0, 3]))
+    assert np.all(wide_wave.bit_count().value == np.array([0, 3]))
     assert np.all(wide_wave[68:66].value == np.array([0, 0]))
 
 
@@ -184,7 +186,7 @@ def test_split_concat_and_merge():
     value = np.array([1, 2, 3], dtype=np.uint64)
     widths = [4, 6, 5]
     waves = [build_waveform(value + offset, width=w) for offset, w in zip([0, 5, 9], widths)]
-    concat = Waveform.concat(waves)
+    concat = Waveform.concatenate(waves)
     split = concat.split_bits(widths, padding=False)
     for original, extracted in zip(waves, split):
         assert np.all(original.value == extracted.value)
@@ -193,7 +195,7 @@ def test_split_concat_and_merge():
     object_waves = [
         build_waveform(object_value + offset, width=w) for offset, w in zip([0, 3, 7], widths)
     ]
-    object_concat = Waveform.concat(object_waves)
+    object_concat = Waveform.concatenate(object_waves)
     object_split = object_concat.split_bits(widths, padding=False)
     for original, extracted in zip(object_waves, object_split):
         assert np.all(original.value == extracted.value)

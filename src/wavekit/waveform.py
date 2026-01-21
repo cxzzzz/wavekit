@@ -51,13 +51,33 @@ class Waveform:
             ),
         )
 
-    def compress(self) -> Waveform:
+    def unique_consecutive(self) -> Waveform:
         if len(self.value) <= 1:
             return self.copy()
         diff_mask = np.diff(self.value) != 0
         padded_diff_mask = np.concatenate(([1], diff_mask[:-1], [1]))
         diff_indices = np.where(padded_diff_mask)[0]
         return self.take(diff_indices)
+
+    def compress(
+        self,
+        condition: Callable[[npt.NDArray[Any]], npt.NDArray[np.bool_]],
+    ) -> Waveform:
+        mask = condition(self.value)
+        if not isinstance(mask, np.ndarray) or mask.dtype != np.bool_:
+            raise TypeError('compress requires boolean numpy array')
+        return self.mask(mask)
+
+    def mask(self, mask: npt.NDArray[np.bool_]) -> Waveform:
+        if not isinstance(mask, np.ndarray) or mask.dtype != np.bool_:
+            raise TypeError('mask requires boolean numpy array')
+        return Waveform(
+            value=self.value[mask],
+            clock=self.clock[mask],
+            time=self.time[mask],
+            width=self.width,
+            signed=self.signed,
+        )
 
     def copy(self) -> Waveform:
         return self.map(lambda x: np.copy(x))
@@ -586,9 +606,15 @@ class Waveform:
             signed=False,
         )
 
-    # 根据索引取值
-    # TODO : 含义与numpy不一致，得改名
-    def take(self, indices: npt.NDArray[Any] | list[int]):
+    def take(self, indices: npt.NDArray[np.integer[Any]] | list[int]):
+        if isinstance(indices, np.ndarray):
+            if indices.dtype == np.bool_:
+                raise TypeError('take requires integer indices')
+            if not np.issubdtype(indices.dtype, np.integer):
+                raise TypeError('take requires integer indices')
+        else:
+            if not all(isinstance(i, int) and not isinstance(i, bool) for i in indices):
+                raise TypeError('take requires integer indices')
         return Waveform(
             value=self.value[indices],
             clock=self.clock[indices],
@@ -597,7 +623,7 @@ class Waveform:
             signed=self.signed,
         )
 
-    def sample(
+    def downsample(
         self,
         chunk_size: int,
         func: Callable[[npt.NDArray[Any]], float] = np.mean,
@@ -655,21 +681,7 @@ class Waveform:
             signed=signed if signed is not None else self.signed,
         )
 
-    def filter(
-        self,
-        func: Callable[[npt.NDArray[Any]], npt.NDArray[np.bool_]],
-    ) -> Waveform:
-        new_indices = func(self.value)
-        return self.take(new_indices)
-        # return Waveform(
-        #    value=self.value[new_indices],
-        #    clock=self.clock[new_indices],
-        #    time=self.time[new_indices],
-        #    width=self.width,
-        #    signed=self.signed
-        # )
-
-    def fall(self) -> Waveform:
+    def falling_edge(self) -> Waveform:
         if self.width != 1:
             raise Exception('raising only support 1-bit waveform')
         one = self.value[:-1] == 1
@@ -683,7 +695,7 @@ class Waveform:
             signed=False,
         )
 
-    def rise(self) -> Waveform:
+    def rising_edge(self) -> Waveform:
         if self.width != 1:
             raise Exception('raising only support 1-bit waveform')
         zero = self.value[:-1] == 0
@@ -697,7 +709,7 @@ class Waveform:
             signed=False,
         )
 
-    def count_one(self) -> Waveform:
+    def bit_count(self) -> Waveform:
         if self.width is None:
             raise ValueError('width is None')
         width = self.width
@@ -728,7 +740,7 @@ class Waveform:
             return res
 
     @staticmethod
-    def concat(waves: list[Waveform]) -> Waveform:
+    def concatenate(waves: list[Waveform]) -> Waveform:
         if not all(not w.signed for w in waves):
             raise Exception('all waveforms should be unsigned')
 
