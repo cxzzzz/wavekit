@@ -1,28 +1,29 @@
 from __future__ import annotations
+
+from typing import Any, Callable, Union, cast
+
 import numpy as np
-from typing import Union, Callable, List
+import numpy.typing as npt
 
 
 class Waveform:
-
-    WaveformOrScalar = Union["Waveform", int, float]
+    WaveformOrScalar = Union['Waveform', int, float]
 
     def __init__(
         self,
-        value: np.ndarray,
-        clock: np.ndarray,
-        time: np.ndarray,
-        width: int,
+        value: npt.NDArray[Any],
+        clock: npt.NDArray[Any],
+        time: npt.NDArray[Any],
+        width: int | None,
         signed: bool,
-        signal: str = "",
+        signal: str = '',
     ):
+        self.clock: npt.NDArray[Any] = clock
+        self.time: npt.NDArray[Any] = time
 
-        self.clock = clock
-        self.time = time
-
-        self.width = width
-        self.signed = signed
-        self.signal = signal
+        self.width: int | None = width
+        self.signed: bool = signed
+        self.signal: str = signal
 
         if width is None:
             self.value = value
@@ -36,15 +37,18 @@ class Waveform:
     def __str__(self):
         return f"Waveform(signal='{self.signal}', width={self.width}, signed={self.signed})"
 
-    def set_signal(self, signal):
+    def set_signal(self, signal: str) -> Waveform:
         self.signal = signal
         return self
 
     @property
-    def data(self):
-        return np.rec.fromarrays(
-            [self.time, self.clock, self.value],
-            names="time,clock,value",
+    def data(self) -> Any:
+        return cast(
+            Any,
+            np.rec.fromarrays(
+                cast(Any, [self.time, self.clock, self.value]),
+                names=cast(Any, 'time,clock,value'),
+            ),
         )
 
     def compress(self) -> Waveform:
@@ -71,7 +75,10 @@ class Waveform:
     def as_signed(self) -> Waveform:
         if self.signed:
             return self.copy()
-        return self.map(lambda x: self._signed(x, self.width), signed=True)
+        if self.width is None:
+            raise ValueError('width is None')
+        width = self.width
+        return self.map(lambda x: self._signed(x, width), signed=True)
 
     @staticmethod
     # @jit
@@ -81,7 +88,10 @@ class Waveform:
     def as_unsigned(self) -> Waveform:
         if not self.signed:
             return self.copy()
-        return self.map(lambda x: self._unsigned(x, self.width), signed=False)
+        if self.width is None:
+            raise ValueError('width is None')
+        width = self.width
+        return self.map(lambda x: self._unsigned(x, width), signed=False)
 
     @staticmethod
     # @jit
@@ -90,25 +100,26 @@ class Waveform:
 
     def _check_sign(self, other: WaveformOrScalar):
         if isinstance(other, Waveform) and self.signed != other.signed:
-            raise ValueError("signedness mismatch")
+            raise ValueError('signedness mismatch')
 
     def _check_arithmetic_op_width(self, other: WaveformOrScalar):
         if self.width is not None and self.width > 64:
-            raise ValueError("width too large")
+            raise ValueError('width too large')
 
         if isinstance(other, Waveform) and other.width is not None and other.width > 64:
-            raise ValueError("width too large")
+            raise ValueError('width too large')
 
-    def _infer_arithmetic_op_width(self, inferred_width: Callable[[], int]):
-        try:
-            inferred_width = min(inferred_width(), 64)
-        except Exception:
-            inferred_width = None
-
-        return inferred_width
+    def _infer_arithmetic_op_width(
+        self,
+        width_supplier: Callable[[], int | None],
+    ) -> int | None:
+        inferred_width = width_supplier()
+        if inferred_width is None:
+            return None
+        return min(inferred_width, 64)
 
     @staticmethod
-    def _get_width(other: WaveformOrScalar):
+    def _get_width(other: WaveformOrScalar) -> int | None:
         if isinstance(other, Waveform):
             return other.width
         elif isinstance(other, int):
@@ -116,10 +127,16 @@ class Waveform:
         elif isinstance(other, float):
             return None
         else:
-            raise ValueError("unsupported type")
+            raise ValueError('unsupported type')
+
+    def _optional_max_width(self, other: WaveformOrScalar) -> int | None:
+        other_width = self._get_width(other)
+        if self.width is None or other_width is None:
+            return None
+        return max(self.width, other_width)
 
     @staticmethod
-    def _get_value(other: WaveformOrScalar):
+    def _get_value(other: WaveformOrScalar) -> Any:
         if isinstance(other, Waveform):
             return other.value
         else:
@@ -129,9 +146,13 @@ class Waveform:
         self._check_sign(other)
         self._check_arithmetic_op_width(other)
 
-        new_width = self._infer_arithmetic_op_width(
-            lambda: max(self.width, self._get_width(other)) + 1
-        )
+        def inferred_width() -> int | None:
+            max_width = self._optional_max_width(other)
+            if max_width is None:
+                return None
+            return max_width + 1
+
+        new_width = self._infer_arithmetic_op_width(inferred_width)
 
         return self.map(
             lambda x: self._add(x, self._get_value(other)),
@@ -150,9 +171,10 @@ class Waveform:
     def __sub__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
 
-        new_width = self._infer_arithmetic_op_width(
-            lambda: max(self.width, self._get_width(other))
-        )
+        def inferred_width() -> int | None:
+            return self._optional_max_width(other)
+
+        new_width = self._infer_arithmetic_op_width(inferred_width)
 
         return self.map(
             lambda x: self._sub(x, self._get_value(other)),
@@ -163,9 +185,10 @@ class Waveform:
     def __rsub__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
 
-        new_width = self._infer_arithmetic_op_width(
-            lambda: max(self.width, self._get_width(other))
-        )
+        def inferred_width() -> int | None:
+            return self._optional_max_width(other)
+
+        new_width = self._infer_arithmetic_op_width(inferred_width)
 
         return self.map(
             lambda x: self._sub(self._get_value(other), x),
@@ -181,9 +204,13 @@ class Waveform:
     def __mul__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
 
-        new_width = self._infer_arithmetic_op_width(
-            lambda: self.width + self._get_width(other)
-        )
+        def inferred_width() -> int | None:
+            other_width = self._get_width(other)
+            if self.width is None or other_width is None:
+                return None
+            return self.width + other_width
+
+        new_width = self._infer_arithmetic_op_width(inferred_width)
 
         return self.map(
             lambda x: self._mul(x, self._get_value(other)),
@@ -243,8 +270,7 @@ class Waveform:
 
     def __rfloordiv__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
-        new_width = self._infer_arithmetic_op_width(
-            lambda: self._get_width(other))
+        new_width = self._infer_arithmetic_op_width(lambda: self._get_width(other))
         new_value = self._floordiv(self._get_value(other), self.value)
 
         return Waveform(
@@ -276,8 +302,7 @@ class Waveform:
 
     def __rmod__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
-        new_width = self._infer_arithmetic_op_width(
-            lambda: self._get_width(other))
+        new_width = self._infer_arithmetic_op_width(lambda: self._get_width(other))
 
         new_value = self._mod(self._get_value(other), self.value)
 
@@ -296,22 +321,6 @@ class Waveform:
 
     def __pow__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
-        new_width = self._infer_arithmetic_op_width(
-            lambda: self.width * self._get_width(other)
-        )
-
-        new_value = self._pow(self.value, self._get_value(other))
-
-        return Waveform(
-            value=new_value,
-            clock=self.clock,
-            time=self.time,
-            width=new_width,
-            signed=self.signed,
-        )
-
-    def __pow__(self, other: WaveformOrScalar) -> Waveform:
-        self._check_sign(other)
         new_width = self._infer_arithmetic_op_width(lambda: 64)
 
         new_value = self._pow(self.value, self._get_value(other))
@@ -325,39 +334,39 @@ class Waveform:
         )
 
     def __rpow__(self, other: WaveformOrScalar) -> Waveform:
-        return other.__pow__(self)
+        return cast(Any, other).__pow__(self)
 
     def _check_logical_op_type(self, other):
         if self.value.dtype not in (np.int64, np.uint64, np.object_):
-            raise TypeError(
-                "Can only perform logical operations on 64-bit integers")
+            raise TypeError('Can only perform logical operations on 64-bit integers')
 
         if isinstance(other, Waveform):
             if other.value.dtype not in (np.int64, np.uint64, np.object_):
-                raise TypeError(
-                    "Can only perform logical operations on 64-bit integers"
-                )
+                raise TypeError('Can only perform logical operations on 64-bit integers')
         elif isinstance(other, float):
-            raise TypeError(
-                "Can only perform logical operations on 64-bit integers")
+            raise TypeError('Can only perform logical operations on 64-bit integers')
 
     def _infer_logical_op_width(
-        self, other: WaveformOrScalar, inferred_width: int = None
-    ):
+        self,
+        other: WaveformOrScalar,
+        inferred_width: int | None = None,
+    ) -> int:
         if inferred_width is not None:
             return inferred_width
 
         if isinstance(other, Waveform):
+            if self.width is None or other.width is None:
+                raise ValueError('width mismatch: None')
             if self.width != other.width:
-                raise ValueError(
-                    "width mismatch: {} and {}".format(self.width, other.width)
-                )
+                raise ValueError(f'width mismatch: {self.width} and {other.width}')
             return self.width
-        else:  # int
-            if self.width < int.bit_length(other):
-                raise ValueError(
-                    "width mismatch: {} and {}".format(self.width, other))
-            return self.width
+        if isinstance(other, float):
+            raise TypeError('Can only perform logical operations on 64-bit integers')
+        if self.width is None:
+            raise ValueError('width mismatch: None')
+        if self.width < int.bit_length(other):
+            raise ValueError(f'width mismatch: {self.width} and {other}')
+        return self.width
 
     @staticmethod
     # @jit
@@ -367,12 +376,18 @@ class Waveform:
     def __lshift__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
         self._check_logical_op_type(other)
+        if isinstance(other, float):
+            raise TypeError('Can only perform logical operations on 64-bit integers')
+        base_width = self.width or 0
+        if isinstance(other, Waveform):
+            if other.width is None:
+                raise ValueError('width mismatch: None')
+            shift_width = 1 << other.width
+        else:
+            shift_width = other
         new_width = self._infer_logical_op_width(
             other,
-            inferred_width=(
-                self.width + (other if isinstance(other, int)
-                              else (1 << other.width))
-            ),
+            inferred_width=base_width + shift_width,
         )
 
         new_value = self._lshift(
@@ -399,11 +414,16 @@ class Waveform:
     def __rshift__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
         self._check_logical_op_type(other)
+        if isinstance(other, float):
+            raise TypeError('Can only perform logical operations on 64-bit integers')
 
-        new_width = self._infer_logical_op_width(
-            self.width if isinstance(other, Waveform) else max(
-                self.width - other, 0)
-        )
+        if isinstance(other, Waveform):
+            new_width = self._infer_logical_op_width(other)
+        else:
+            new_width = self._infer_logical_op_width(
+                other,
+                inferred_width=max((self.width or 0) - other, 0),
+            )
 
         new_value = self._rshift(self.value, self._get_value(other))
 
@@ -418,11 +438,16 @@ class Waveform:
     def __rrshift__(self, other: WaveformOrScalar, width: int = None) -> Waveform:
         self._check_sign(other)
         self._check_logical_op_type(other)
+        if isinstance(other, float):
+            raise TypeError('Can only perform logical operations on 64-bit integers')
 
-        new_width = self._infer_logical_op_width(
-            self.width if isinstance(other, Waveform) else max(
-                self.width - other, 0)
-        )
+        if isinstance(other, Waveform):
+            new_width = self._infer_logical_op_width(other)
+        else:
+            new_width = self._infer_logical_op_width(
+                other,
+                inferred_width=max((self.width or 0) - other, 0),
+            )
 
         new_value = self._rshift(self.value, self._get_value(other))
 
@@ -489,19 +514,24 @@ class Waveform:
         return (~a) & np.uint64((1 << width) - 1)
 
     def __invert__(self, width: int = None) -> Waveform:
-        return self.map(
-            lambda x: self._invert(x, self.width), width=self.width, signed=False
-        )
+        if self.width is None:
+            raise ValueError('width is None')
+        width_value = self.width
+        return self.map(lambda x: self._invert(x, width_value), width=width_value, signed=False)
 
     @staticmethod
     # @jit
     def _eq(a, b):
         return a == b
 
-    def __eq__(self, other: WaveformOrScalar) -> Waveform:
+    def __eq__(self, other: object) -> Any:
+        if not isinstance(other, (Waveform, int, float)):
+            return NotImplemented
         self._check_sign(other)
         return self.map(
-            lambda x: self._eq(x, self._get_value(other)), width=1, signed=False
+            lambda x: self._eq(x, self._get_value(other)),
+            width=1,
+            signed=False,
         )
 
     @staticmethod
@@ -509,18 +539,20 @@ class Waveform:
     def _ne(a, b):
         return a != b
 
-    def __ne__(self, other: WaveformOrScalar) -> Waveform:
+    def __ne__(self, other: object) -> Any:
+        if not isinstance(other, (Waveform, int, float)):
+            return NotImplemented
         self._check_sign(other)
         return self.map(
-            lambda x: self._ne(x, self._get_value(other)), width=1, signed=False
+            lambda x: self._ne(x, self._get_value(other)),
+            width=1,
+            signed=False,
         )
 
     @staticmethod
     # @jit
     def _fast_bitsel(value, start: int, width: int):
-        return (value >> np.uint64(start)) & (
-            (np.uint64(1) << np.uint64(width)) - np.uint64(1)
-        )
+        return (value >> np.uint64(start)) & ((np.uint64(1) << np.uint64(width)) - np.uint64(1))
 
     @staticmethod
     def _bitsel(value, start: int, width: int):
@@ -532,10 +564,10 @@ class Waveform:
     def __getitem__(self, index):
         if isinstance(index, slice):
             if index.step is not None:
-                raise Exception("slice with step is not supported")
+                raise Exception('slice with step is not supported')
 
             if index.start < index.stop:
-                raise Exception("only support little-endian slicing")
+                raise Exception('only support little-endian slicing')
 
             start = index.stop
             width = (index.start - index.stop) + 1
@@ -543,7 +575,7 @@ class Waveform:
             start = index
             width = 1
         else:
-            raise Exception("unsupported index type")
+            raise Exception('unsupported index type')
 
         new_value = self._bitsel(self.value, start, width)
         return Waveform(
@@ -556,8 +588,7 @@ class Waveform:
 
     # 根据索引取值
     # TODO : 含义与numpy不一致，得改名
-    def take(self, indices: Union[np.ndarray, list[int]]):
-
+    def take(self, indices: npt.NDArray[Any] | list[int]):
         return Waveform(
             value=self.value[indices],
             clock=self.clock[indices],
@@ -566,11 +597,16 @@ class Waveform:
             signed=self.signed,
         )
 
-    def sample(self, chunk_size: int, func: [Callable[[np.ndarray], int]] = np.mean):
-        def helper(arr: np.ndarray, func: Callable[[np.ndarray], int]):
-            sampled_arr = [
-                func(arr[i: i + chunk_size]) for i in range(0, len(arr), chunk_size)
-            ]
+    def sample(
+        self,
+        chunk_size: int,
+        func: Callable[[npt.NDArray[Any]], float] = np.mean,
+    ) -> Waveform:
+        def helper(
+            arr: npt.NDArray[Any],
+            func: Callable[[npt.NDArray[Any]], float],
+        ) -> npt.NDArray[Any]:
+            sampled_arr = [func(arr[i : i + chunk_size]) for i in range(0, len(arr), chunk_size)]
             return np.array(sampled_arr)
 
         return Waveform(
@@ -583,21 +619,15 @@ class Waveform:
 
     @staticmethod
     # @jit
-    def _count_one_uint64(x: np.ndarray):
+    def _count_one_uint64(x: npt.NDArray[Any]):
         m1 = np.uint64(0x5555555555555555)  # binary: 0101...
         m2 = np.uint64(0x3333333333333333)  # binary: 00110011..
         m4 = np.uint64(0x0F0F0F0F0F0F0F0F)  # binary:  4 zeros,  4 ones ...
-        m8 = np.uint64(0x00FF00FF00FF00FF)  # binary:  8 zeros,  8 ones ...
-        m16 = np.uint64(0x0000FFFF0000FFFF)  # binary: 16 zeros, 16 ones ...
-        m32 = np.uint64(0x00000000FFFFFFFF)  # binary: 32 zeros, 32 ones ...
-        hff = np.uint64(0xFFFFFFFFFFFFFFFF)  # binary: all ones
         h01 = np.uint64(0x0101010101010101)
 
         # put count of each 2 bits into those 2 bits
         x = x - ((x >> np.uint64(1)) & m1)
-        x = (x & m2) + (
-            (x >> np.uint64(2)) & m2
-        )  # put count of each 4 bits into those 4 bits
+        x = (x & m2) + ((x >> np.uint64(2)) & m2)  # put count of each 4 bits into those 4 bits
         # put count of each 8 bits into those 8 bits
         x = (x + (x >> np.uint64(4))) & m4
         x = (x * h01) >> np.uint64(56)
@@ -607,19 +637,14 @@ class Waveform:
     def _count_one(x, width: int):
         t = np.zeros(x.shape, dtype=np.uint64)
         for idx in range(0, width, 64):
-            t = (
-                Waveform._count_one_uint64(
-                    ((x >> idx) & ((1 << 64) - 1)).astype(np.uint64)
-                )
-                + t
-            )
+            t = Waveform._count_one_uint64(((x >> idx) & ((1 << 64) - 1)).astype(np.uint64)) + t
         return t
 
     def map(
         self,
-        func: Callable[[np.array], np.array],
-        width: int = None,
-        signed: bool = None,
+        func: Callable[[npt.NDArray[Any]], npt.NDArray[Any]],
+        width: int | None = None,
+        signed: bool | None = None,
     ) -> Waveform:
         new_value = func(self.value)
         return Waveform(
@@ -630,7 +655,10 @@ class Waveform:
             signed=signed if signed is not None else self.signed,
         )
 
-    def filter(self, func: Callable[[np.array], bool]) -> Waveform:
+    def filter(
+        self,
+        func: Callable[[npt.NDArray[Any]], npt.NDArray[np.bool_]],
+    ) -> Waveform:
         new_indices = func(self.value)
         return self.take(new_indices)
         # return Waveform(
@@ -643,7 +671,7 @@ class Waveform:
 
     def fall(self) -> Waveform:
         if self.width != 1:
-            raise Exception("raising only support 1-bit waveform")
+            raise Exception('raising only support 1-bit waveform')
         one = self.value[:-1] == 1
         zero = self.value[1:] == 0
         new_value = np.concatenate(([False], one & zero))
@@ -657,7 +685,7 @@ class Waveform:
 
     def rise(self) -> Waveform:
         if self.width != 1:
-            raise Exception("raising only support 1-bit waveform")
+            raise Exception('raising only support 1-bit waveform')
         zero = self.value[:-1] == 0
         one = self.value[1:] == 1
         new_value = np.concatenate(([False], one & zero))
@@ -670,45 +698,51 @@ class Waveform:
         )
 
     def count_one(self) -> Waveform:
-        return self.map(
-            lambda v: Waveform._count_one(v, self.width), width=64, signed=False
-        )
+        if self.width is None:
+            raise ValueError('width is None')
+        width = self.width
+        return self.map(lambda v: Waveform._count_one(v, width), width=64, signed=False)
 
-    def split_bits(
-        self, bit_group_size: Union[int, list[int]], padding: bool = False
-    ) -> List[Waveform]:
+    def split_bits(self, bit_group_size: int | list[int], padding: bool = False) -> list[Waveform]:
+        if self.width is None:
+            raise ValueError('width is None')
+        width = self.width
         if isinstance(bit_group_size, int):
-            if (not padding) and (self.width % bit_group_size != 0):
-                raise Exception(
-                    "width must be a multiple of bit_group_size when padding is false"
-                )
+            if (not padding) and (width % bit_group_size != 0):
+                raise Exception('width must be a multiple of bit_group_size when padding is false')
             return [
-                self[min(i + bit_group_size - 1, self.width): i]
-                for i in range(0, self.width, bit_group_size)
+                self[min(i + bit_group_size - 1, width) : i]
+                for i in range(0, width, bit_group_size)
             ]
         else:
-            if sum(bit_group_size) != self.width:
+            if sum(bit_group_size) != width:
                 raise Exception(
-                    "the sum of the bit_group_size must be equal to the width when padding == False"
+                    'the sum of the bit_group_size must be equal to the width when padding == False'
                 )
 
             res = []
             start_bit = 0
             for s in bit_group_size:
-                res.append(self[start_bit + s - 1: start_bit])
+                res.append(self[start_bit + s - 1 : start_bit])
                 start_bit += s
             return res
 
     @staticmethod
     def concat(waves: list[Waveform]) -> Waveform:
-        if not (all([w.signed == False for w in waves])):
-            raise Exception("all waveforms should be unsigned")
+        if not all(not w.signed for w in waves):
+            raise Exception('all waveforms should be unsigned')
 
-        concat_width = sum([w.width for w in waves])
+        widths = [w.width for w in waves]
+        if any(w is None for w in widths):
+            raise ValueError('width is None')
+        widths_int = [w for w in widths if w is not None]
+        concat_width = sum(widths_int)
         dtype = np.uint64 if concat_width <= 64 else np.object_
 
-        new_value = 0
+        new_value: Any = 0
         for w in reversed(waves):
+            if w.width is None:
+                raise ValueError('width is None')
             new_value = ((new_value << w.width) | w.value).astype(dtype)
 
         return Waveform(
@@ -722,7 +756,7 @@ class Waveform:
     @staticmethod
     def merge(
         waves: list[Waveform],
-        func: Callable[[list[any]], any],
+        func: Callable[[list[Any]], Any],
         width: int,
         signed: bool,
     ) -> Waveform:
@@ -741,39 +775,3 @@ class Waveform:
             width=width,
             signed=signed,
         )
-
-
-"""
-    @staticmethod
-    def merge(waves:list[Waveform], func:Callable[[Waveform,Waveform],Waveform], width:int)->Waveform:
-
-    @staticmethod
-    #@jit
-    def _ge(a,b):
-        return a >= b
-
-    def __ge__(self): ## gt le lt
-        self._check_sign(other)
-
-    def __getitem__():
-
-
-    def resize(self, width: int)-> Waveform:
-        pass
-
-    def reduce()->Waveform:
-        pass
-
-    def apply()->Waveform:
-        pass
-
-    def sorted()->Waveform:
-        pass
-
-    @statisticmethod
-    def concat(waves:list[Waveform])->Waveform:
-        pass
-
-
-
-"""

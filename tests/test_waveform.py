@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+
 from wavekit.waveform import Waveform
 
 
@@ -116,7 +117,7 @@ def test_shift_ops():
     assert np.all((wave << 2).value == np.array([4, 8, 12]))
     assert (wave << 2).width == 10
     assert np.all((wave >> 2).value == np.array([0, 0, 0]))
-    assert (wave >> 2).width == 8
+    assert (wave >> 2).width == 6
 
 
 def test_mod_pow_and_ne():
@@ -190,8 +191,7 @@ def test_split_concat_and_merge():
 
     object_value = np.array([1, 2, 3], dtype=np.object_)
     object_waves = [
-        build_waveform(object_value + offset, width=w)
-        for offset, w in zip([0, 3, 7], widths)
+        build_waveform(object_value + offset, width=w) for offset, w in zip([0, 3, 7], widths)
     ]
     object_concat = Waveform.concat(object_waves)
     object_split = object_concat.split_bits(widths, padding=False)

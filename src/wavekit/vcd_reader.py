@@ -1,45 +1,62 @@
 from __future__ import annotations
+
 import re
-import numpy as np
+from collections.abc import Sequence
 from functools import cached_property
-from vcdvcd import VCDVCD, Scope as VcdVcdScope, Signal as VcdVcdSignal
-from typing import Optional
-from .waveform import Waveform
+
+import numpy as np
+from vcdvcd import VCDVCD
+from vcdvcd import Scope as VcdVcdScope
+
 from .reader import Reader, Scope
+from .waveform import Waveform
+
 
 class VcdScope(Scope):
-    def __init__(self, vcdvcd_scope: VcdVcdScope, parent_scope: Scope):
-        super().__init__(name = vcdvcd_scope.name.split(".")[-1])
+    def __init__(self, vcdvcd_scope: VcdVcdScope, parent_scope: Scope | None):
+        super().__init__(name=vcdvcd_scope.name.split('.')[-1])
         self.vcdvcd_scope = vcdvcd_scope
         self.parent_scope = parent_scope
-        self._child_scopes = {}
-        self._signals = set()
 
     @cached_property
-    def signal_list(self) -> list[str]:
-        return [k for k,v in self.vcdvcd_scope.subElements.items() if isinstance(v, str)]
+    def signal_list(self) -> Sequence[str]:
+        return [k for k, v in self.vcdvcd_scope.subElements.items() if isinstance(v, str)]
 
     @cached_property
-    def child_scope_list(self) -> list[Scope]:
-        return [VcdScope(v, self) for k,v in self.vcdvcd_scope.subElements.items() if isinstance(v, VcdVcdScope)]
+    def child_scope_list(self) -> Sequence[Scope]:
+        return [
+            VcdScope(v, self)
+            for _, v in self.vcdvcd_scope.subElements.items()
+            if isinstance(v, VcdVcdScope)
+        ]
+
+    @property
+    def begin_time(self) -> int:
+        return self.parent_scope.begin_time if self.parent_scope else 0
+
+    @property
+    def end_time(self) -> int:
+        return self.parent_scope.end_time if self.parent_scope else 0
+
 
 class VcdReader(Reader):
-
     def __init__(self, file: str):
         super().__init__()
         self.file = file
         self.file_handle = VCDVCD(file, store_scopes=True)
-        self._top_scope_list = [VcdScope(v, None) for k,v in self.file_handle.scopes.items() if '.' not in k]
+        self._top_scope_list = [
+            VcdScope(v, None) for k, v in self.file_handle.scopes.items() if '.' not in k
+        ]
 
-    def top_scope_list(self) -> list[Scope]:
+    def top_scope_list(self) -> Sequence[Scope]:
         return self._top_scope_list
 
     @property
-    def begin_time(self) -> str:
+    def begin_time(self) -> int:
         return self.file_handle.begintime
 
     @property
-    def end_time(self) -> str:
+    def end_time(self) -> int:
         return self.file_handle.endtime
 
     def load_wave(
@@ -49,24 +66,24 @@ class VcdReader(Reader):
         xz_value: int = 0,
         signed: bool = False,
         sample_on_posedge: bool = False,
-        begin_time: Optional[str] = None,
-        end_time: Optional[str] = None,
+        begin_time: int | None = None,
+        end_time: int | None = None,
     ) -> Waveform:
-
         if begin_time is not None:
-            raise NotImplementedError("begin_time is not supported")
+            raise NotImplementedError('begin_time is not supported')
         if end_time is not None:
-            raise NotImplementedError("end_time is not supported")
+            raise NotImplementedError('end_time is not supported')
 
         signal_handle = self.file_handle[signal]
         width = int(signal_handle.size)
-        signal_value_change = np.array([
-            (v[0], int(re.sub(r"[xXzZ]", str(xz_value), v[1]), 2))
-            for v in signal_handle.tv
-        ], dtype=np.object_ if width > 64 else np.uint64)
-        clock_value_change = np.array([
-            (v[0], int(re.sub(r"[xXzZ]", "0", v[1]), 2)) for v in self.file_handle[clock].tv
-        ], dtype = np.uint64)
+        signal_value_change = np.array(
+            [(v[0], int(re.sub(r'[xXzZ]', str(xz_value), v[1]), 2)) for v in signal_handle.tv],
+            dtype=np.object_ if width > 64 else np.uint64,
+        )
+        clock_value_change = np.array(
+            [(v[0], int(re.sub(r'[xXzZ]', '0', v[1]), 2)) for v in self.file_handle[clock].tv],
+            dtype=np.uint64,
+        )
 
         return self.value_change_to_waveform(
             signal_value_change,
@@ -74,7 +91,7 @@ class VcdReader(Reader):
             width=int(signal_handle.size),
             signed=signed,
             sample_on_posedge=sample_on_posedge,
-            signal=signal
+            signal=signal,
         )
 
     def close(self):

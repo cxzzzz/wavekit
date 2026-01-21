@@ -14,6 +14,35 @@ numpy = "^2.0.0"
 vcdvcd = "^2.3.5"
 pytest = "^8.2.2"
 
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.6.2"
+mypy = "^1.11.2"
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**.py" = ["B017"]
+
+[tool.ruff.format]
+quote-style = "single"
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.9"
+files = ["src", "tests"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+check_untyped_defs = false
+ignore_missing_imports = true
+no_implicit_optional = false
+
 [build-system]
 requires = ["poetry-core", "Cython", "setuptools", "wheel", "numpy>=2.0.0"]
 build-backend = "poetry.core.masonry.api"

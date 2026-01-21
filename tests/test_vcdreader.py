@@ -2,8 +2,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+
 from wavekit import VcdReader
-from wavekit.pattern_parser import expand_brace_pattern, split_by_hierarchy, split_by_range_expr
+from wavekit.pattern_parser import (
+    expand_brace_pattern,
+    split_by_hierarchy,
+    split_by_range_expr,
+)
 from wavekit.reader import Reader
 
 

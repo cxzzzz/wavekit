@@ -1,27 +1,34 @@
+from __future__ import annotations
+
 import re
 from typing import Any
 
 
-def split_by_range_expr(pattern: str):
+def split_by_range_expr(pattern: str) -> tuple[str, str]:
     match = re.search(r'(\[(\d+:\d+|\d+)\])*$', pattern)
-    pattern = pattern[:match.span()[0]]
+    if match is None:
+        return pattern, ''
+    pattern = pattern[: match.span()[0]]
     range_expr = match[0]
     return pattern, range_expr
 
 
 def split_by_hierarchy(pattern: str) -> list[str]:
-    import re
     return re.split(r'(?<!\.)\.(?!\.)', pattern)
+
 
 # just like shell brace expansion
 # or regex pattern
 
 
-def expand_brace_pattern(pattern: str) -> dict[tuple, str]:
+PatternMap = dict[tuple[Any, ...], str]
+
+
+def expand_brace_pattern(pattern: str) -> PatternMap:
     # 数字范围模式
-    range_pattern = re.compile(r"\{(\d+)\.\.(\d+)(?:\.\.(\d+))?\}")
+    range_pattern = re.compile(r'\{(\d+)\.\.(\d+)(?:\.\.(\d+))?\}')
     # 字符串列表模式
-    list_pattern = re.compile(r"\{([^\{\}]+)\}")
+    list_pattern = re.compile(r'\{([^\{\}]+)\}')
 
     # 处理数字范围模式
     def expand_range(match):
@@ -32,21 +39,21 @@ def expand_brace_pattern(pattern: str) -> dict[tuple, str]:
 
     # 处理字符串列表模式
     def expand_list(match):
-        return match.group(1).split(",")
+        return match.group(1).split(',')
 
     def expand_regex(match):
         raise NotImplementedError()
-        return f"({match.group(1)})"
+        return f'({match.group(1)})'
 
     # 递归解析模式
-    def recursive_expand(parts):
+    def recursive_expand(parts: list[str]) -> PatternMap:
         if not parts:
-            return {(): ""}
+            return {(): ''}
 
         first_part = parts[0]
         rest_parts = parts[1:]
 
-        expanded_first = []
+        expanded_first: PatternMap
 
         if match := range_pattern.match(first_part):
             expanded_first = {(p,): str(p) for p in expand_range(match)}
@@ -70,8 +77,8 @@ def expand_brace_pattern(pattern: str) -> dict[tuple, str]:
         if pattern[i] == '{':
             j = pattern.find('}', i)
             if j == -1:
-                raise ValueError(f"Unmatched pattern delimiter: {pattern[i]}, {pattern} ")
-            parts.append(pattern[i: j + 1])
+                raise ValueError(f'Unmatched pattern delimiter: {pattern[i]}, {pattern} ')
+            parts.append(pattern[i : j + 1])
             i = j + 1
         else:
             j = i
