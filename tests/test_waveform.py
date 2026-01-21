@@ -1,211 +1,260 @@
-import pytest
 import numpy as np
+import pytest
 from wavekit.waveform import Waveform
 
 
-def test_waveform():
-
-    value = np.array([1, 2, 3, 4, 5, 6, 7, 8])
+def build_waveform(values, width, signed=False):
+    value = np.array(values)
     clock = np.arange(len(value))
     time = clock * 10
+    return Waveform(value, clock, time, width=width, signed=signed)
 
-    width = 32
-    a = Waveform(value, clock, time, width=width, signed=False)
-    b = Waveform(value, clock, time, width=width, signed=False)
 
-    assert np.all((a + b).value == (value * 2))
-    assert (a+b).width == width + 1
-    assert np.all((a - b).value == 0)
-    assert (a-b).width == width
-    assert np.all((a * b).value == value * value)
-    assert (a*b).width == 2*width
-    assert np.all((a / b).value == value / value)
-    assert (a/b).width is None
-    assert np.all((a // b).value == (value // value))
-    assert (a//b).width == width
-    assert np.all(a.sample(2).value == np.array([1.5, 3.5, 5.5, 7.5]))
+def test_arithmetic_with_waveform():
+    wave = build_waveform([1, 2, 3, 4], width=8)
+    other = build_waveform([1, 2, 3, 4], width=8)
 
-    assert np.all((a + 1).value == (value + 1))
-    assert (a+1).width == width + 1
-    assert np.all((a - 1).value == (value - 1))
-    assert (a-1).width == width
-    assert np.all((a * 3).value == (value * 3))
-    assert (a*3).width == width + 2
-    assert np.all((a / 5).value == value / 5)
-    assert (a/5).width is None
-    assert np.all((a // 5).value == value // 5)
-    assert (a//5).width == width
+    assert np.all((wave + other).value == np.array([2, 4, 6, 8]))
+    assert (wave + other).width == 9
+    assert np.all((wave - other).value == np.array([0, 0, 0, 0]))
+    assert (wave - other).width == 8
+    assert np.all((wave * other).value == np.array([1, 4, 9, 16]))
+    assert (wave * other).width == 16
+    assert np.allclose((wave / other).value, np.array([1, 1, 1, 1]))
+    assert (wave / other).width is None
+    assert np.all((wave // other).value == np.array([1, 1, 1, 1]))
+    assert (wave // other).width == 8
 
-    assert np.all((1 + a).value == (value + 1))
-    assert (1+a).width == width + 1
-    assert np.all((10 - a).value == (10 - value))
-    assert (31 - a).width == width
-    assert np.all((3*a).value == (value * 3))
-    assert (3*a).width == width + 2
-    assert np.all((20/a).value == (20/value))
-    assert (20/a).width is None
-    assert np.all((5//a).value == 5//value)
-    assert (5//a).width == int.bit_length(5)
 
-    width = 64
-    a = Waveform(value, clock, time, width=width, signed=False)
-    b = Waveform(value, clock, time, width=width, signed=False)
-    assert np.all((a + b).value == (value * 2))
-    assert (a+b).width == 64
-    assert np.all((a - b).value == 0)
-    assert (a-b).width == 64
-    assert np.all((a * b).value == value * value)
-    assert (a*b).width == 64
-    assert np.all((a * 5).value == value * 5)
-    assert (a*b).width == 64
+def test_arithmetic_with_scalar():
+    wave = build_waveform([1, 2, 3, 4], width=8)
 
-    value = np.array([1, 2, 3, 4, 2**32-1, 2**32, 2 **
-                     64-2, 2**64-1], dtype=np.uint64)
-    width = 64
-    clock = np.arange(len(value))
-    time = clock * 10
-    a = Waveform(value, clock, time, width=width, signed=False)
-    assert np.all(a.count_one().value == np.array([1, 1, 2, 1, 32, 1, 63, 64]))
-    assert np.all(a[1].value == np.array([0, 1, 1, 0, 1, 0, 1, 1]))
-    assert np.all(a[2:1].value == np.array([0, 1, 1, 2, 3, 0, 3, 3]))
+    assert np.all((wave + 1).value == np.array([2, 3, 4, 5]))
+    assert (wave + 1).width == 9
+    assert np.all((wave - 1).value == np.array([0, 1, 2, 3]))
+    assert (wave - 1).width == 8
+    assert np.all((wave * 3).value == np.array([3, 6, 9, 12]))
+    assert (wave * 3).width == 10
+    assert np.allclose((wave / 5).value, np.array([0.2, 0.4, 0.6, 0.8]))
+    assert (wave / 5).width is None
+    assert np.all((wave // 5).value == np.array([0, 0, 0, 0]))
+    assert (wave // 5).width == 8
 
-    width = 128
-    value = np.array([1, 2, 3, 4, 2**32-1, 2**32, 2 **
-                     64-2, 2**64-1, 2**66, 2**128-1])
-    a = Waveform(value, clock, time, width=width, signed=False)
-    assert np.all(a[68:66].value == np.array([0, 0, 0, 0, 0, 0, 0, 0, 1, 7]))
+    assert np.all((1 + wave).value == np.array([2, 3, 4, 5]))
+    assert (1 + wave).width == 9
+    assert np.all((10 - wave).value == np.array([9, 8, 7, 6]))
+    assert (10 - wave).width == 8
+    assert np.all((3 * wave).value == np.array([3, 6, 9, 12]))
+    assert (3 * wave).width == 10
+    assert np.allclose((20 / wave).value, np.array([20, 10, 6.6666667, 5]))
+    assert (20 / wave).width is None
+    assert np.all((5 // wave).value == np.array([5, 2, 1, 1]))
+    assert (5 // wave).width == int.bit_length(5)
 
-    value = np.array([1, 2, 4, 8, 16, 32, 64], dtype=np.uint64)
-    width = 10
-    clock = np.arange(len(value))
-    time = clock * 10
-    a = Waveform(value, clock, time, width=width, signed=False)
-    splited_as = a.split_bits(3, padding=True)
-    assert len(splited_as) == 4
-    assert np.all(splited_as[0].value == np.array([1, 2, 4, 0, 0, 0, 0]))
-    assert np.all(splited_as[1].value == np.array([0, 0, 0, 1, 2, 4, 0]))
-    assert np.all(splited_as[2].value == np.array([0, 0, 0, 0, 0, 0, 1]))
 
-    value = np.array([1, 2, 3, 4, 0, 666, 100, 200, 333, 444,
-                     1023, 1999, 99999], dtype=np.uint64)
-    value2 = value + 0x1010_0111
-    width = 44
-    clock = np.arange(len(value))
-    time = clock * 10
-    a = Waveform(value, clock, time, width=width, signed=False)
-    b = Waveform(value2, clock, time, width=width, signed=False)
-    assert np.all((a & b).value == (value & value2))
-    assert (a & b).width == width
-    assert np.all((a | b).value == (value | value2))
-    assert (a | b).width == width
-    assert np.all((a ^ b).value == (value ^ value2))
-    assert (a ^ b).width == width
-    assert np.all((~a).value == ((~value) & ((1 << width)-1)))
-    assert (~a).width == width
-    assert np.all((a == b).value == (value == value2))
-    assert (a == b).width == 1
+def test_arithmetic_width_limit():
+    wave = build_waveform([1, 2, 3], width=64)
+    other = build_waveform([1, 2, 3], width=64)
 
-    assert np.all((a & 666).value == (value & 666))
-    assert (a & 666).width == width
-    assert np.all((a | 666).value == (value | 666))
-    assert (a | 666).width == width
-    assert np.all((a ^ 666).value == (value ^ 666))
-    assert (a ^ 666).width == width
-    assert np.all((~a).value == ((~value) & ((1 << width)-1)))
-    assert (~a).width == width
-    assert np.all((a == 666).value == (value == 666))
-    assert (a == 666).width == 1
+    assert (wave + other).width == 64
+    assert (wave - other).width == 64
+    assert (wave * other).width == 64
 
-    value = np.array([1, 2, 3, 4, 0, 666, 100, 200, 333,
-                     444, 1023, 1999], dtype=np.uint64)
-    values = [value, value + 1234, value + 9999]
-    width = [16, 20, 21]
-    clock = np.arange(len(value))
-    time = clock * 10
-    waves = [Waveform(v, clock, time, width=w, signed=False)
-             for v, w in zip(values, width)]
-    concat_values = (values[0] + (values[1] << width[0]) +
-                     (values[2] << (width[0] + width[1])))
-    concat_waves = Waveform.concat(waves)
-    assert np.all(concat_waves.value == concat_values)
-    splited_waves = concat_waves.split_bits(width, padding=False)
-    for v, w in zip(values, splited_waves):
-        assert np.all(v == w.value)
 
-    value = np.array([1, 2, 3, 4, 0, 666, 100, 200, 333,
-                     444, 1023, 1999], dtype=np.object_)
-    values = [value, value + 1234, value + 99999]
-    width = [16, 35, 30]
-    clock = np.arange(len(value))
-    time = clock * 10
-    waves = [Waveform(v, clock, time, width=w, signed=False)
-             for v, w in zip(values, width)]
-    concat_values = (values[0] + (values[1] << width[0]) +
-                     (values[2] << (width[0] + width[1])))
-    concat_waves = Waveform.concat(waves)
-    assert np.all(concat_waves.value == concat_values)
-    splited_waves = concat_waves.split_bits(width, padding=False)
-    for v, w in zip(values, splited_waves):
-        assert np.all(v == w.value)
+def test_arithmetic_width_error():
+    wave = build_waveform([1, 2, 3], width=65)
+    other = build_waveform([1, 2, 3], width=65)
+    with pytest.raises(ValueError):
+        _ = wave + other
 
-    value = np.array([1, 2, 9, 4, 10, 666],)
-    width = 20
-    clock = np.arange(len(value))
-    time = clock * 10
-    a = Waveform(value, clock, time, width=width, signed=False)
-    b = a.filter(lambda x: (x > 5))
-    assert np.all(b.value == np.array([9, 10, 666]))
 
-    value = np.array([0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0])
-    width = 1
-    clock = np.arange(len(value))
-    time = clock*10
-    a = Waveform(value, clock, time, width=width, signed=False)
-    b = a.rise()
-    assert np.all(b.value == np.array([0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0]))
-    assert np.all(b.clock == a.clock)
-    assert np.all(b.time == a.time)
+def test_signedness_mismatch_error():
+    signed_wave = build_waveform([1, 2, 3], width=8, signed=True)
+    unsigned_wave = build_waveform([1, 2, 3], width=8, signed=False)
+    with pytest.raises(ValueError):
+        _ = signed_wave + unsigned_wave
 
-    b = a.fall()
-    assert np.all(b.value == np.array([0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1]))
-    assert np.all(b.clock == a.clock)
-    assert np.all(b.time == a.time)
 
-    assert (np.all(a.compress().value == np.array([0, 1, 0, 1, 0, 1, 0])))
+def test_logical_ops_and_widths():
+    value = np.array([1, 2, 3, 4], dtype=np.uint64)
+    other_value = np.array([4, 3, 2, 1], dtype=np.uint64)
+    wave = build_waveform(value, width=12)
+    other = build_waveform(other_value, width=12)
 
-    value = np.array([])
-    clock = np.arange(len(value))
-    time = clock*10
-    a = Waveform(value, clock, time, width=width, signed=False)
-    assert (np.all(a.compress().value == np.array([])))
+    assert np.all((wave & other).value == (value & other_value))
+    assert (wave & other).width == 12
+    assert np.all((wave | other).value == (value | other_value))
+    assert (wave | other).width == 12
+    assert np.all((wave ^ other).value == (value ^ other_value))
+    assert (wave ^ other).width == 12
+    assert np.all((~wave).value == ((~value) & ((1 << 12) - 1)))
+    assert (~wave).width == 12
+    assert np.all((wave == other).value == (value == other_value))
+    assert (wave == other).width == 1
 
-    value = np.array([50])
-    clock = np.arange(len(value))
-    time = clock*10
-    a = Waveform(value, clock, time, width=width, signed=False)
-    assert (np.all(a.compress().value == np.array([50])))
+    assert np.all((wave & 7).value == (value & 7))
+    assert (wave & 7).width == 12
+    assert np.all((wave | 7).value == (value | 7))
+    assert (wave | 7).width == 12
+    assert np.all((wave ^ 7).value == (value ^ 7))
+    assert (wave ^ 7).width == 12
+    assert np.all((wave == 7).value == (value == 7))
+    assert (wave == 7).width == 1
 
-    value = np.array([50, 50])
-    clock = np.arange(len(value))
-    time = clock*10
-    a = Waveform(value, clock, time, width=width, signed=False)
-    assert (np.all(a.compress().value == np.array([50, 50])))
 
-    value = np.array([50, 60])
-    clock = np.arange(len(value))
-    time = clock*10
-    a = Waveform(value, clock, time, width=width, signed=False)
-    assert (np.all(a.compress().value == np.array([50, 60])))
+def test_logical_width_errors():
+    wave = build_waveform([1, 2, 3], width=4)
+    other = build_waveform([1, 2, 3], width=5)
+    with pytest.raises(ValueError):
+        _ = wave & other
+    with pytest.raises(ValueError):
+        _ = wave & 16
 
-    value1 = np.array([50, 100, 200])
-    value2 = np.array([30, 40, 90])
-    clock = np.arange(len(value))
-    time = clock*10
-    a = Waveform(value1, clock, time, width=width, signed=False)
-    b = Waveform(value2, clock, time, width=width, signed=False)
-    merged = Waveform.merge([a, b], lambda x: x[0] + x[1], 32, False)
 
-    assert np.all(merged.value == value1 + value2)
-    assert merged.width == 32
-    assert np.all(merged.clock == clock)
-    assert np.all(merged.time == time)
+def test_shift_ops():
+    wave = build_waveform([1, 2, 3], width=8)
+    assert np.all((wave << 2).value == np.array([4, 8, 12]))
+    assert (wave << 2).width == 10
+    assert np.all((wave >> 2).value == np.array([0, 0, 0]))
+    assert (wave >> 2).width == 8
+
+
+def test_mod_pow_and_ne():
+    wave = build_waveform([2, 3, 4], width=8)
+    other = build_waveform([1, 2, 3], width=8)
+
+    assert np.all((wave % other).value == np.array([0, 1, 1]))
+    assert (wave % other).width == 8
+    assert np.all((5 % wave).value == np.array([1, 2, 1]))
+    assert (5 % wave).width == int.bit_length(5)
+
+    assert np.all((wave**other).value == np.array([2, 9, 64]))
+    assert (wave**other).width == 64
+    assert np.all((wave != other).value == np.array([1, 1, 1]))
+    assert (wave != other).width == 1
+
+
+def test_bitsel_and_slice_errors():
+    wave = build_waveform([0b1011, 0b0101], width=4)
+    assert np.all(wave[1].value == np.array([1, 0]))
+    assert np.all(wave[3:2].value == np.array([2, 1]))
+
+    with pytest.raises(Exception):
+        _ = wave[3:0:2]
+    with pytest.raises(Exception):
+        _ = wave[1:3]
+
+
+def test_sampling_and_filter():
+    wave = build_waveform([1, 2, 3, 4, 5, 6], width=8)
+    sampled = wave.sample(2)
+    assert np.allclose(sampled.value, np.array([1.5, 3.5, 5.5]))
+    assert sampled.width is None
+
+    filtered = wave.filter(lambda x: x > 4)
+    assert np.all(filtered.value == np.array([5, 6]))
+
+
+def test_rise_fall_and_compress():
+    wave = build_waveform([0, 1, 0, 1, 1, 0], width=1)
+    assert np.all(wave.rise().value == np.array([0, 1, 0, 1, 0, 0]))
+    assert np.all(wave.fall().value == np.array([0, 0, 1, 0, 0, 1]))
+
+    repeated = build_waveform([0, 0, 1, 1, 0, 0], width=1)
+    assert np.all(repeated.compress().value == np.array([0, 1, 0, 0]))
+    empty = build_waveform([], width=1)
+    assert np.all(empty.compress().value == np.array([]))
+
+
+def test_count_one_and_bits():
+    value = np.array([1, 2, 3, 4, 2**32 - 1], dtype=np.uint64)
+    wave = build_waveform(value, width=64)
+    assert np.all(wave.count_one().value == np.array([1, 1, 2, 1, 32]))
+    assert np.all(wave[1].value == np.array([0, 1, 1, 0, 1]))
+    assert np.all(wave[2:1].value == np.array([0, 1, 1, 2, 3]))
+
+    wide_values = np.array([0, (1 << 65) + 3], dtype=np.object_)
+    wide_wave = build_waveform(wide_values, width=128)
+    assert np.all(wide_wave.count_one().value == np.array([0, 3]))
+    assert np.all(wide_wave[68:66].value == np.array([0, 0]))
+
+
+def test_split_concat_and_merge():
+    value = np.array([1, 2, 3], dtype=np.uint64)
+    widths = [4, 6, 5]
+    waves = [build_waveform(value + offset, width=w) for offset, w in zip([0, 5, 9], widths)]
+    concat = Waveform.concat(waves)
+    split = concat.split_bits(widths, padding=False)
+    for original, extracted in zip(waves, split):
+        assert np.all(original.value == extracted.value)
+
+    object_value = np.array([1, 2, 3], dtype=np.object_)
+    object_waves = [
+        build_waveform(object_value + offset, width=w)
+        for offset, w in zip([0, 3, 7], widths)
+    ]
+    object_concat = Waveform.concat(object_waves)
+    object_split = object_concat.split_bits(widths, padding=False)
+    for original, extracted in zip(object_waves, object_split):
+        assert np.all(original.value == extracted.value)
+
+    merged = Waveform.merge(
+        [waves[0], waves[1]],
+        lambda values: values[0] + values[1],
+        width=16,
+        signed=False,
+    )
+    assert np.all(merged.value == waves[0].value + waves[1].value)
+    assert merged.width == 16
+
+
+def test_split_bits_validation_error():
+    wave = build_waveform([1, 2, 3], width=10)
+    with pytest.raises(Exception):
+        _ = wave.split_bits(3, padding=False)
+    with pytest.raises(Exception):
+        _ = wave.split_bits([3, 4], padding=False)
+
+
+def test_signed_unsigned_conversion():
+    wave = build_waveform([0, 7, 8, 15], width=4, signed=False)
+    signed_wave = wave.as_signed()
+    assert np.all(signed_wave.value == np.array([0, 7, -8, -1]))
+    unsigned_wave = signed_wave.as_unsigned()
+    assert np.all(unsigned_wave.value == np.array([0, 7, 8, 15]))
+
+
+def test_waveform_metadata_and_copy():
+    wave = build_waveform([1, 2, 3], width=8)
+    assert str(wave) == "Waveform(signal='', width=8, signed=False)"
+    assert wave.set_signal('tb.u0.sig') is wave
+    assert wave.signal == 'tb.u0.sig'
+
+    record = wave.data
+    assert record.dtype.names == ('time', 'clock', 'value')
+    assert np.all(record['time'] == wave.time)
+    assert np.all(record['clock'] == wave.clock)
+    assert np.all(record['value'] == wave.value)
+
+    copied = wave.copy()
+    copied.value[0] = 99
+    assert wave.value[0] == 1
+
+
+def test_map_take_and_idempotent_conversion():
+    wave = build_waveform([1, 2, 3, 4], width=8)
+    mapped = wave.map(lambda x: x + 1, width=9, signed=True)
+    assert np.all(mapped.value == np.array([2, 3, 4, 5]))
+    assert mapped.width == 9
+    assert mapped.signed is True
+    assert np.all(mapped.clock == wave.clock)
+    assert np.all(mapped.time == wave.time)
+
+    taken = wave.take([0, 2])
+    assert np.all(taken.value == np.array([1, 3]))
+    assert np.all(taken.clock == np.array([0, 2]))
+
+    unsigned_wave = build_waveform([1, 2, 3], width=8, signed=False)
+    assert np.all(unsigned_wave.as_unsigned().value == unsigned_wave.value)
+    signed_wave = build_waveform([1, 2, 3], width=8, signed=True)
+    assert np.all(signed_wave.as_signed().value == signed_wave.value)
