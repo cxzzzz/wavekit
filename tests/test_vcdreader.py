@@ -67,6 +67,50 @@ def test_vcd_reader_load_waves_regex(vcd_path):
     assert all(wave.width == 4 for wave in j_regex.values())
 
 
+def test_vcd_reader_load_waves_brace_expansion(vcd_path):
+    vcd_reader = VcdReader(str(vcd_path))
+
+    j_states = vcd_reader.load_waves(
+        'tb.u0.J_{state,next}[3:0]',
+        'tb.tck',
+        signed=True,
+        sample_on_posedge=False,
+    )
+
+    assert set(j_states.keys()) == {('next',), ('state',)}
+    assert {wave.signal for wave in j_states.values()} == {
+        'tb.u0.J_next[3:0]',
+        'tb.u0.J_state[3:0]',
+    }
+    assert all(wave.width == 4 for wave in j_states.values())
+
+
+def test_vcd_reader_load_waves_regex_key_conflict(vcd_path):
+    vcd_reader = VcdReader(str(vcd_path))
+
+    with pytest.raises(Exception):
+        vcd_reader.load_waves(
+            r'tb.u0.@J_[A-Za-z0-9_]+\[3:0\]',
+            'tb.tck',
+        )
+
+
+def test_vcd_reader_load_waves_uses_signal_range(vcd_path):
+    vcd_reader = VcdReader(str(vcd_path))
+
+    waves = vcd_reader.load_waves(
+        'tb.u0.J_state',
+        'tb.tck',
+        signed=True,
+        sample_on_posedge=False,
+    )
+
+    assert list(waves.keys()) == [()]
+    wave = waves[()]
+    assert wave.signal == 'tb.u0.J_state[3:0]'
+    assert wave.width == 4
+
+
 def test_vcd_reader_clock_pattern_error(vcd_path):
     vcd_reader = VcdReader(str(vcd_path))
     with pytest.raises(Exception):

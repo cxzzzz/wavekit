@@ -24,19 +24,23 @@ def traverse_signal(
     res: dict[tuple[Any, ...], str] = {}
     if len(descendant_scope_pattern_list) == 1:
         for signal in scope.signal_list:
+            signal_name, signal_range = split_by_range_expr(signal)
             for k, p in descendant_scope_pattern_list[0].items():
-                p, range_expr = split_by_range_expr(p)
                 if p[0] == '@':
                     if match := re.fullmatch(p[1:], signal):
                         assert len(k) == 0
                         key = (match.groups(),)
                         if key in res:
                             raise Exception(f'pattern {p[1:]} match more than one signal')
-                        res[key] = f'{signal}{range_expr}'
-                elif p == signal:
+                        res[key] = signal
+                else:
+                    p_no_range, range_expr = split_by_range_expr(p)
+                    if p_no_range != signal_name:
+                        continue
                     key = k
                     assert key not in res
-                    res[key] = f'{signal}{range_expr}'
+                    final_range = range_expr or signal_range
+                    res[key] = f'{signal_name}{final_range}'
                     break
     return res
 
