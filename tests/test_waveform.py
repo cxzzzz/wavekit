@@ -182,6 +182,12 @@ def test_count_one_and_bits():
     assert np.all(wide_wave[68:66].value == np.array([0, 0]))
 
 
+def test_bit_count_over_64_width():
+    wide_values = np.array([1 << 70, (1 << 80) + 3], dtype=np.object_)
+    wide_wave = build_waveform(wide_values, width=96)
+    assert np.all(wide_wave.bit_count().value == np.array([1, 3]))
+
+
 def test_split_concat_and_merge():
     value = np.array([1, 2, 3], dtype=np.uint64)
     widths = [4, 6, 5]
@@ -255,6 +261,9 @@ def test_map_take_and_idempotent_conversion():
     taken = wave.take([0, 2])
     assert np.all(taken.value == np.array([1, 3]))
     assert np.all(taken.clock == np.array([0, 2]))
+
+    with pytest.raises(TypeError):
+        wave.take(np.array([True, False, True, False]))
 
     unsigned_wave = build_waveform([1, 2, 3], width=8, signed=False)
     assert np.all(unsigned_wave.as_unsigned().value == unsigned_wave.value)

@@ -644,26 +644,12 @@ class Waveform:
         )
 
     @staticmethod
-    # @jit
-    def _count_one_uint64(x: npt.NDArray[Any]):
-        m1 = np.uint64(0x5555555555555555)  # binary: 0101...
-        m2 = np.uint64(0x3333333333333333)  # binary: 00110011..
-        m4 = np.uint64(0x0F0F0F0F0F0F0F0F)  # binary:  4 zeros,  4 ones ...
-        h01 = np.uint64(0x0101010101010101)
-
-        # put count of each 2 bits into those 2 bits
-        x = x - ((x >> np.uint64(1)) & m1)
-        x = (x & m2) + ((x >> np.uint64(2)) & m2)  # put count of each 4 bits into those 4 bits
-        # put count of each 8 bits into those 8 bits
-        x = (x + (x >> np.uint64(4))) & m4
-        x = (x * h01) >> np.uint64(56)
-        return x
-
-    @staticmethod
     def _count_one(x, width: int):
         t = np.zeros(x.shape, dtype=np.uint64)
+        mask = (1 << 64) - 1
         for idx in range(0, width, 64):
-            t = Waveform._count_one_uint64(((x >> idx) & ((1 << 64) - 1)).astype(np.uint64)) + t
+            chunk = ((x >> idx) & mask).astype(np.uint64)
+            t = np.bitwise_count(chunk).astype(np.uint64) + t
         return t
 
     def map(
@@ -713,6 +699,8 @@ class Waveform:
         if self.width is None:
             raise ValueError('width is None')
         width = self.width
+        if self.value.dtype != np.object_ and self.width <= 64:
+            return self.map(lambda v: np.bitwise_count(v), width=64, signed=False)
         return self.map(lambda v: Waveform._count_one(v, width), width=64, signed=False)
 
     def split_bits(self, bit_group_size: int | list[int], padding: bool = False) -> list[Waveform]:
