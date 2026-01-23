@@ -80,7 +80,7 @@ class Waveform:
         )
 
     def copy(self) -> Waveform:
-        return self.map(lambda x: np.copy(x))
+        return self.vectorized_map(lambda x: np.copy(x))
 
     @staticmethod
     # @jit
@@ -98,7 +98,7 @@ class Waveform:
         if self.width is None:
             raise ValueError('width is None')
         width = self.width
-        return self.map(lambda x: self._signed(x, width), signed=True)
+        return self.vectorized_map(lambda x: self._signed(x, width), signed=True)
 
     @staticmethod
     # @jit
@@ -111,7 +111,7 @@ class Waveform:
         if self.width is None:
             raise ValueError('width is None')
         width = self.width
-        return self.map(lambda x: self._unsigned(x, width), signed=False)
+        return self.vectorized_map(lambda x: self._unsigned(x, width), signed=False)
 
     @staticmethod
     # @jit
@@ -174,7 +174,7 @@ class Waveform:
 
         new_width = self._infer_arithmetic_op_width(inferred_width)
 
-        return self.map(
+        return self.vectorized_map(
             lambda x: self._add(x, self._get_value(other)),
             width=new_width,
             signed=self.signed,
@@ -196,7 +196,7 @@ class Waveform:
 
         new_width = self._infer_arithmetic_op_width(inferred_width)
 
-        return self.map(
+        return self.vectorized_map(
             lambda x: self._sub(x, self._get_value(other)),
             width=new_width,
             signed=self.signed,
@@ -210,7 +210,7 @@ class Waveform:
 
         new_width = self._infer_arithmetic_op_width(inferred_width)
 
-        return self.map(
+        return self.vectorized_map(
             lambda x: self._sub(self._get_value(other), x),
             width=new_width,
             signed=self.signed,
@@ -232,7 +232,7 @@ class Waveform:
 
         new_width = self._infer_arithmetic_op_width(inferred_width)
 
-        return self.map(
+        return self.vectorized_map(
             lambda x: self._mul(x, self._get_value(other)),
             width=new_width,
             signed=self.signed,
@@ -487,7 +487,7 @@ class Waveform:
     def __and__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
         new_width = self._infer_logical_op_width(other)
-        return self.map(
+        return self.vectorized_map(
             lambda x: self._and(x, self._get_value(other)),
             width=new_width,
             signed=False,
@@ -504,7 +504,7 @@ class Waveform:
     def __or__(self, other: WaveformOrScalar, width: int = None) -> Waveform:
         self._check_sign(other)
         new_width = self._infer_logical_op_width(other)
-        return self.map(
+        return self.vectorized_map(
             lambda x: self._or(x, self._get_value(other)), width=new_width, signed=False
         )
 
@@ -519,7 +519,7 @@ class Waveform:
     def __xor__(self, other: WaveformOrScalar, width: int = None) -> Waveform:
         self._check_sign(other)
         new_width = self._infer_logical_op_width(other)
-        return self.map(
+        return self.vectorized_map(
             lambda x: self._xor(x, self._get_value(other)),
             width=new_width,
             signed=False,
@@ -537,7 +537,7 @@ class Waveform:
         if self.width is None:
             raise ValueError('width is None')
         width_value = self.width
-        return self.map(lambda x: self._invert(x, width_value), width=width_value, signed=False)
+        return self.vectorized_map(lambda x: self._invert(x, width_value), width=width_value, signed=False)
 
     @staticmethod
     # @jit
@@ -548,7 +548,7 @@ class Waveform:
         if not isinstance(other, (Waveform, int, float)):
             return NotImplemented
         self._check_sign(other)
-        return self.map(
+        return self.vectorized_map(
             lambda x: self._eq(x, self._get_value(other)),
             width=1,
             signed=False,
@@ -563,7 +563,7 @@ class Waveform:
         if not isinstance(other, (Waveform, int, float)):
             return NotImplemented
         self._check_sign(other)
-        return self.map(
+        return self.vectorized_map(
             lambda x: self._ne(x, self._get_value(other)),
             width=1,
             signed=False,
@@ -652,11 +652,11 @@ class Waveform:
             t = np.bitwise_count(chunk).astype(np.uint64) + t
         return t
 
-    def map(
+    def vectorized_map(
         self,
         func: Callable[[npt.NDArray[Any]], npt.NDArray[Any]],
         width: int | None = None,
-        signed: bool | None = None,
+        signed: bool | None = None
     ) -> Waveform:
         new_value = func(self.value)
         return Waveform(
@@ -666,6 +666,15 @@ class Waveform:
             width=width or self.width,
             signed=signed if signed is not None else self.signed,
         )
+
+    def map(
+        self,
+        func: Callable[[npt.NDArray[Any]], npt.NDArray[Any]],
+        width: int | None = None,
+        signed: bool | None = None
+    ) -> Waveform:
+        vectorized_func = np.vectorize(func)
+        return self.vectorized_map(vectorized_func, width, signed)
 
     def falling_edge(self) -> Waveform:
         if self.width != 1:
@@ -700,8 +709,8 @@ class Waveform:
             raise ValueError('width is None')
         width = self.width
         if self.value.dtype != np.object_ and self.width <= 64:
-            return self.map(lambda v: np.bitwise_count(v), width=64, signed=False)
-        return self.map(lambda v: Waveform._count_one(v, width), width=64, signed=False)
+            return self.vectorized_map(lambda v: np.bitwise_count(v), width=64, signed=False)
+        return self.vectorized_map(lambda v: Waveform._count_one(v, width), width=64, signed=False)
 
     def split_bits(self, bit_group_size: int | list[int], padding: bool = False) -> list[Waveform]:
         if self.width is None:
@@ -774,4 +783,31 @@ class Waveform:
             time=np.copy(waves[0].time),
             width=width,
             signed=signed,
+        )
+
+    def time_slice(self, begin_time: int | None = None, end_time: int | None = None, include_end: bool = False) -> Waveform:
+        # numpy有没有提供一个函数，根据范围，获取一个有序数组的索引
+        if begin_time is None:
+            begin_time = self.begin_time
+        if end_time is None:
+            end_time = self.end_time
+        start_idx = np.searchsorted(self.time, begin_time, side='left')
+        end_idx = np.searchsorted(self.time, end_time, side="right" if include_end else "left")
+        return Waveform(
+            value=self.value[start_idx:end_idx],
+            clock=self.clock[start_idx:end_idx],
+            time=self.time[start_idx:end_idx],
+            width=self.width,
+            signed=self.signed,
+        )
+
+    def slice(self, begin_idx: int, end_idx: int, include_end: bool = False) -> Waveform:
+        if include_end:
+            end_idx += 1
+        return Waveform(
+            value=self.value[begin_idx:end_idx],
+            clock=self.clock[begin_idx:end_idx],
+            time=self.time[begin_idx:end_idx],
+            width=self.width,
+            signed=self.signed,
         )

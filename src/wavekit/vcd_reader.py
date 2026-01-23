@@ -59,6 +59,9 @@ class VcdReader(Reader):
     def end_time(self) -> int:
         return self.file_handle.endtime
 
+    def get_width(self, signal: str) -> int:
+        return int(self.file_handle[signal].size)
+
     def load_wave(
         self,
         signal: str,
@@ -69,13 +72,10 @@ class VcdReader(Reader):
         begin_time: int | None = None,
         end_time: int | None = None,
     ) -> Waveform:
-        if begin_time is not None:
-            raise NotImplementedError('begin_time is not supported')
-        if end_time is not None:
-            raise NotImplementedError('end_time is not supported')
-
         signal_handle = self.file_handle[signal]
         width = int(signal_handle.size)
+
+        #  TODO: opt performance
         signal_value_change = np.array(
             [(v[0], int(re.sub(r'[xXzZ]', str(xz_value), v[1]), 2)) for v in signal_handle.tv],
             dtype=np.object_ if width > 64 else np.uint64,
@@ -85,14 +85,16 @@ class VcdReader(Reader):
             dtype=np.uint64,
         )
 
-        return self.value_change_to_waveform(
+        full_wave = self.value_change_to_waveform(
             signal_value_change,
             clock_value_change,
-            width=int(signal_handle.size),
+            width=width,
             signed=signed,
             sample_on_posedge=sample_on_posedge,
             signal=signal,
         )
+
+        return full_wave.time_slice(begin_time, end_time)
 
     def close(self):
         pass
