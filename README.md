@@ -58,8 +58,8 @@ with VcdReader("fifo_tb.vcd") as f: # open the VCD file
     depth = 8
 
     #calculate the average FIFO occupancy level.
-    w_ptr = f.load_wave("fifo_tb.s_fifo.w_ptr[2:0]", clock=clock)   # load fifo write pointer signal
-    r_ptr = f.load_wave("fifo_tb.s_fifo.r_ptr[2:0]", clock=clock)   # load fifo read pointer signal
+    w_ptr = f.load_waveform("fifo_tb.s_fifo.w_ptr[2:0]", clock=clock)   # load fifo write pointer signal
+    r_ptr = f.load_waveform("fifo_tb.s_fifo.r_ptr[2:0]", clock=clock)   # load fifo read pointer signal
     fifo_water_level = (w_ptr + depth - r_ptr) % depth              # calculate the occupancy level
     average_fifo_water_level = np.mean(fifo_water_level.value)      # calculate the average occupancy level using numpy
     print( f"average fifo occupancy level: {average_fifo_water_level}" )

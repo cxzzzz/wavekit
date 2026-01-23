@@ -182,7 +182,7 @@ class Reader:
         return False
 
     @abstractmethod
-    def load_wave(
+    def load_waveform(
         self,
         signal: str,
         clock: str,
@@ -220,7 +220,7 @@ class Reader:
     def top_scope_list(self) -> Sequence[Scope]:
         pass
 
-    def load_waves(
+    def load_matched_waveforms(
         self,
         pattern: str,
         clock_pattern: str,
@@ -273,7 +273,7 @@ class Reader:
             )
 
         return {
-            k: self.load_wave(
+            k: self.load_waveform(
                 s,
                 clock_full_name,
                 xz_value=xz_value,

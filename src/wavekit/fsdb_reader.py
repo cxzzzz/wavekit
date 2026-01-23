@@ -81,7 +81,7 @@ class FsdbReader(Reader):
         self.file = file
         self.file_handle = NpiFsdbReader(file)
 
-    def load_wave(
+    def load_waveform(
         self,
         signal: str,
         clock: str,

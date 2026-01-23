@@ -36,10 +36,10 @@ def test_pattern_parsing():
         _ = expand_brace_pattern('u{0,1')
 
 
-def test_vcd_reader_load_wave(vcd_path):
+def test_vcd_reader_load_waveform(vcd_path):
     vcd_reader = VcdReader(str(vcd_path))
 
-    j_state = vcd_reader.load_wave(
+    j_state = vcd_reader.load_waveform(
         'tb.u0.J_state[3:0]',
         clock='tb.tck',
         signed=True,
@@ -52,10 +52,10 @@ def test_vcd_reader_load_wave(vcd_path):
     assert len(j_state.value) > 0
 
 
-def test_vcd_reader_load_wave_without_range(vcd_path):
+def test_vcd_reader_load_waveform_without_range(vcd_path):
     vcd_reader = VcdReader(str(vcd_path))
 
-    j_next = vcd_reader.load_wave(
+    j_next = vcd_reader.load_waveform(
         'tb.u0.J_next',
         clock='tb.tck',
         signed=True,
@@ -66,10 +66,10 @@ def test_vcd_reader_load_wave_without_range(vcd_path):
     assert j_next.width == 4
 
 
-def test_vcd_reader_load_waves_regex(vcd_path):
+def test_vcd_reader_load_matched_waveforms_regex(vcd_path):
     vcd_reader = VcdReader(str(vcd_path))
 
-    j_regex = vcd_reader.load_waves(
+    j_regex = vcd_reader.load_matched_waveforms(
         r'tb.u0.@J_([a-z]+\[3:0\])',
         'tb.tck',
         signed=True,
@@ -81,10 +81,10 @@ def test_vcd_reader_load_waves_regex(vcd_path):
     assert all(wave.width == 4 for wave in j_regex.values())
 
 
-def test_vcd_reader_load_waves_brace_expansion(vcd_path):
+def test_vcd_reader_load_matched_waveforms_brace_expansion(vcd_path):
     vcd_reader = VcdReader(str(vcd_path))
 
-    j_states = vcd_reader.load_waves(
+    j_states = vcd_reader.load_matched_waveforms(
         'tb.u0.J_{state,next}[3:0]',
         'tb.tck',
         signed=True,
@@ -99,20 +99,20 @@ def test_vcd_reader_load_waves_brace_expansion(vcd_path):
     assert all(wave.width == 4 for wave in j_states.values())
 
 
-def test_vcd_reader_load_waves_regex_key_conflict(vcd_path):
+def test_vcd_reader_load_matched_waveforms_regex_key_conflict(vcd_path):
     vcd_reader = VcdReader(str(vcd_path))
 
     with pytest.raises(Exception):
-        vcd_reader.load_waves(
+        vcd_reader.load_matched_waveforms(
             r'tb.u0.@J_[A-Za-z0-9_]+\[3:0\]',
             'tb.tck',
         )
 
 
-def test_vcd_reader_load_waves_uses_signal_range(vcd_path):
+def test_vcd_reader_load_matched_waveforms_uses_signal_range(vcd_path):
     vcd_reader = VcdReader(str(vcd_path))
 
-    waves = vcd_reader.load_waves(
+    waves = vcd_reader.load_matched_waveforms(
         'tb.u0.J_state',
         'tb.tck',
         signed=True,
@@ -128,7 +128,7 @@ def test_vcd_reader_load_waves_uses_signal_range(vcd_path):
 def test_vcd_reader_clock_pattern_error(vcd_path):
     vcd_reader = VcdReader(str(vcd_path))
     with pytest.raises(Exception):
-        vcd_reader.load_waves('tb.u0.J_state[3:0]', 'tb.no_clock')
+        vcd_reader.load_matched_waveforms('tb.u0.J_state[3:0]', 'tb.no_clock')
 
 
 def test_value_change_to_waveform_sample_on_posedge():
