@@ -537,7 +537,11 @@ class Waveform:
         if self.width is None:
             raise ValueError('width is None')
         width_value = self.width
-        return self.vectorized_map(lambda x: self._invert(x, width_value), width=width_value, signed=False)
+        return self.vectorized_map(
+            lambda x: self._invert(x, width_value),
+            width=width_value,
+            signed=False,
+        )
 
     @staticmethod
     # @jit
@@ -656,7 +660,7 @@ class Waveform:
         self,
         func: Callable[[npt.NDArray[Any]], npt.NDArray[Any]],
         width: int | None = None,
-        signed: bool | None = None
+        signed: bool | None = None,
     ) -> Waveform:
         new_value = func(self.value)
         return Waveform(
@@ -671,7 +675,7 @@ class Waveform:
         self,
         func: Callable[[npt.NDArray[Any]], npt.NDArray[Any]],
         width: int | None = None,
-        signed: bool | None = None
+        signed: bool | None = None,
     ) -> Waveform:
         vectorized_func = np.vectorize(func)
         return self.vectorized_map(vectorized_func, width, signed)
@@ -785,20 +789,26 @@ class Waveform:
             signed=signed,
         )
 
-    def time_slice(self, begin_time: int | None = None, end_time: int | None = None, include_end: bool = False) -> Waveform:
+    def time_slice(
+        self,
+        begin_time: int | None = None,
+        end_time: int | None = None,
+        include_end: bool = False,
+    ) -> Waveform:
         # numpy有没有提供一个函数，根据范围，获取一个有序数组的索引
         if begin_time is None:
-            begin_time = self.begin_time
+            begin_time = int(self.time[0])
         if end_time is None:
-            end_time = self.end_time
+            end_time = int(self.time[-1]) + 1
         start_idx = np.searchsorted(self.time, begin_time, side='left')
-        end_idx = np.searchsorted(self.time, end_time, side="right" if include_end else "left")
+        end_idx = np.searchsorted(self.time, end_time, side='right' if include_end else 'left')
         return Waveform(
             value=self.value[start_idx:end_idx],
             clock=self.clock[start_idx:end_idx],
             time=self.time[start_idx:end_idx],
             width=self.width,
             signed=self.signed,
+            signal=self.signal,
         )
 
     def slice(self, begin_idx: int, end_idx: int, include_end: bool = False) -> Waveform:
@@ -810,4 +820,5 @@ class Waveform:
             time=self.time[begin_idx:end_idx],
             width=self.width,
             signed=self.signed,
+            signal=self.signal,
         )

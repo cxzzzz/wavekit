@@ -52,6 +52,20 @@ def test_vcd_reader_load_wave(vcd_path):
     assert len(j_state.value) > 0
 
 
+def test_vcd_reader_load_wave_without_range(vcd_path):
+    vcd_reader = VcdReader(str(vcd_path))
+
+    j_next = vcd_reader.load_wave(
+        'tb.u0.J_next',
+        clock='tb.tck',
+        signed=True,
+        sample_on_posedge=False,
+    )
+
+    assert j_next.signal == 'tb.u0.J_next[3:0]'
+    assert j_next.width == 4
+
+
 def test_vcd_reader_load_waves_regex(vcd_path):
     vcd_reader = VcdReader(str(vcd_path))
 

@@ -72,6 +72,15 @@ class VcdReader(Reader):
         begin_time: int | None = None,
         end_time: int | None = None,
     ) -> Waveform:
+        if signal not in self.file_handle.references_to_ids:
+            pattern = re.compile(rf'^{re.escape(signal)}\[\d+(?::\d+)?\]$')
+            matches = [
+                ref for ref in self.file_handle.references_to_ids.keys() if pattern.fullmatch(ref)
+            ]
+            if len(matches) == 1:
+                signal = matches[0]
+            elif len(matches) > 1:
+                raise ValueError(f'pattern {signal} matches more than one signal')
         signal_handle = self.file_handle[signal]
         width = int(signal_handle.size)
 
