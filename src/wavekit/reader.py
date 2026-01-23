@@ -194,6 +194,7 @@ class Reader:
     ) -> Waveform:
         pass
 
+
     @staticmethod
     def value_change_to_waveform(
         value_change: np.ndarray,
@@ -220,24 +221,10 @@ class Reader:
     def top_scope_list(self) -> Sequence[Scope]:
         pass
 
-    def load_matched_waveforms(
+    def get_matched_signals(
         self,
         pattern: str,
-        clock_pattern: str,
-        xz_value: int = 0,
-        signed: bool = False,
-        sample_on_posedge: bool = False,
-        begin_time: int | None = None,
-        end_time: int | None = None,
-    ) -> dict[tuple[Any, ...], Waveform]:
-        pattern = pattern.strip()
-        expanded_pattern_list: list[PatternMap] = [
-            expand_brace_pattern(p) for p in split_by_hierarchy(pattern)
-        ]
-
-        expanded_clock_pattern_list: list[PatternMap] = [
-            expand_brace_pattern(p) for p in split_by_hierarchy(clock_pattern)
-        ]
+    ) -> dict[tuple[Any, ...], str]:
 
         def combine_dict(
             dict1: dict[tuple[Any, ...], str],
@@ -255,22 +242,39 @@ class Reader:
 
             return {**dict1, **dict2}
 
-        clock_patterns: dict[tuple[Any, ...], str] = {}
-        for scope in self.top_scope_list():
-            clock_patterns = combine_dict(
-                clock_patterns,
-                traverse_scope(scope, expanded_clock_pattern_list),
-            )
-        if len(clock_patterns) == 0:
-            raise Exception(f'clock pattern {clock_pattern} can not match any signal')
-        clock_full_name = list(clock_patterns.values())[0]
+        pattern = pattern.strip()
+        expanded_pattern_list: list[PatternMap] = [
+            expand_brace_pattern(p) for p in split_by_hierarchy(pattern)
+        ]
 
-        signal_patterns: dict[tuple[Any, ...], str] = {}
+        matched_signals: dict[tuple[Any, ...], str] = {}
         for scope in self.top_scope_list():
-            signal_patterns = combine_dict(
-                signal_patterns,
+            matched_signals = combine_dict(
+                matched_signals,
                 traverse_scope(scope, expanded_pattern_list),
             )
+        return matched_signals
+
+    def load_matched_waveforms(
+        self,
+        pattern: str,
+        clock_pattern: str,
+        xz_value: int = 0,
+        signed: bool = False,
+        sample_on_posedge: bool = False,
+        begin_time: int | None = None,
+        end_time: int | None = None,
+    ) -> dict[tuple[Any, ...], Waveform]:
+        clock_patterns = self.get_matched_signals(clock_pattern)
+        if not clock_patterns:
+            raise Exception(f'clock pattern {clock_pattern} can not match any signal')
+        if len(clock_patterns) > 1:
+            raise Exception(
+                f'clock pattern {clock_pattern} match more than one signal: {clock_patterns}'
+            )
+        clock_full_name = next(iter(clock_patterns.values()))
+
+        matched_signals = self.get_matched_signals(pattern)
 
         return {
             k: self.load_waveform(
@@ -282,7 +286,7 @@ class Reader:
                 begin_time=begin_time,
                 end_time=end_time,
             )
-            for k, s in signal_patterns.items()
+            for k, s in matched_signals.items()
         }
 
     @abstractmethod
