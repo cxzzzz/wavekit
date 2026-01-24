@@ -8,8 +8,8 @@ htmlcov/
 dist/
 *.egg-info/
 build/
-src/wavekit/*.so
-src/wavekit/*.cpp
+src/wavekit/**/*.so
+src/wavekit/**/*.cpp
 .mypy_cache/
 .ruff_cache/
 .tox/

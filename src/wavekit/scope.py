@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from functools import cached_property
 from typing import Any
 
-from .pattern_parser import (
+from .readers.pattern_parser import (
     PatternMap,
     split_by_range_expr,
 )

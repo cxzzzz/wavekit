@@ -8,12 +8,14 @@ from __future__ import annotations
 
 __version__ = '0.1.2'
 
-from .vcd_reader import VcdReader as VcdReader
+from .readers.vcd.reader import VcdReader as VcdReader
+from .scope import Scope as Scope
+from .signal import Signal as Signal
 from .waveform import Waveform as Waveform
 
 try:
-    from .fsdb_reader import FsdbReader as FsdbReader
+    from .readers.fsdb.reader import FsdbReader as FsdbReader
 
-    __all__ = ['Waveform', 'VcdReader', 'FsdbReader']
+    __all__ = ['Waveform', 'VcdReader', 'FsdbReader', 'Scope', 'Signal']
 except ImportError:
-    __all__ = ['Waveform', 'VcdReader']
+    __all__ = ['Waveform', 'VcdReader', 'Scope', 'Signal']

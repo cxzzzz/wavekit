@@ -6,11 +6,11 @@ from collections.abc import Sequence
 from functools import cached_property
 from typing import Any
 
+from ...scope import Scope
+from ...signal import Signal
+from ...waveform import Waveform
+from ..base import Reader
 from .npi_fsdb_reader import NpiFsdbReader, NpiFsdbScope
-from .reader import Reader
-from .scope import Scope
-from .signal import Signal
-from .waveform import Waveform
 
 
 class FsdbScope(Scope):

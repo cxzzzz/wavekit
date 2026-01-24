@@ -6,8 +6,8 @@ from setuptools import Extension, setup
 
 extensions = [
     Extension(
-        'src.wavekit.value_change',
-        sources=['src/wavekit/value_change.pyx'],
+        'src.wavekit.readers.value_change',
+        sources=['src/wavekit/readers/value_change.pyx'],
         include_dirs=[np.get_include()],
         extra_compile_args=['-fpic', '-O3', '-march=native'],
         extra_link_args=['-O3', '-march=native'],
@@ -21,8 +21,8 @@ if VERDI_HOME := os.environ.get('VERDI_HOME'):
 
     extensions.append(
         Extension(
-            'src.wavekit.npi_fsdb_reader',
-            sources=['src/wavekit/npi_fsdb_reader.pyx'],
+            'src.wavekit.readers.fsdb.npi_fsdb_reader',
+            sources=['src/wavekit/readers/fsdb/npi_fsdb_reader.pyx'],
             include_dirs=[np.get_include(), npi_include_dir],
             library_dirs=[npi_library_dir],
             libraries=['NPI', 'rt'],

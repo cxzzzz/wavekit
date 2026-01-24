@@ -6,14 +6,14 @@ from typing import Any
 
 import numpy as np
 
+from ..scope import Scope, traverse_scope
+from ..waveform import Waveform
 from .pattern_parser import (
     PatternMap,
     expand_brace_pattern,
     split_by_hierarchy,
 )
-from .scope import Scope, traverse_scope
 from .value_change import value_change_to_value_array
-from .waveform import Waveform
 
 
 class Reader:

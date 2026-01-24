@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from wavekit.waveform import Waveform
+from wavekit import Waveform
 
 
 def build_waveform(values, width, signed=False):

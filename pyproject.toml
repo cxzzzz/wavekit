@@ -6,7 +6,7 @@ authors = ["cxzzzz <cxz19961010@outlook.com>"]
 readme = "README.md"
 repository = "https://github.com/cxzzzz/wavekit"
 build = "build.py"
-include = ["src/wavekit/*.so"]
+include = ["src/wavekit/**/*.so"]
 
 [tool.poetry.dependencies]
 python = "^3.9"

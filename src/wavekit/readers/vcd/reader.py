@@ -8,10 +8,10 @@ import numpy as np
 from vcdvcd import VCDVCD
 from vcdvcd import Scope as VcdVcdScope
 
-from .reader import Reader
-from .scope import Scope
-from .signal import Signal
-from .waveform import Waveform
+from ...scope import Scope
+from ...signal import Signal
+from ...waveform import Waveform
+from ..base import Reader
 
 
 class VcdScope(Scope):
