@@ -5,6 +5,8 @@ from typing import Any, Callable, Union, cast
 import numpy as np
 import numpy.typing as npt
 
+from .signal import Signal
+
 
 class Waveform:
     WaveformOrScalar = Union['Waveform', int, float]
@@ -21,9 +23,7 @@ class Waveform:
         self.clock: npt.NDArray[Any] = clock
         self.time: npt.NDArray[Any] = time
 
-        self.width: int | None = width
-        self.signed: bool = signed
-        self.signal: str = signal
+        self._signal: Signal = Signal(name=signal, width=width, signed=signed)
 
         if width is None:
             self.value = value
@@ -34,11 +34,39 @@ class Waveform:
         else:
             self.value = value.astype(np.uint64)
 
+    @property
+    def width(self) -> int | None:
+        return self._signal.width
+
+    @width.setter
+    def width(self, value: int | None):
+        self._signal.width = value
+
+    @property
+    def signed(self) -> bool:
+        return self._signal.signed
+
+    @signed.setter
+    def signed(self, value: bool):
+        self._signal.signed = value
+
+    @property
+    def signal(self) -> Signal:
+        return self._signal
+
+    @property
+    def name(self) -> str:
+        return self._signal.name
+
+    @name.setter
+    def name(self, value: str):
+        self._signal.name = value
+
     def __str__(self):
-        return f"Waveform(signal='{self.signal}', width={self.width}, signed={self.signed})"
+        return f"Waveform(signal='{self.name}', width={self.width}, signed={self.signed})"
 
     def set_signal(self, signal: str) -> Waveform:
-        self.signal = signal
+        self.name = signal
         return self
 
     @property
@@ -808,7 +836,7 @@ class Waveform:
             time=self.time[start_idx:end_idx],
             width=self.width,
             signed=self.signed,
-            signal=self.signal,
+            signal=self.name,
         )
 
     def slice(self, begin_idx: int, end_idx: int, include_end: bool = False) -> Waveform:
@@ -820,5 +848,5 @@ class Waveform:
             time=self.time[begin_idx:end_idx],
             width=self.width,
             signed=self.signed,
-            signal=self.signal,
+            signal=self.name,
         )

@@ -46,7 +46,7 @@ def test_vcd_reader_load_waveform(vcd_path):
         sample_on_posedge=False,
     )
 
-    assert j_state.signal == 'tb.u0.J_state[3:0]'
+    assert j_state.name == 'tb.u0.J_state[3:0]'
     assert j_state.width == 4
     assert j_state.signed is True
     assert len(j_state.value) > 0
@@ -62,7 +62,7 @@ def test_vcd_reader_load_waveform_without_range(vcd_path):
         sample_on_posedge=False,
     )
 
-    assert j_next.signal == 'tb.u0.J_next[3:0]'
+    assert j_next.name == 'tb.u0.J_next[3:0]'
     assert j_next.width == 4
 
 
@@ -92,7 +92,7 @@ def test_vcd_reader_load_matched_waveforms_brace_expansion(vcd_path):
     )
 
     assert set(j_states.keys()) == {('next',), ('state',)}
-    assert {wave.signal for wave in j_states.values()} == {
+    assert {wave.name for wave in j_states.values()} == {
         'tb.u0.J_next[3:0]',
         'tb.u0.J_state[3:0]',
     }
@@ -121,7 +121,7 @@ def test_vcd_reader_load_matched_waveforms_uses_signal_range(vcd_path):
 
     assert list(waves.keys()) == [()]
     wave = waves[()]
-    assert wave.signal == 'tb.u0.J_state[3:0]'
+    assert wave.name == 'tb.u0.J_state[3:0]'
     assert wave.width == 4
 
 
@@ -147,4 +147,4 @@ def test_value_change_to_waveform_sample_on_posedge():
     assert np.all(wave.value == np.array([1, 0]))
     assert np.all(wave.clock == np.array([0, 1]))
     assert np.all(wave.time == np.array([5, 15]))
-    assert wave.signal == 'tb.sig'
+    assert wave.name == 'tb.sig'

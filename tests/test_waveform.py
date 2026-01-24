@@ -17,12 +17,13 @@ def build_waveform(values, width, signed=False):
 
 
 def test_metadata_and_copy():
-    wave = build_waveform([1, 2, 3], width=8)
+    wave = build_waveform([1, 2, 3], width=8, signed=False)
     assert str(wave) == "Waveform(signal='', width=8, signed=False)"
     assert wave.set_signal('tb.u0.sig') is wave
-    assert wave.signal == 'tb.u0.sig'
+    assert wave.name == 'tb.u0.sig'
 
     record = wave.data
+    assert len(record) == 3
     assert record.dtype.names == ('time', 'clock', 'value')
     assert np.all(record['time'] == wave.time)
     assert np.all(record['clock'] == wave.clock)
@@ -364,3 +365,40 @@ def test_signed_conversion():
     assert np.all(unsigned_wave_2.as_unsigned().value == unsigned_wave_2.value)
     signed_wave_2 = build_waveform([1, 2, 3], width=8, signed=True)
     assert np.all(signed_wave_2.as_signed().value == signed_wave_2.value)
+
+def test_signal_synchronization():
+    wave = build_waveform([1, 2, 3], width=8, signed=False)
+    wave.set_signal('test_sig')
+
+    # Check initial state
+    assert wave.width == 8
+    assert wave.signal.width == 8
+    assert wave.name == 'test_sig'
+    assert wave.signal.name == 'test_sig'
+
+    # Modify via Waveform property
+    wave.width = 16
+    assert wave.width == 16
+    assert wave.signal.width == 16
+
+    wave.name = 'new_name'
+    assert wave.name == 'new_name'
+    assert wave.signal.name == 'new_name'
+
+    # Modify via Signal object
+    wave.signal.width = 32
+    assert wave.width == 32
+    assert wave.signal.width == 32
+
+    wave.signal.name = 'final_name'
+    assert wave.name == 'final_name'
+    assert wave.signal.name == 'final_name'
+
+    # Check signed synchronization
+    wave.signed = True
+    assert wave.signed is True
+    assert wave.signal.signed is True
+
+    wave.signal.signed = False
+    assert wave.signed is False
+    assert wave.signal.signed is False
