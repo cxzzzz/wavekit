@@ -7,23 +7,37 @@ from functools import cached_property
 from typing import Any
 
 from .npi_fsdb_reader import NpiFsdbReader, NpiFsdbScope
-from .reader import Reader, Scope
+from .reader import Reader
+from .scope import Scope
+from .signal import Signal
 from .waveform import Waveform
 
 
 class FsdbScope(Scope):
-    def __init__(self, handle: NpiFsdbScope, parent_scope: FsdbScope | None):
+    def __init__(self, handle: NpiFsdbScope, parent_scope: FsdbScope | None, reader: Reader):
         super().__init__(name=handle.name())
         self.handle = handle
         self.parent_scope = parent_scope
+        self.reader = reader
 
     @cached_property
-    def signal_list(self) -> Sequence[str]:
-        return [s for s in self.handle.signal_list()]
+    def signal_list(self) -> Sequence[Signal]:
+        full_scope_name = self.full_name()
+        return [
+            Signal(
+                name=s,
+                width=None,
+                signed=False,
+                width_resolver=lambda signal_name=f'{full_scope_name}.{s}': (
+                    self.reader.get_signal_width(signal_name)
+                ),
+            )
+            for s in self.handle.signal_list()
+        ]
 
     @cached_property
     def child_scope_list(self) -> Sequence[Scope]:
-        return [FsdbScope(c, self) for c in self.handle.child_scope_list()]
+        return [FsdbScope(c, self, self.reader) for c in self.handle.child_scope_list()]
 
     @property
     def type(self) -> str:
@@ -119,8 +133,13 @@ class FsdbReader(Reader):
 
     def top_scope_list(self) -> Sequence[Scope]:
         if not hasattr(self, '_top_scope_list'):
-            self._top_scope_list = [FsdbScope(s, None) for s in self.file_handle.top_scope_list()]
+            self._top_scope_list = [
+                FsdbScope(s, None, self) for s in self.file_handle.top_scope_list()
+            ]
         return self._top_scope_list
+
+    def get_signal_width(self, signal: str) -> int:
+        return self.file_handle.get_signal_width(signal)
 
     @property
     def begin_time(self) -> str:

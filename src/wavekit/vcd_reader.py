@@ -8,24 +8,44 @@ import numpy as np
 from vcdvcd import VCDVCD
 from vcdvcd import Scope as VcdVcdScope
 
-from .reader import Reader, Scope
+from .reader import Reader
+from .scope import Scope
+from .signal import Signal
 from .waveform import Waveform
 
 
 class VcdScope(Scope):
-    def __init__(self, vcdvcd_scope: VcdVcdScope, parent_scope: Scope | None):
+    def __init__(
+        self,
+        vcdvcd_scope: VcdVcdScope,
+        parent_scope: Scope | None,
+        reader: Reader,
+    ):
         super().__init__(name=vcdvcd_scope.name.split('.')[-1])
         self.vcdvcd_scope = vcdvcd_scope
         self.parent_scope = parent_scope
+        self.reader = reader
 
     @cached_property
-    def signal_list(self) -> Sequence[str]:
-        return [k for k, v in self.vcdvcd_scope.subElements.items() if isinstance(v, str)]
+    def signal_list(self) -> Sequence[Signal]:
+        full_scope_name = self.full_name()
+        return [
+            Signal(
+                name=k,
+                width=None,
+                signed=False,
+                width_resolver=lambda signal_name=f'{full_scope_name}.{k}': (
+                    self.reader.get_signal_width(signal_name)
+                ),
+            )
+            for k, v in self.vcdvcd_scope.subElements.items()
+            if isinstance(v, str)
+        ]
 
     @cached_property
     def child_scope_list(self) -> Sequence[Scope]:
         return [
-            VcdScope(v, self)
+            VcdScope(v, self, self.reader)
             for _, v in self.vcdvcd_scope.subElements.items()
             if isinstance(v, VcdVcdScope)
         ]
@@ -45,7 +65,7 @@ class VcdReader(Reader):
         self.file = file
         self.file_handle = VCDVCD(file, store_scopes=True)
         self._top_scope_list = [
-            VcdScope(v, None) for k, v in self.file_handle.scopes.items() if '.' not in k
+            VcdScope(v, None, self) for k, v in self.file_handle.scopes.items() if '.' not in k
         ]
 
     def top_scope_list(self) -> Sequence[Scope]:
@@ -59,7 +79,7 @@ class VcdReader(Reader):
     def end_time(self) -> int:
         return self.file_handle.endtime
 
-    def get_width(self, signal: str) -> int:
+    def get_signal_width(self, signal: str) -> int:
         return int(self.file_handle[signal].size)
 
     def load_waveform(

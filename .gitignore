@@ -14,4 +14,5 @@ src/wavekit/*.cpp
 .ruff_cache/
 .tox/
 .nox/
+.trae/
 .hypothesis/

@@ -366,6 +366,7 @@ def test_signed_conversion():
     signed_wave_2 = build_waveform([1, 2, 3], width=8, signed=True)
     assert np.all(signed_wave_2.as_signed().value == signed_wave_2.value)
 
+
 def test_signal_synchronization():
     wave = build_waveform([1, 2, 3], width=8, signed=False)
     wave.set_signal('test_sig')

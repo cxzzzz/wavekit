@@ -19,11 +19,17 @@ class Waveform:
         width: int | None,
         signed: bool,
         signal: str = '',
+        width_resolver: Callable[[], int] | None = None,
     ):
         self.clock: npt.NDArray[Any] = clock
         self.time: npt.NDArray[Any] = time
 
-        self._signal: Signal = Signal(name=signal, width=width, signed=signed)
+        self._signal: Signal = Signal(
+            name=signal,
+            width=width,
+            signed=signed,
+            width_resolver=width_resolver,
+        )
 
         if width is None:
             self.value = value

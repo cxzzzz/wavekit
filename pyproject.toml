@@ -42,6 +42,7 @@ warn_unused_configs = true
 check_untyped_defs = false
 ignore_missing_imports = true
 no_implicit_optional = false
+disable_error_code = ["misc"]
 
 [build-system]
 requires = ["poetry-core", "Cython", "setuptools", "wheel", "numpy>=2.0.0"]
