@@ -16,3 +16,6 @@ src/wavekit/**/*.cpp
 .nox/
 .trae/
 .hypothesis/
+
+example/**/*.vcd
+example/**/*.vvp
