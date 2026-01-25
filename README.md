@@ -47,7 +47,7 @@ This project uses [Poetry](https://python-poetry.org/) for dependency management
 Wavekit simplifies extracting multiple signals using brace expansion or regular expressions.
 
 **1. Using Brace Expansion**
-Use brace patterns (e.g., `{state,next}`) to load related signals in one go.
+Use brace patterns (e.g., `{state,next}` or `{0..7}`) to load related signals in one go.
 
 ```python
 from wavekit import VcdReader
