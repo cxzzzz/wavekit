@@ -16,11 +16,11 @@ class Waveform:
         value: npt.NDArray[Any],
         clock: npt.NDArray[np.number],
         time: npt.NDArray[np.number],
-        signal: Signal = Signal('', None, False),
+        signal: Signal | None = None,
     ):
         self.clock: npt.NDArray[np.number] = clock
         self.time: npt.NDArray[np.number] = time
-        self.signal: Signal = signal
+        self.signal: Signal = signal if signal is not None else Signal('', None, False)
 
         if self.width is None or self.signed is None:
             self.value = value
