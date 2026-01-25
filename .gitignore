@@ -21,3 +21,4 @@ example/**/*.vcd
 example/**/*.vvp
 
 .vscode/
+.pypirc
