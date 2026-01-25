@@ -22,3 +22,4 @@ example/**/*.vvp
 
 .vscode/
 .pypirc
+poetry.toml
