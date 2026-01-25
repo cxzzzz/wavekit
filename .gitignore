@@ -19,3 +19,5 @@ src/wavekit/**/*.cpp
 
 example/**/*.vcd
 example/**/*.vvp
+
+.vscode/
