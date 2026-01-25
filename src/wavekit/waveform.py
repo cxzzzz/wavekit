@@ -71,10 +71,6 @@ class Waveform:
     def __str__(self):
         return f"Waveform(signal='{self.name}', width={self.width}, signed={self.signed})"
 
-    def set_signal(self, signal: str) -> Waveform:
-        self.name = signal
-        return self
-
     @property
     def data(self) -> Any:
         return cast(
@@ -93,16 +89,23 @@ class Waveform:
         diff_indices = np.where(padded_diff_mask)[0]
         return self.take(diff_indices)
 
-    def compress(
+    def compress(self) -> Waveform:
+        return self.unique_consecutive()
+
+    def vectorized_filter(
         self,
-        condition: Callable[[npt.NDArray[Any]], npt.NDArray[np.bool_]],
+        func: Callable[[np.ndarray[Any]], np.ndarray[np.bool_]],
     ) -> Waveform:
-        mask = condition(self.value)
-        if not isinstance(mask, np.ndarray) or mask.dtype != np.bool_:
-            raise TypeError('compress requires boolean numpy array')
+        mask = func(self.value)
         return self.mask(mask)
 
-    def mask(self, mask: npt.NDArray[np.bool_]) -> Waveform:
+    def filter(self, condition: Callable[[Any], bool]) -> Waveform:
+        mask = np.vectorize(condition)(self.value)
+        return self.mask(mask)
+
+    def mask(self, mask: npt.NDArray[np.bool_] | Waveform) -> Waveform:
+        if isinstance(mask, Waveform):
+            mask = mask.value
         if not isinstance(mask, np.ndarray) or mask.dtype != np.bool_:
             raise TypeError('mask requires boolean numpy array')
         return Waveform(
@@ -644,7 +647,9 @@ class Waveform:
             signed=False,
         )
 
-    def take(self, indices: npt.NDArray[np.integer[Any]] | list[int]):
+    def take(self, indices: npt.NDArray[np.integer[Any]] | list[int] | Waveform) -> Waveform:
+        if isinstance(indices, Waveform):
+            indices = indices.value
         if isinstance(indices, np.ndarray):
             if indices.dtype == np.bool_:
                 raise TypeError('take requires integer indices')
@@ -707,7 +712,7 @@ class Waveform:
 
     def map(
         self,
-        func: Callable[[npt.NDArray[Any]], npt.NDArray[Any]],
+        func: Callable[[Any], Any],
         width: int | None = None,
         signed: bool | None = None,
     ) -> Waveform:

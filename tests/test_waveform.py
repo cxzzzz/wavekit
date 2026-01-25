@@ -19,7 +19,7 @@ def build_waveform(values, width, signed=False):
 def test_metadata_and_copy():
     wave = build_waveform([1, 2, 3], width=8, signed=False)
     assert str(wave) == "Waveform(signal='', width=8, signed=False)"
-    assert wave.set_signal('tb.u0.sig') is wave
+    wave.name = 'tb.u0.sig'
     assert wave.name == 'tb.u0.sig'
 
     record = wave.data
@@ -239,10 +239,37 @@ def test_mask():
     assert np.all(masked.value == np.array([5, 6]))
 
 
-def test_compress():
+def test_mask_with_waveform():
+    wave = build_waveform([1, 2, 3, 4], width=8)
+    # Create a boolean mask waveform
+    mask_vals = np.array([False, True, False, True], dtype=np.bool_)
+    mask_wave = Waveform(
+        value=mask_vals,
+        clock=wave.clock,
+        time=wave.time,
+        width=1,
+        signed=False
+    )
+    masked = wave.mask(mask_wave)
+    assert np.all(masked.value == np.array([2, 4]))
+
+
+def test_filter():
     wave = build_waveform([1, 2, 3, 4, 5, 6], width=8)
-    compressed = wave.compress(lambda v: v > 4)
-    assert np.all(compressed.value == np.array([5, 6]))
+    filtered = wave.filter(lambda v: v > 4)
+    assert np.all(filtered.value == np.array([5, 6]))
+
+def test_vectorized_filter():
+    wave = build_waveform([1, 2, 3, 4, 5, 6], width=8)
+    # vectorized_filter expects a function that takes an array and returns a boolean array
+    filtered = wave.vectorized_filter(lambda x: x > 3)
+    assert np.all(filtered.value == np.array([4, 5, 6]))
+
+def test_compress():
+    # compress is now an alias for unique_consecutive
+    wave = build_waveform([1, 1, 2, 2, 3], width=8)
+    compressed = wave.compress()
+    assert np.all(compressed.value == np.array([1, 2, 3]))
 
 
 def test_unique_consecutive():
@@ -369,7 +396,7 @@ def test_signed_conversion():
 
 def test_signal_synchronization():
     wave = build_waveform([1, 2, 3], width=8, signed=False)
-    wave.set_signal('test_sig')
+    wave.name = 'test_sig'
 
     # Check initial state
     assert wave.width == 8
