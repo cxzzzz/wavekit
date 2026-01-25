@@ -6,16 +6,15 @@
 
 from __future__ import annotations
 
-__version__ = '0.1.2'
+from importlib import metadata
+try:
+    __version__ = metadata.version("wavekit")
+except metadata.PackageNotFoundError:
+    __version__ = "unknown"
 
 from .readers.vcd.reader import VcdReader as VcdReader
 from .scope import Scope as Scope
 from .signal import Signal as Signal
 from .waveform import Waveform as Waveform
 
-try:
-    from .readers.fsdb.reader import FsdbReader as FsdbReader
-
-    __all__ = ['Waveform', 'VcdReader', 'FsdbReader', 'Scope', 'Signal']
-except ImportError:
-    __all__ = ['Waveform', 'VcdReader', 'Scope', 'Signal']
+__all__ = ['Waveform', 'VcdReader', 'FsdbReader', 'Scope', 'Signal']
