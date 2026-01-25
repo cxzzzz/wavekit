@@ -1,8 +1,9 @@
 import os
-import sys
 import subprocess
-import pytest
 from contextlib import contextmanager
+
+import pytest
+
 
 # Helper context manager to change working directory
 @contextmanager
@@ -14,14 +15,17 @@ def change_dir(destination):
     finally:
         os.chdir(cwd)
 
+
 @pytest.fixture
 def example_dir():
     # Assuming tests are run from project root
     return os.path.abspath(os.path.join(os.path.dirname(__file__), '../example'))
 
+
 @pytest.fixture
 def project_root():
     return os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
 
 def run_make_all(cwd, project_root):
     # Set PYTHONPATH to include the project root's src directory
@@ -30,14 +34,9 @@ def run_make_all(cwd, project_root):
     env['PYTHONPATH'] = f"{src_path}:{env.get('PYTHONPATH', '')}"
 
     # Run 'make all'
-    result = subprocess.run(
-        ['make', 'all'],
-        cwd=cwd,
-        env=env,
-        capture_output=True,
-        text=True
-    )
+    result = subprocess.run(['make', 'all'], cwd=cwd, env=env, capture_output=True, text=True)
     return result
+
 
 def test_scoreboard_verify(example_dir, project_root):
     target_dir = os.path.join(example_dir, 'scoreboard')
@@ -46,7 +45,8 @@ def test_scoreboard_verify(example_dir, project_root):
 
     # Check for success
     if result.returncode != 0:
-        pytest.fail(f"Make all failed with stderr:\n{result.stderr}\nStdout:\n{result.stdout}")
+        pytest.fail(f'Make all failed with stderr:\n{result.stderr}\nStdout:\n{result.stdout}')
+
 
 def test_fifo_occupancy(example_dir, project_root):
     target_dir = os.path.join(example_dir, 'fifo_occupancy')
@@ -54,7 +54,8 @@ def test_fifo_occupancy(example_dir, project_root):
     result = run_make_all(target_dir, project_root)
 
     if result.returncode != 0:
-        pytest.fail(f"Make all failed with stderr:\n{result.stderr}\nStdout:\n{result.stdout}")
+        pytest.fail(f'Make all failed with stderr:\n{result.stderr}\nStdout:\n{result.stdout}')
+
 
 def test_fifo_latency(example_dir, project_root):
     target_dir = os.path.join(example_dir, 'fifo_latency')
@@ -62,4 +63,4 @@ def test_fifo_latency(example_dir, project_root):
     result = run_make_all(target_dir, project_root)
 
     if result.returncode != 0:
-        pytest.fail(f"Make all failed with stderr:\n{result.stderr}\nStdout:\n{result.stdout}")
+        pytest.fail(f'Make all failed with stderr:\n{result.stderr}\nStdout:\n{result.stdout}')

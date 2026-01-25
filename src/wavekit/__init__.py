@@ -7,10 +7,11 @@
 from __future__ import annotations
 
 from importlib import metadata
+
 try:
-    __version__ = metadata.version("wavekit")
+    __version__ = metadata.version('wavekit')
 except metadata.PackageNotFoundError:
-    __version__ = "unknown"
+    __version__ = 'unknown'
 
 from .readers.vcd.reader import VcdReader as VcdReader
 from .scope import Scope as Scope

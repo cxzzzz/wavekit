@@ -1,14 +1,14 @@
 import numpy as np
 import pytest
 
-from wavekit import Waveform, Signal
+from wavekit import Signal, Waveform
 
 
 def build_waveform(values, width, signed=False):
     value = np.array(values)
     clock = np.arange(len(value))
     time = clock * 10
-    return Waveform(value, clock, time, signal=Signal("", width, signed))
+    return Waveform(value, clock, time, signal=Signal('', width, signed))
 
 
 # ==========================================
@@ -247,7 +247,7 @@ def test_mask_with_waveform():
         value=mask_vals,
         clock=wave.clock,
         time=wave.time,
-        signal=Signal("", 1, False),
+        signal=Signal('', 1, False),
     )
     masked = wave.mask(mask_wave)
     assert np.all(masked.value == np.array([2, 4]))
@@ -258,11 +258,13 @@ def test_filter():
     filtered = wave.filter(lambda v: v > 4)
     assert np.all(filtered.value == np.array([5, 6]))
 
+
 def test_vectorized_filter():
     wave = build_waveform([1, 2, 3, 4, 5, 6], width=8)
     # vectorized_filter expects a function that takes an array and returns a boolean array
     filtered = wave.vectorized_filter(lambda x: x > 3)
     assert np.all(filtered.value == np.array([4, 5, 6]))
+
 
 def test_compress():
     # compress is now an alias for unique_consecutive

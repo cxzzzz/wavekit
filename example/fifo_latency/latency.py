@@ -1,5 +1,7 @@
 import numpy as np
+
 from wavekit import VcdReader
+
 
 def analyze_write_latency():
     # Analyze how long write requests are blocked (Backpressure Latency)
@@ -15,19 +17,20 @@ def analyze_write_latency():
         blocked = w_en & full
 
         if not np.any(blocked.value):
-            print("No write backpressure detected.")
+            print('No write backpressure detected.')
             return
 
-        blocked_start = blocked.rising_edge().filter(lambda v: v!=0)
-        blocked_end = blocked.falling_edge().filter(lambda v: v!=0)
+        blocked_start = blocked.rising_edge().filter(lambda v: v != 0)
+        blocked_end = blocked.falling_edge().filter(lambda v: v != 0)
         blocked_num = len(blocked_end.value)
         duration = (blocked_end.clock[:blocked_num] - blocked_start.clock[:blocked_num]) + 1
 
-        print(f"Write Backpressure Analysis:")
-        print(f"  Total blocked cycles: {np.sum(blocked.value)}")
-        print(f"  Max consecutive blocked cycles: {np.max(duration)}")
-        print(f"  Average blocking duration: {np.mean(duration):.2f} cycles")
-        print(f"  Number of blocking events: {blocked_num}")
+        print('Write Backpressure Analysis:')
+        print(f'  Total blocked cycles: {np.sum(blocked.value)}')
+        print(f'  Max consecutive blocked cycles: {np.max(duration)}')
+        print(f'  Average blocking duration: {np.mean(duration):.2f} cycles')
+        print(f'  Number of blocking events: {blocked_num}')
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     analyze_write_latency()
