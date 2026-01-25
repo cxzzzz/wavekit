@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..scope import Scope, traverse_scope
+from ..signal import Signal
 from ..waveform import Waveform
 from .pattern_parser import (
     PatternMap,
@@ -62,9 +63,7 @@ class Reader:
             value=value,
             clock=clock,
             time=time,
-            width=width,
-            signed=signed,
-            signal=signal,
+            signal=Signal(signal, width, signed),
         )
 
     @abstractmethod

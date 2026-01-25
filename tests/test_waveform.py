@@ -1,14 +1,14 @@
 import numpy as np
 import pytest
 
-from wavekit import Waveform
+from wavekit import Waveform, Signal
 
 
 def build_waveform(values, width, signed=False):
     value = np.array(values)
     clock = np.arange(len(value))
     time = clock * 10
-    return Waveform(value, clock, time, width=width, signed=signed)
+    return Waveform(value, clock, time, signal=Signal("", width, signed))
 
 
 # ==========================================
@@ -18,7 +18,7 @@ def build_waveform(values, width, signed=False):
 
 def test_metadata_and_copy():
     wave = build_waveform([1, 2, 3], width=8, signed=False)
-    assert str(wave) == "Waveform(signal='', width=8, signed=False)"
+    assert str(wave) == "Waveform(Signal(name='', width=8, signed=False))"
     wave.name = 'tb.u0.sig'
     assert wave.name == 'tb.u0.sig'
 
@@ -247,8 +247,7 @@ def test_mask_with_waveform():
         value=mask_vals,
         clock=wave.clock,
         time=wave.time,
-        width=1,
-        signed=False
+        signal=Signal("", 1, False),
     )
     masked = wave.mask(mask_wave)
     assert np.all(masked.value == np.array([2, 4]))

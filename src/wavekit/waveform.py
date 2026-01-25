@@ -14,62 +14,49 @@ class Waveform:
     def __init__(
         self,
         value: npt.NDArray[Any],
-        clock: npt.NDArray[Any],
-        time: npt.NDArray[Any],
-        width: int | None,
-        signed: bool,
-        signal: str = '',
-        width_resolver: Callable[[], int] | None = None,
+        clock: npt.NDArray[npt.number],
+        time: npt.NDArray[npt.number],
+        signal: Signal = Signal("", None, None)
     ):
-        self.clock: npt.NDArray[Any] = clock
-        self.time: npt.NDArray[Any] = time
+        self.clock: npt.NDArray[npt.number] = clock
+        self.time: npt.NDArray[npt.number] = time
+        self.signal: Signal = signal
 
-        self._signal: Signal = Signal(
-            name=signal,
-            width=width,
-            signed=signed,
-            width_resolver=width_resolver,
-        )
-
-        if width is None:
+        if self.width is None or self.signed is None:
             self.value = value
-        elif width > 64:
+        elif self.width > 64:
             self.value = value.astype(np.object_)
-        elif signed:
+        elif self.signed:
             self.value = value.astype(np.int64)
         else:
             self.value = value.astype(np.uint64)
 
     @property
     def width(self) -> int | None:
-        return self._signal.width
+        return self.signal.width
 
     @width.setter
     def width(self, value: int | None):
-        self._signal.width = value
+        self.signal.width = value
 
     @property
     def signed(self) -> bool:
-        return self._signal.signed
+        return self.signal.signed
 
     @signed.setter
     def signed(self, value: bool):
-        self._signal.signed = value
-
-    @property
-    def signal(self) -> Signal:
-        return self._signal
+        self.signal.signed = value
 
     @property
     def name(self) -> str:
-        return self._signal.name
+        return self.signal.name
 
     @name.setter
     def name(self, value: str):
-        self._signal.name = value
+        self.signal.name = value
 
     def __str__(self):
-        return f"Waveform(signal='{self.name}', width={self.width}, signed={self.signed})"
+        return f"Waveform({self.signal})"
 
     @property
     def data(self) -> Any:
@@ -105,15 +92,16 @@ class Waveform:
 
     def mask(self, mask: npt.NDArray[np.bool_] | Waveform) -> Waveform:
         if isinstance(mask, Waveform):
-            mask = mask.value
+            if not (mask.width == 1 or mask.value.dtype == np.bool_):
+                raise TypeError('mask requires waveform with width 1 or boolean dtype')
+            mask = mask.value.astype(np.bool_)
         if not isinstance(mask, np.ndarray) or mask.dtype != np.bool_:
             raise TypeError('mask requires boolean numpy array')
         return Waveform(
             value=self.value[mask],
             clock=self.clock[mask],
             time=self.time[mask],
-            width=self.width,
-            signed=self.signed,
+            signal=Signal(self.name, self.width, self.signed),
         )
 
     def copy(self) -> Waveform:
@@ -291,8 +279,7 @@ class Waveform:
             value=new_value,
             clock=self.clock,
             time=self.time,
-            width=None,
-            signed=self.signed,
+            signal=Signal("", None, self.signed),
         )
 
     def __rtruediv__(self, other: WaveformOrScalar) -> Waveform:
@@ -303,8 +290,7 @@ class Waveform:
             value=new_value,
             clock=self.clock,
             time=self.time,
-            width=None,
-            signed=self.signed,
+            signal=Signal("", None, self.signed),
         )
 
     @staticmethod
@@ -321,8 +307,7 @@ class Waveform:
             value=new_value,
             clock=self.clock,
             time=self.time,
-            width=new_width,
-            signed=self.signed,
+            signal=Signal("", new_width, self.signed),
         )
 
     def __rfloordiv__(self, other: WaveformOrScalar) -> Waveform:
@@ -334,8 +319,7 @@ class Waveform:
             value=new_value,
             clock=self.clock,
             time=self.time,
-            width=new_width,
-            signed=self.signed,
+            signal=Signal("", new_width, self.signed),
         )
 
     @staticmethod
@@ -353,8 +337,7 @@ class Waveform:
             value=new_value,
             clock=self.clock,
             time=self.time,
-            width=new_width,
-            signed=self.signed,
+            signal=Signal("", new_width, self.signed),
         )
 
     def __rmod__(self, other: WaveformOrScalar) -> Waveform:
@@ -367,8 +350,7 @@ class Waveform:
             value=new_value,
             clock=self.clock,
             time=self.time,
-            width=new_width,
-            signed=self.signed,
+            signal=Signal("", new_width, self.signed),
         )
 
     @staticmethod
@@ -386,8 +368,7 @@ class Waveform:
             value=new_value,
             clock=self.clock,
             time=self.time,
-            width=new_width,
-            signed=self.signed,
+            signal=Signal("", new_width, self.signed),
         )
 
     def __rpow__(self, other: WaveformOrScalar) -> Waveform:
@@ -456,8 +437,7 @@ class Waveform:
             value=new_value,
             clock=self.clock,
             time=self.time,
-            width=new_width,
-            signed=self.signed,
+            signal=Signal("", new_width, self.signed),
         )
 
     def __rlshift__(self, other: WaveformOrScalar) -> Waveform:
@@ -488,8 +468,7 @@ class Waveform:
             value=new_value,
             clock=self.clock,
             time=self.time,
-            width=new_width,
-            signed=self.signed,
+            signal=Signal("", new_width, self.signed),
         )
 
     def __rrshift__(self, other: WaveformOrScalar, width: int = None) -> Waveform:
@@ -512,8 +491,7 @@ class Waveform:
             value=new_value,
             clock=self.clock,
             time=self.time,
-            width=new_width,
-            signed=self.signed,
+            signal=Signal("", new_width, self.signed),
         )
 
     @staticmethod
@@ -643,11 +621,10 @@ class Waveform:
             value=new_value,
             clock=self.clock,
             time=self.time,
-            width=width,
-            signed=False,
+            signal=Signal('', width, False),
         )
 
-    def take(self, indices: npt.NDArray[np.integer[Any]] | list[int] | Waveform) -> Waveform:
+    def take(self, indices: npt.NDArray[np.integer] | list[int] | Waveform) -> Waveform:
         if isinstance(indices, Waveform):
             indices = indices.value
         if isinstance(indices, np.ndarray):
@@ -662,8 +639,7 @@ class Waveform:
             value=self.value[indices],
             clock=self.clock[indices],
             time=self.time[indices],
-            width=self.width,
-            signed=self.signed,
+            signal=Signal(self.name, self.width, self.signed),
         )
 
     def downsample(
@@ -682,8 +658,7 @@ class Waveform:
             value=helper(self.value, func),
             clock=helper(self.clock, np.mean),
             time=helper(self.time, np.mean),
-            width=None,
-            signed=self.signed,
+            signal=Signal(self.name, None, self.signed),
         )
 
     @staticmethod
@@ -706,8 +681,7 @@ class Waveform:
             value=new_value,
             clock=np.copy(self.clock),
             time=np.copy(self.time),
-            width=width or self.width,
-            signed=signed if signed is not None else self.signed,
+            signal=Signal("", width or self.width, signed if signed is not None else self.signed),
         )
 
     def map(
@@ -729,8 +703,7 @@ class Waveform:
             value=new_value,
             clock=np.copy(self.clock),
             time=np.copy(self.time),
-            width=1,
-            signed=False,
+            signal=Signal("", 1, False),
         )
 
     def rising_edge(self) -> Waveform:
@@ -743,8 +716,7 @@ class Waveform:
             value=new_value,
             clock=np.copy(self.clock),
             time=np.copy(self.time),
-            width=1,
-            signed=False,
+            signal=Signal("", 1, False),
         )
 
     def bit_count(self) -> Waveform:
@@ -801,8 +773,7 @@ class Waveform:
             value=new_value,
             clock=np.copy(waves[0].clock),
             time=np.copy(waves[0].time),
-            width=concat_width,
-            signed=False,
+            signal=Signal("", concat_width, False),
         )
 
     @staticmethod
@@ -824,8 +795,7 @@ class Waveform:
             value=new_value,
             clock=np.copy(waves[0].clock),
             time=np.copy(waves[0].time),
-            width=width,
-            signed=signed,
+            signal=Signal("", width, signed),
         )
 
     def time_slice(
@@ -845,9 +815,7 @@ class Waveform:
             value=self.value[start_idx:end_idx],
             clock=self.clock[start_idx:end_idx],
             time=self.time[start_idx:end_idx],
-            width=self.width,
-            signed=self.signed,
-            signal=self.name,
+            signal=Signal(self.name, self.width, self.signed),
         )
 
     def slice(self, begin_idx: int, end_idx: int, include_end: bool = False) -> Waveform:
@@ -857,7 +825,5 @@ class Waveform:
             value=self.value[begin_idx:end_idx],
             clock=self.clock[begin_idx:end_idx],
             time=self.time[begin_idx:end_idx],
-            width=self.width,
-            signed=self.signed,
-            signal=self.name,
+            signal=Signal(self.name, self.width, self.signed),
         )
