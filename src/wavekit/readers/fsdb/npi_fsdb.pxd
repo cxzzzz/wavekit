@@ -82,8 +82,13 @@ cdef extern from "npi_fsdb.h":
         npiFsdbScopeFullName
         npiFsdbScopeDefName
         npiFsdbScopeType
-
-
+    
+    ctypedef enum npiFsdbSigCompositeType_e:
+        npiFsdbSigCtArray
+        npiFsdbSigCtStruct
+        npiFsdbSigCtUnion
+        npiFsdbSigCtTaggedUnion
+        npiFsdbSigCtRecord
 
 
     npiFsdbFileHandle npi_fsdb_open( const NPI_BYTE8* name )
@@ -113,3 +118,5 @@ cdef extern from "npi_fsdb.h":
     npiFsdbSigHandle npi_fsdb_iter_sig_next( npiFsdbSigIter iter )
     npiFsdbSigIter npi_fsdb_iter_sig( npiFsdbScopeHandle scope )
     npiFsdbSigIter npi_fsdb_iter_member( npiFsdbSigHandle sig )
+    NPI_INT32 npi_fsdb_iter_scope_stop( npiFsdbScopeIter iter )
+    NPI_INT32 npi_fsdb_iter_sig_stop( npiFsdbSigIter iter )

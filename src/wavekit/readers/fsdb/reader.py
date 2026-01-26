@@ -10,7 +10,7 @@ from ...scope import Scope
 from ...signal import Signal
 from ...waveform import Waveform
 from ..base import Reader
-from .npi_fsdb_reader import NpiFsdbReader, NpiFsdbScope
+from .npi_fsdb_reader import NpiFsdbReader, NpiFsdbScope, NpiFsdbSignalScope
 
 
 class FsdbScope(Scope):
@@ -65,6 +65,9 @@ class FsdbScope(Scope):
         return self.parent_scope.end_time if self.parent_scope else 0
 
     def preload_module_scope(self):
+        if isinstance(self.handle, NpiFsdbSignalScope):
+            return {}
+
         preloaded_module_scope = defaultdict(list)
         for c in self.child_scope_list:
             for module_name, module_scope_list in c.preload_module_scope().items():
