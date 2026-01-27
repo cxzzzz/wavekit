@@ -14,6 +14,7 @@ except metadata.PackageNotFoundError:
     __version__ = 'unknown'
 
 from .readers.vcd.reader import VcdReader as VcdReader
+from .readers.fsdb.reader import FsdbReader as FsdbReader
 from .scope import Scope as Scope
 from .signal import Signal as Signal
 from .waveform import Waveform as Waveform
