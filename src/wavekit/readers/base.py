@@ -45,7 +45,7 @@ class Reader:
     @abstractmethod
     def get_signal_width(self, signal: str) -> int:
         pass
-    
+
     @abstractmethod
     def get_signal_range(self, signal: str) -> tuple[int]:
         pass

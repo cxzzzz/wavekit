@@ -41,7 +41,10 @@ class FsdbScope(Scope):
 
     @cached_property
     def child_normal_scope_list(self) -> Sequence[Scope]:
-        return [FsdbScope(c, self, self.reader) for c in self.handle.child_scope_list(include_signal_scope=False)]
+        return [
+            FsdbScope(c, self, self.reader)
+            for c in self.handle.child_scope_list(include_signal_scope=False)
+        ]
 
     @property
     def type(self) -> str:
@@ -147,7 +150,7 @@ class FsdbReader(Reader):
 
     def get_signal_width(self, signal: str) -> int:
         return self.file_handle.get_signal_width(signal)
-    
+
     def get_signal_range(self, signal: str) -> tuple[int]:
         return self.file_handle.get_signal_range(signal)
 
