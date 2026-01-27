@@ -39,6 +39,10 @@ class FsdbScope(Scope):
     def child_scope_list(self) -> Sequence[Scope]:
         return [FsdbScope(c, self, self.reader) for c in self.handle.child_scope_list()]
 
+    @cached_property
+    def child_normal_scope_list(self) -> Sequence[Scope]:
+        return [FsdbScope(c, self, self.reader) for c in self.handle.child_scope_list(include_signal_scope=False)]
+
     @property
     def type(self) -> str:
         if not hasattr(self, '_type'):
@@ -69,7 +73,7 @@ class FsdbScope(Scope):
             return {}
 
         preloaded_module_scope = defaultdict(list)
-        for c in self.child_scope_list:
+        for c in self.child_normal_scope_list:
             for module_name, module_scope_list in c.preload_module_scope().items():
                 preloaded_module_scope[module_name].extend(module_scope_list)
 
@@ -143,6 +147,9 @@ class FsdbReader(Reader):
 
     def get_signal_width(self, signal: str) -> int:
         return self.file_handle.get_signal_width(signal)
+    
+    def get_signal_range(self, signal: str) -> tuple[int]:
+        return self.file_handle.get_signal_range(signal)
 
     @property
     def begin_time(self) -> str:
