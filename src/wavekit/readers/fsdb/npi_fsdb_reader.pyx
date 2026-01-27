@@ -297,6 +297,8 @@ cdef class NpiFsdbReader:
         file_str = file.encode('utf-8')
         cdef char* file_s = file_str
         self.fsdb_handle = npi_fsdb_open(file_s)
+        if(self.fsdb_handle == NULL):
+            raise OSError(f"Failed to open fsdb file :{file_str}")
 
 
 

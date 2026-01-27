@@ -13,10 +13,16 @@ try:
 except metadata.PackageNotFoundError:
     __version__ = 'unknown'
 
-from .readers.fsdb.reader import FsdbReader as FsdbReader
 from .readers.vcd.reader import VcdReader as VcdReader
 from .scope import Scope as Scope
 from .signal import Signal as Signal
 from .waveform import Waveform as Waveform
 
 __all__ = ['Waveform', 'VcdReader', 'FsdbReader', 'Scope', 'Signal']
+
+try:
+    from .readers.fsdb.reader import FsdbReader as FsdbReader
+
+    __all__.append('FsdbReader')
+except ImportError:
+    pass
