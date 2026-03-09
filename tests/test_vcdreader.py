@@ -132,6 +132,16 @@ def test_vcd_reader_clock_pattern_error(vcd_path):
         vcd_reader.load_matched_waveforms('tb.u0.J_state[3:0]', 'tb.no_clock')
 
 
+def test_vcd_reader_clock_pattern_key_mismatch_error(vcd_path):
+    # clock brace expansion yields different keys than the signal pattern
+    vcd_reader = VcdReader(str(vcd_path))
+    with pytest.raises(Exception, match='do not match signal pattern keys'):
+        vcd_reader.load_matched_waveforms(
+            'tb.u0.J_{state,next}[3:0]',   # keys: {('state',), ('next',)}
+            'tb.{tck,tms}',                 # keys: {('tck',), ('tms',)} — mismatch
+        )
+
+
 def test_value_change_to_waveform_sample_on_posedge():
     value_change = np.array([[0, 0], [5, 1], [10, 0]], dtype=np.uint64)
     clock_changes = np.array([[0, 0], [5, 1], [10, 0], [15, 1]], dtype=np.uint64)

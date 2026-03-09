@@ -119,29 +119,38 @@ class Reader:
         begin_time: int | None = None,
         end_time: int | None = None,
     ) -> dict[tuple[Any, ...], Waveform]:
-        clock_patterns = self.get_matched_signals(clock_pattern)
-        if not clock_patterns:
+        matched_clocks = self.get_matched_signals(clock_pattern)
+        if not matched_clocks:
             raise Exception(f'clock pattern {clock_pattern} can not match any signal')
-        if len(clock_patterns) > 1:
-            raise Exception(
-                f'clock pattern {clock_pattern} match more than one signal: {clock_patterns}'
-            )
-        clock_full_name = next(iter(clock_patterns.values()))
 
         matched_signals = self.get_matched_signals(pattern)
 
-        return {
-            k: self.load_waveform(
-                s,
-                clock_full_name,
-                xz_value=xz_value,
-                signed=signed,
-                sample_on_posedge=sample_on_posedge,
-                begin_time=begin_time,
-                end_time=end_time,
-            )
-            for k, s in matched_signals.items()
-        }
+        load_kwargs: dict[str, Any] = dict(
+            xz_value=xz_value,
+            signed=signed,
+            sample_on_posedge=sample_on_posedge,
+            begin_time=begin_time,
+            end_time=end_time,
+        )
+
+        if len(matched_clocks) == 1:
+            # Broadcast: single clock shared by all matched signals
+            clock_full_name = next(iter(matched_clocks.values()))
+            return {
+                k: self.load_waveform(s, clock_full_name, **load_kwargs)
+                for k, s in matched_signals.items()
+            }
+        else:
+            # Per-signal clock: keys must match exactly
+            if set(matched_clocks.keys()) != set(matched_signals.keys()):
+                raise Exception(
+                    f'clock pattern {clock_pattern!r} matched keys {sorted(matched_clocks.keys())} '
+                    f'which do not match signal pattern keys {sorted(matched_signals.keys())}'
+                )
+            return {
+                k: self.load_waveform(s, matched_clocks[k], **load_kwargs)
+                for k, s in matched_signals.items()
+            }
 
     @abstractmethod
     def close(self):
