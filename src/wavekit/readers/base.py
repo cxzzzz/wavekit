@@ -212,7 +212,7 @@ class Reader:
             matched_per_path.append((placeholder, path, matched))
 
         if mode == 'single':
-            for placeholder, path, matched in matched_per_path:
+            for _placeholder, path, matched in matched_per_path:
                 if len(matched) > 1:
                     raise ValueError(
                         f"path '{path}' matched {len(matched)} signals in mode='single',"
@@ -242,7 +242,7 @@ class Reader:
                 # All multi-match paths must share identical key sets
                 ref_ph, ref_p, ref_matched = multi_paths[0]
                 ref_keys = set(ref_matched.keys())
-                for ph, p, matched in multi_paths[1:]:
+                for _ph, p, matched in multi_paths[1:]:
                     if set(matched.keys()) != ref_keys:
                         raise ValueError(
                             f"inconsistent match keys between paths: "
