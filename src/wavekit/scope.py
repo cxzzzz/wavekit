@@ -14,6 +14,36 @@ from .signal import Signal
 
 
 class Scope:
+    """A node in the hierarchical scope tree of a waveform file.
+
+    Waveform formats (VCD, FSDB) organise signals in a tree of named scopes that
+    mirrors the RTL module hierarchy.  Each ``Scope`` node exposes the signals
+    declared at that level and the child scopes one level below.
+
+    The concrete implementations (``VcdScope``, ``FsdbScope``) are created
+    automatically by the corresponding :class:`~wavekit.readers.base.Reader`
+    and are returned via :meth:`~wavekit.readers.base.Reader.top_scope_list`.
+    You typically traverse scopes to resolve pattern-matched signal paths; for
+    direct signal loading use the Reader methods instead.
+
+    Attributes
+    ----------
+    name:
+        The local (non-qualified) scope name, e.g. ``"dut"``.
+    parent_scope:
+        Parent ``Scope`` node, or ``None`` for top-level scopes.
+
+    Abstract properties (implemented by subclasses)
+    -------------------------------------------------
+    signal_list:
+        All :class:`~wavekit.signal.Signal` objects declared in this scope
+        (not recursively).
+    child_scope_list:
+        Direct child :class:`Scope` nodes.
+    begin_time / end_time:
+        Simulation time boundaries for this scope (inherited from the file).
+    """
+
     def __init__(self, name: str):
         self.name = name
         self._module_cache: dict[str, list[Scope]] = {}
@@ -30,6 +60,16 @@ class Scope:
         pass
 
     def full_name(self, root: Scope | None = None) -> str:
+        """Return the fully-qualified dotted name of this scope.
+
+        Walks up the parent chain and joins names with ``"."``.
+
+        Parameters
+        ----------
+        root:
+            If provided, stop ascending at this ancestor scope so the returned
+            name is relative to *root* rather than the absolute top.
+        """
         ancestors: list[Scope] = []
         parent: Scope | None = self
         while parent is not None:

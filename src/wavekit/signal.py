@@ -4,6 +4,26 @@ from collections.abc import Callable
 
 
 class Signal:
+    """Metadata descriptor for a single hardware signal.
+
+    Stores the signal's full hierarchical name, bit-width, and signedness.
+    Width resolution is lazy: if ``width`` is not provided at construction time,
+    it is computed on first access via ``width_resolver`` (a callable that reads
+    the actual width from the underlying waveform file).  This avoids eagerly
+    querying file I/O for every signal in a large scope tree.
+
+    Attributes
+    ----------
+    name:
+        Full dotted signal path, e.g. ``"tb.dut.data_out[7:0]"``.
+    signed:
+        Whether the signal value should be interpreted as a two's-complement
+        signed integer.
+    width_resolver:
+        Optional zero-argument callable that returns the bit-width.  Only
+        called once; the result is cached in ``_width``.
+    """
+
     name: str
     signed: bool
     width_resolver: Callable[[], int] | None

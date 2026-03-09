@@ -20,6 +20,38 @@ from .value_change import value_change_to_value_array
 
 
 class Reader:
+    """Abstract base class for waveform file readers.
+
+    Concrete subclasses (:class:`~wavekit.VcdReader`,
+    :class:`~wavekit.FsdbReader`) implement the file-format-specific I/O;
+    all high-level analysis APIs are provided here.
+
+    Supports the context-manager protocol::
+
+        with VcdReader("sim.vcd") as r:
+            wave = r.load_waveform("tb.dut.data[7:0]", clock="tb.clk")
+
+    Signal path format
+    ------------------
+    All signal paths use dotted hierarchical notation matching the scope tree
+    in the waveform file, e.g. ``"tb.dut.sub.signal_name[7:0]"``.
+    If the bit-range suffix is omitted and the file stores the signal with a
+    range, the range is appended automatically.
+
+    Pattern syntax (used by :meth:`get_matched_signals`,
+    :meth:`load_matched_waveforms`, :meth:`eval`)
+    -------------------------------------------------
+    * ``{a,b,c}``     — matches ``a``, ``b``, or ``c``; captures each as a key.
+    * ``{0..7}``       — integer range 0 to 7 inclusive; step defaults to 1.
+    * ``{0..7..2}``    — integer range with explicit step (0, 2, 4, 6).
+    * ``@<regex>``     — prefix a path component with ``@`` to use a Python
+      regex instead of exact matching; capture groups ``(...)`` become tuple
+      elements in the result key.
+
+    All pattern expansions produce ``dict[tuple, str]`` where the tuple key
+    encodes the captured values and the value is the full signal path.
+    """
+
     def __init__(self):
         pass
 
@@ -42,7 +74,41 @@ class Reader:
         begin_time: int | None = None,
         end_time: int | None = None,
     ) -> Waveform:
-        pass
+        """Load a single signal as a clock-synchronised :class:`~wavekit.Waveform`.
+
+        The signal is sampled on every **negedge** of *clock* by default
+        (i.e. the value is captured at each falling edge of the clock, which
+        reflects the value that was stable during the preceding high phase).
+        Set ``sample_on_posedge=True`` to sample on rising edges instead.
+
+        Parameters
+        ----------
+        signal:
+            Full dotted path of the signal, optionally including a bit-range
+            suffix, e.g. ``"tb.dut.data[7:0]"`` or ``"tb.dut.data"``.
+        clock:
+            Full dotted path of the clock signal, e.g. ``"tb.clk"``.
+        xz_value:
+            Integer substituted for ``X`` and ``Z`` values in the file.
+            Defaults to ``0``.
+        signed:
+            If ``True``, the loaded values are interpreted as two's-complement
+            signed integers.
+        sample_on_posedge:
+            If ``True``, sample on rising clock edges; otherwise on falling
+            edges (default).
+        begin_time:
+            Simulation time to start loading from (inclusive).  ``None`` means
+            start of simulation.
+        end_time:
+            Simulation time to stop loading at (exclusive).  ``None`` means
+            end of simulation.
+
+        Returns
+        -------
+        Waveform:
+            One sample per clock edge within the requested time range.
+        """
 
     @abstractmethod
     def get_signal_width(self, signal: str) -> int:
@@ -74,12 +140,41 @@ class Reader:
 
     @abstractmethod
     def top_scope_list(self) -> Sequence[Scope]:
-        pass
+        """Return the top-level :class:`~wavekit.scope.Scope` nodes of the file.
+
+        Each element corresponds to one root module in the waveform hierarchy
+        (typically just one, e.g. the testbench).  Traverse the tree via
+        :attr:`~wavekit.scope.Scope.child_scope_list` and
+        :attr:`~wavekit.scope.Scope.signal_list` for custom scope inspection.
+        """
 
     def get_matched_signals(
         self,
         pattern: str,
     ) -> dict[tuple[Any, ...], str]:
+        """Return all signals whose paths match *pattern*, keyed by captured values.
+
+        Traverses the full scope tree and applies the pattern (brace expansion
+        or ``@`` regex) to each level.  See the class docstring for pattern
+        syntax details.
+
+        Parameters
+        ----------
+        pattern:
+            Signal path pattern, e.g. ``"tb.dut.fifo_{0..3}.w_ptr[2:0]"`` or
+            ``r"tb.dut.@([a-z]+)_valid"``.
+
+        Returns
+        -------
+        dict[tuple, str]:
+            Maps each captured key tuple to the fully-qualified signal path.
+            For patterns without capture groups the key is ``()``.
+
+        Raises
+        ------
+        Exception:
+            If two different signals resolve to the same key.
+        """
         def combine_dict(
             dict1: dict[tuple[Any, ...], str],
             dict2: dict[tuple[Any, ...], str],
@@ -119,6 +214,50 @@ class Reader:
         begin_time: int | None = None,
         end_time: int | None = None,
     ) -> dict[tuple[Any, ...], Waveform]:
+        """Batch-load all signals matching *pattern*, each paired with its clock.
+
+        Internally calls :meth:`get_matched_signals` for both *pattern* and
+        *clock_pattern*, then dispatches :meth:`load_waveform` for every match.
+
+        Clock assignment rules:
+
+        * **Single clock** — if *clock_pattern* matches exactly one signal, that
+          clock is broadcast to all matched signals.
+        * **Per-signal clock** — if *clock_pattern* matches multiple signals,
+          its key set must equal the key set of *pattern* exactly; each signal
+          is paired with the clock sharing the same key.
+
+        Parameters
+        ----------
+        pattern:
+            Signal path pattern (brace/regex).  See class docstring.
+        clock_pattern:
+            Clock signal path or pattern.  Must match at least one signal.
+        xz_value, signed, sample_on_posedge, begin_time, end_time:
+            Forwarded to :meth:`load_waveform` for every loaded signal.
+
+        Returns
+        -------
+        dict[tuple, Waveform]:
+            Same keys as :meth:`get_matched_signals` on *pattern*.
+
+        Raises
+        ------
+        Exception:
+            If *clock_pattern* matches no signals, or if per-signal clock keys
+            do not match signal keys.
+
+        Example
+        -------
+        ::
+
+            # Load J_state and J_next sharing a single clock
+            waves = reader.load_matched_waveforms(
+                "tb.u0.J_{state,next}[3:0]",
+                clock_pattern="tb.tck",
+            )
+            # waves == { ('state',): Waveform, ('next',): Waveform }
+        """
         matched_clocks = self.get_matched_signals(clock_pattern)
         if not matched_clocks:
             raise Exception(f'clock pattern {clock_pattern} can not match any signal')
