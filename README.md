@@ -57,7 +57,7 @@ with VcdReader("jtag.vcd") as f:
     # Returns: { ('state',): Waveform(...), ('next',): Waveform(...) }
     waves = f.load_matched_waveforms(
         "tb.u0.J_{state,next}[3:0]",
-        clock="tb.tck"
+        clock_pattern="tb.tck"
     )
 
     for (suffix,), wave in waves.items():
@@ -75,7 +75,7 @@ with VcdReader("jtag.vcd") as f:
     regex_pattern = r"tb.u0.@J_([a-z]+)"
 
     # Returns: { ('state',): Waveform(...), ('next',): Waveform(...) }
-    waves = f.load_matched_waveforms(regex_pattern, clock="tb.tck")
+    waves = f.load_matched_waveforms(regex_pattern, clock_pattern="tb.tck")
 
     for (name_part,), wave in waves.items():
         print(f"Matched: {name_part}")
