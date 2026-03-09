@@ -137,8 +137,8 @@ def test_vcd_reader_clock_pattern_key_mismatch_error(vcd_path):
     vcd_reader = VcdReader(str(vcd_path))
     with pytest.raises(Exception, match='do not match signal pattern keys'):
         vcd_reader.load_matched_waveforms(
-            'tb.u0.J_{state,next}[3:0]',   # keys: {('state',), ('next',)}
-            'tb.{tck,tms}',                 # keys: {('tck',), ('tms',)} — mismatch
+            'tb.u0.J_{state,next}[3:0]',  # keys: {('state',), ('next',)}
+            'tb.{tck,tms}',  # keys: {('tck',), ('tms',)} — mismatch
         )
 
 

@@ -231,12 +231,8 @@ class Reader:
                 ) from exc
 
         elif mode == 'zip':
-            multi_paths = [
-                (ph, p, m) for ph, p, m in matched_per_path if len(m) > 1
-            ]
-            single_paths = [
-                (ph, p, m) for ph, p, m in matched_per_path if len(m) == 1
-            ]
+            multi_paths = [(ph, p, m) for ph, p, m in matched_per_path if len(m) > 1]
+            single_paths = [(ph, p, m) for ph, p, m in matched_per_path if len(m) == 1]
 
             if multi_paths:
                 # All multi-match paths must share identical key sets
@@ -245,7 +241,7 @@ class Reader:
                 for _ph, p, matched in multi_paths[1:]:
                     if set(matched.keys()) != ref_keys:
                         raise ValueError(
-                            f"inconsistent match keys between paths: "
+                            f'inconsistent match keys between paths: '
                             f"'{ref_p}' has keys {sorted(ref_keys)}, "
                             f"'{p}' has keys {sorted(matched.keys())}"
                         )

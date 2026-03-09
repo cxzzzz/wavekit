@@ -16,10 +16,10 @@ import re
 # handled as a Python subscript on the Waveform object (i.e. bit-slicing).
 _WAVE_PATH_RE = re.compile(
     r'(?P<path>'
-    r'(?:[$]{1,2}|@)?'                      # optional prefix $$ / $ / @
-    r'(?:[A-Za-z_][A-Za-z0-9_]*)'           # first identifier segment
+    r'(?:[$]{1,2}|@)?'  # optional prefix $$ / $ / @
+    r'(?:[A-Za-z_][A-Za-z0-9_]*)'  # first identifier segment
     r'(?:[.][A-Za-z_][A-Za-z0-9_{}.,]*)*'  # dot-separated segments (allow braces, no [ ])
-    r'(?:\[\d+(?::\d+)?\])?'               # optional trailing [N:M] or [N] range
+    r'(?:\[\d+(?::\d+)?\])?'  # optional trailing [N:M] or [N] range
     r')'
 )
 
