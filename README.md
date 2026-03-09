@@ -128,6 +128,63 @@ with VcdReader("bus_tb.vcd") as f:
     print(f"First valid data: {hex(valid_data.value[0])}")
 ```
 
+### Expression Evaluation
+
+Use `eval` to compute waveform expressions directly from signal path strings, without manually loading each signal.
+
+**Single mode** — all paths match exactly one signal, returns a single `Waveform`:
+
+```python
+from wavekit import VcdReader
+
+with VcdReader("fifo_tb.vcd") as f:
+    clock = "fifo_tb.clk"
+
+    # Equivalent to loading w_ptr and r_ptr separately and computing the difference
+    occupancy = f.eval(
+        "fifo_tb.s_fifo.w_ptr[2:0] - fifo_tb.s_fifo.r_ptr[2:0]",
+        clock=clock,
+    )
+    print(f"Occupancy width: {occupancy.width}")
+```
+
+Bit-slicing on the expression result is also supported:
+
+```python
+    # Load a 4-bit signal and slice out the lower 2 bits
+    low_bits = f.eval("tb.dut.data[3:0][1:0]", clock=clock)
+    assert low_bits.width == 2
+```
+
+**Zip mode** — paths with brace/regex patterns expand to multiple signals; the expression is evaluated once per matched key and a `dict` is returned:
+
+```python
+with VcdReader("multi_fifo_tb.vcd") as f:
+    clock = "tb.clk"
+
+    # Evaluate occupancy for fifo_0, fifo_1, fifo_2, fifo_3 in one call
+    # Returns: { (0,): Waveform, (1,): Waveform, (2,): Waveform, (3,): Waveform }
+    occupancies = f.eval(
+        "tb.fifo_{0..3}.w_ptr[2:0] - tb.fifo_{0..3}.r_ptr[2:0]",
+        clock=clock,
+        mode="zip",
+    )
+
+    for (idx,), wave in occupancies.items():
+        print(f"fifo_{idx} occupancy width: {wave.width}")
+```
+
+Single-match paths in zip mode are **broadcast** — the same waveform is reused across all keys:
+
+```python
+    # base_offset matches one signal; it is reused for every fifo index
+    adjusted = f.eval(
+        "tb.fifo_{0..3}.w_ptr[2:0] - tb.dut.base_offset[2:0]",
+        clock=clock,
+        mode="zip",
+    )
+```
+
 ## 🛠️ Development
 
 This project adheres to strict code quality standards using modern Python tooling:
