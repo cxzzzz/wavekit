@@ -141,12 +141,20 @@ class FsdbReader(Reader):
         if end_cycle is not None:
             end_time = int(clock_edge_times[end_cycle])
 
-        begin_time_actual = begin_time or 0
-        end_time_actual = end_time or 2**64 - 1
+        begin_time_actual = begin_time if begin_time is not None else 0
+        end_time_actual = end_time if end_time is not None else 2**64 - 1
 
-        # clock_offset = number of sampling edges before begin_time
+        # Compute clock_offset = number of sampling edges before begin_time_actual
         clock_offset = int(np.searchsorted(clock_edge_times, begin_time_actual, side='left'))
 
+        # Trim clock to window [begin_time_actual, end_time_actual] to reduce memory in value_change
+        clock_mask = all_clock_changes[:, 0] >= begin_time_actual
+        if end_time is not None:
+            clock_mask &= all_clock_changes[:, 0] <= end_time_actual
+        windowed_clock_changes = all_clock_changes[clock_mask]
+
+        # Load signal within the requested window only (FSDB NPI provides the
+        # correct initial value at begin_time even if the last change was earlier)
         signal_value_change = self.file_handle.load_value_change(
             signal_path,
             begin_time=begin_time_actual,
@@ -154,14 +162,21 @@ class FsdbReader(Reader):
             xz_value=xz_value,
         )
 
-        return self.value_change_to_waveform(
+        full_wave = self.value_change_to_waveform(
             signal_value_change,
-            all_clock_changes,
+            windowed_clock_changes,
             width=self.file_handle.get_signal_width(signal_path),
             signed=signed,
             sample_on_posedge=sample_on_posedge,
             signal=signal_path,
             clock_offset=clock_offset,
+        )
+
+        # time_slice trims the garbage samples produced by clock edges before
+        # begin_time (where the windowed signal data hasn't started yet)
+        return full_wave.time_slice(
+            begin_time_actual if begin_time is not None else None,
+            end_time if end_time is not None else None,
         )
 
     def top_scope_list(self) -> Sequence[Scope]:

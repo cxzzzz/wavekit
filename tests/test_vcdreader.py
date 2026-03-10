@@ -264,3 +264,116 @@ def test_eval_no_match_raises(vcd_path):
     with VcdReader(str(vcd_path)) as reader:
         with pytest.raises(ValueError, match='matched no signals'):
             reader.eval('tb.u0.nonexistent_signal', clock='tb.tck')
+
+
+# ------------------------------------------------------------------
+# begin_time / end_time / begin_cycle / end_cycle tests
+# ------------------------------------------------------------------
+
+
+def test_load_waveform_begin_end_time(vcd_path):
+    with VcdReader(str(vcd_path)) as reader:
+        full = reader.load_waveform('tb.u0.J_state[3:0]', clock='tb.tck')
+        windowed = reader.load_waveform(
+            'tb.u0.J_state[3:0]', clock='tb.tck', begin_time=105, end_time=205
+        )
+
+    # Windowed result should be a strict subset of the full waveform
+    assert len(windowed.value) == 10
+    assert windowed.time[0] == 105
+    assert windowed.time[-1] == 195
+    # Clock values are absolute: cycle 10 is at time 105 (negedge 0 at t=5, period=10)
+    assert windowed.clock[0] == 10
+    assert windowed.clock[-1] == 19
+    # Values should match the corresponding slice of the full waveform
+    assert np.array_equal(windowed.value, full.value[10:20])
+
+
+def test_load_waveform_begin_end_cycle(vcd_path):
+    with VcdReader(str(vcd_path)) as reader:
+        full = reader.load_waveform('tb.u0.J_state[3:0]', clock='tb.tck')
+        windowed = reader.load_waveform(
+            'tb.u0.J_state[3:0]', clock='tb.tck', begin_cycle=10, end_cycle=20
+        )
+
+    assert len(windowed.value) == 10
+    assert windowed.clock[0] == 10
+    assert windowed.clock[-1] == 19
+    assert np.array_equal(windowed.value, full.value[10:20])
+
+
+def test_load_waveform_cycle_equals_time_window(vcd_path):
+    # begin_cycle=20 / end_cycle=30 should produce identical results to the
+    # corresponding begin_time / end_time window (cycle 20 is at time 205)
+    with VcdReader(str(vcd_path)) as reader:
+        full = reader.load_waveform('tb.u0.J_state[3:0]', clock='tb.tck')
+        by_time = reader.load_waveform(
+            'tb.u0.J_state[3:0]', clock='tb.tck', begin_time=205, end_time=305
+        )
+        by_cycle = reader.load_waveform(
+            'tb.u0.J_state[3:0]', clock='tb.tck', begin_cycle=20, end_cycle=30
+        )
+
+    assert np.array_equal(by_time.value, by_cycle.value)
+    assert np.array_equal(by_time.clock, by_cycle.clock)
+    assert np.array_equal(by_time.time, by_cycle.time)
+    assert np.array_equal(by_cycle.value, full.value[20:30])
+
+
+def test_load_waveform_mutually_exclusive_begin(vcd_path):
+    with VcdReader(str(vcd_path)) as reader:
+        with pytest.raises(ValueError, match='mutually exclusive'):
+            reader.load_waveform(
+                'tb.u0.J_state[3:0]', clock='tb.tck',
+                begin_time=100, begin_cycle=10,
+            )
+
+
+def test_load_waveform_mutually_exclusive_end(vcd_path):
+    with VcdReader(str(vcd_path)) as reader:
+        with pytest.raises(ValueError, match='mutually exclusive'):
+            reader.load_waveform(
+                'tb.u0.J_state[3:0]', clock='tb.tck',
+                end_time=200, end_cycle=20,
+            )
+
+
+def test_value_change_to_waveform_clock_offset():
+    # Verify that clock_offset shifts the .clock array to start from a given value
+    value_change = np.array([[0, 0], [5, 1], [10, 0]], dtype=np.uint64)
+    clock_changes = np.array([[0, 0], [5, 1], [10, 0], [15, 1]], dtype=np.uint64)
+
+    wave_no_offset = Reader.value_change_to_waveform(
+        value_change, clock_changes, width=1, signed=False,
+        sample_on_posedge=True, signal='tb.sig',
+    )
+    wave_with_offset = Reader.value_change_to_waveform(
+        value_change, clock_changes, width=1, signed=False,
+        sample_on_posedge=True, signal='tb.sig', clock_offset=50,
+    )
+
+    assert np.all(wave_no_offset.clock == np.array([0, 1]))
+    assert np.all(wave_with_offset.clock == np.array([50, 51]))
+    # Values are the same regardless of offset
+    assert np.array_equal(wave_no_offset.value, wave_with_offset.value)
+
+
+def test_cycle_slice(vcd_path):
+    with VcdReader(str(vcd_path)) as reader:
+        full = reader.load_waveform('tb.u0.J_state[3:0]', clock='tb.tck')
+
+    sliced = full.cycle_slice(10, 20)
+    assert len(sliced.value) == 10
+    assert sliced.clock[0] == 10
+    assert sliced.clock[-1] == 19
+    assert np.array_equal(sliced.value, full.value[10:20])
+
+
+def test_cycle_slice_include_end(vcd_path):
+    with VcdReader(str(vcd_path)) as reader:
+        full = reader.load_waveform('tb.u0.J_state[3:0]', clock='tb.tck')
+
+    sliced = full.cycle_slice(10, 20, include_end=True)
+    assert len(sliced.value) == 11
+    assert sliced.clock[-1] == 20
+
