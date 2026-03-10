@@ -1,55 +1,49 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from dataclasses import dataclass
 
 
+@dataclass
 class Signal:
     """Metadata descriptor for a single hardware signal.
 
-    Stores the signal's full hierarchical name, bit-width, and signedness.
-    Width resolution is lazy: if ``width`` is not provided at construction time,
-    it is computed on first access via ``width_resolver`` (a callable that reads
-    the actual width from the underlying waveform file).  This avoids eagerly
-    querying file I/O for every signal in a large scope tree.
+    Stores the signal's local name, full hierarchical path, bit-width,
+    declared bit-range, and signedness.
 
     Attributes
     ----------
     name:
-        Full dotted signal path, e.g. ``"tb.dut.data_out[7:0]"``.
+        Local signal identifier as it appears within its parent scope,
+        matching the form used in the waveform file.  May include a range
+        suffix when the file stores the signal with one, e.g. ``"data[7:0]"``
+        or ``"mem[3][7:0]"``.  Scalar signals have no suffix, e.g. ``"clk"``.
+        Invariant: ``full_name == parent_scope_path + "." + name``.
+    full_name:
+        Complete hierarchical signal path, e.g. ``"tb.dut.data[7:0]"`` or
+        ``"tb.dut.mem[3][7:0]"``.  Equal to ``parent_scope_path + "." + name``.
+        Pass this directly to :meth:`~wavekit.readers.base.Reader.load_waveform`.
+    width:
+        Bit-width of the signal, e.g. ``8`` for ``[7:0]``.  ``None`` if not
+        yet resolved.
+    range:
+        The declared or user-requested bit-range of the signal as a
+        ``(high, low)`` integer tuple, e.g. ``(7, 0)`` for ``[7:0]``.
+        For single-bit selection ``[n]`` this is stored as ``(n, n)``.
+        ``None`` if the signal is scalar or the format does not expose
+        range information.
     signed:
         Whether the signal value should be interpreted as a two's-complement
-        signed integer.
-    width_resolver:
-        Optional zero-argument callable that returns the bit-width.  Only
-        called once; the result is cached in ``_width``.
+        signed integer.  Defaults to ``False``.
     """
 
     name: str
-    signed: bool
-    width_resolver: Callable[[], int] | None
-    _width: int | None
-
-    def __init__(
-        self,
-        name: str,
-        width: int | None,
-        signed: bool,
-        width_resolver: Callable[[], int] | None = None,
-    ):
-        self.name = name
-        self._width = width
-        self.signed = signed
-        self.width_resolver = width_resolver
-
-    @property
-    def width(self) -> int | None:
-        if self._width is None and self.width_resolver is not None:
-            self._width = self.width_resolver()
-        return self._width
-
-    @width.setter
-    def width(self, value: int | None):
-        self._width = value
+    full_name: str
+    width: int | None
+    range: tuple[int, int] | None
+    signed: bool = False
 
     def __str__(self) -> str:
-        return f"Signal(name='{self.name}', width={self.width}, signed={self.signed})"
+        return (
+            f"Signal(name='{self.name}', full_name='{self.full_name}', "
+            f"width={self.width}, signed={self.signed}, range={self.range})"
+        )

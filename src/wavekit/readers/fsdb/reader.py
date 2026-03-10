@@ -23,17 +23,21 @@ class FsdbScope(Scope):
     @cached_property
     def signal_list(self) -> Sequence[Signal]:
         full_scope_name = self.full_name()
-        return [
-            Signal(
-                name=s,
-                width=None,
-                signed=False,
-                width_resolver=lambda signal_name=f'{full_scope_name}.{s}': (
-                    self.reader.get_signal_width(signal_name)
-                ),
+        signals = []
+        for s in self.handle.signal_list():
+            signal_path = f'{full_scope_name}.{s}'
+            width = self.reader._get_signal_width(signal_path)
+            rng = self.reader._get_signal_range(signal_path)
+            signals.append(
+                Signal(
+                    name=s,
+                    full_name=signal_path,
+                    width=width,
+                    range=rng,
+                    signed=False,
+                )
             )
-            for s in self.handle.signal_list()
-        ]
+        return signals
 
     @cached_property
     def child_scope_list(self) -> Sequence[Scope]:
@@ -107,26 +111,29 @@ class FsdbReader(Reader):
 
     def load_waveform(
         self,
-        signal: str,
-        clock: str,
+        signal: Signal | str,
+        clock: Signal | str,
         xz_value: int = 0,
         signed: bool = False,
         sample_on_posedge: bool = False,
         begin_time: int | None = None,
         end_time: int | None = None,
     ) -> Waveform:
+        signal_path = signal.full_name if isinstance(signal, Signal) else signal
+        clock_path = clock.full_name if isinstance(clock, Signal) else clock
+
         begin_time = begin_time or 0
         end_time = end_time or 2**64 - 1
 
         signal_value_change = self.file_handle.load_value_change(
-            signal,
+            signal_path,
             begin_time=begin_time,
             end_time=end_time,
             xz_value=xz_value,
         )
 
         clock_value_change = self.file_handle.load_value_change(
-            clock,
+            clock_path,
             begin_time=begin_time,
             end_time=end_time,
             xz_value=0,
@@ -135,10 +142,10 @@ class FsdbReader(Reader):
         return self.value_change_to_waveform(
             signal_value_change,
             clock_value_change,
-            width=self.file_handle.get_signal_width(signal),
+            width=self.file_handle.get_signal_width(signal_path),
             signed=signed,
             sample_on_posedge=sample_on_posedge,
-            signal=signal,
+            signal=signal_path,
         )
 
     def top_scope_list(self) -> Sequence[Scope]:
@@ -148,10 +155,10 @@ class FsdbReader(Reader):
             ]
         return self._top_scope_list
 
-    def get_signal_width(self, signal: str) -> int:
+    def _get_signal_width(self, signal: str) -> int:
         return self.file_handle.get_signal_width(signal)
 
-    def get_signal_range(self, signal: str) -> tuple[int]:
+    def _get_signal_range(self, signal: str) -> tuple[int, int]:
         return self.file_handle.get_signal_range(signal)
 
     @property

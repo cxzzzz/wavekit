@@ -8,7 +8,7 @@ def build_waveform(values, width, signed=False):
     value = np.array(values)
     clock = np.arange(len(value))
     time = clock * 10
-    return Waveform(value, clock, time, signal=Signal('', width, signed))
+    return Waveform(value, clock, time, signal=Signal('', '', width, None, signed))
 
 
 # ==========================================
@@ -18,7 +18,7 @@ def build_waveform(values, width, signed=False):
 
 def test_metadata_and_copy():
     wave = build_waveform([1, 2, 3], width=8, signed=False)
-    assert str(wave) == "Waveform(Signal(name='', width=8, signed=False))"
+    assert str(wave) == "Waveform(Signal(name='', full_name='', width=8, signed=False, range=None))"
     wave.name = 'tb.u0.sig'
     assert wave.name == 'tb.u0.sig'
 
@@ -247,7 +247,7 @@ def test_mask_with_waveform():
         value=mask_vals,
         clock=wave.clock,
         time=wave.time,
-        signal=Signal('', 1, False),
+        signal=Signal('', '', 1, None, False),
     )
     masked = wave.mask(mask_wave)
     assert np.all(masked.value == np.array([2, 4]))
