@@ -6,6 +6,8 @@ from collections.abc import Sequence
 from functools import cached_property
 from typing import Any
 
+import numpy as np
+
 from ...scope import Scope
 from ...signal import Signal
 from ...waveform import Waveform
@@ -67,14 +69,6 @@ class FsdbScope(Scope):
             self.preload_module_scope()
         return self._preloaded_module_scope[module_name]
 
-    @property
-    def begin_time(self) -> int:
-        return self.parent_scope.begin_time if self.parent_scope else 0
-
-    @property
-    def end_time(self) -> int:
-        return self.parent_scope.end_time if self.parent_scope else 0
-
     def preload_module_scope(self):
         if isinstance(self.handle, NpiFsdbSignalScope):
             return {}
@@ -118,34 +112,56 @@ class FsdbReader(Reader):
         sample_on_posedge: bool = False,
         begin_time: int | None = None,
         end_time: int | None = None,
+        begin_cycle: int | None = None,
+        end_cycle: int | None = None,
     ) -> Waveform:
+        if begin_time is not None and begin_cycle is not None:
+            raise ValueError("begin_time and begin_cycle are mutually exclusive")
+        if end_time is not None and end_cycle is not None:
+            raise ValueError("end_time and end_cycle are mutually exclusive")
+
         signal_path = signal.full_name if isinstance(signal, Signal) else signal
         clock_path = clock.full_name if isinstance(clock, Signal) else clock
 
-        begin_time = begin_time or 0
-        end_time = end_time or 2**64 - 1
+        # Always load the full clock to compute absolute cycle numbers
+        all_clock_changes = self.file_handle.load_value_change(
+            clock_path,
+            begin_time=0,
+            end_time=2**64 - 1,
+            xz_value=0,
+        )
+
+        # Determine clock edge timestamps for the sampling edge
+        sample_value = 1 if sample_on_posedge else 0
+        clock_edge_times = all_clock_changes[all_clock_changes[:, 1] == sample_value, 0]
+
+        # Convert begin_cycle/end_cycle to begin_time/end_time
+        if begin_cycle is not None:
+            begin_time = int(clock_edge_times[begin_cycle])
+        if end_cycle is not None:
+            end_time = int(clock_edge_times[end_cycle])
+
+        begin_time_actual = begin_time or 0
+        end_time_actual = end_time or 2**64 - 1
+
+        # clock_offset = number of sampling edges before begin_time
+        clock_offset = int(np.searchsorted(clock_edge_times, begin_time_actual, side='left'))
 
         signal_value_change = self.file_handle.load_value_change(
             signal_path,
-            begin_time=begin_time,
-            end_time=end_time,
+            begin_time=begin_time_actual,
+            end_time=end_time_actual,
             xz_value=xz_value,
-        )
-
-        clock_value_change = self.file_handle.load_value_change(
-            clock_path,
-            begin_time=begin_time,
-            end_time=end_time,
-            xz_value=0,
         )
 
         return self.value_change_to_waveform(
             signal_value_change,
-            clock_value_change,
+            all_clock_changes,
             width=self.file_handle.get_signal_width(signal_path),
             signed=signed,
             sample_on_posedge=sample_on_posedge,
             signal=signal_path,
+            clock_offset=clock_offset,
         )
 
     def top_scope_list(self) -> Sequence[Scope]:

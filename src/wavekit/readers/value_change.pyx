@@ -44,7 +44,8 @@ def str_value_change_to_int_value_change_uint64(list[tuple[int, str]] int_str_li
 def value_change_to_value_array_uint64(
         np.ndarray[np.uint64_t, ndim=2] value_change,
         np.ndarray[np.uint64_t, ndim=2] clock_changes,
-        bint sample_on_posedge
+        bint sample_on_posedge,
+        unsigned long clock_offset = 0
     )-> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
         cdef np.ndarray[np.uint64_t, ndim=1] value_time = value_change[:,0]
@@ -57,7 +58,7 @@ def value_change_to_value_array_uint64(
         cdef np.ndarray[np.uint64_t, ndim=1] time_res = np.zeros([clock.size], dtype=np.uint64)
 
         cdef int sample_clock_value = 1 if sample_on_posedge else 0
-        cdef unsigned long vidx = 0, cidx = 0 , ccnt = 0
+        cdef unsigned long vidx = 0, cidx = 0, ccnt = 0
         cdef unsigned long crange = clock.size, vrange = value.size
         cdef unsigned long cvalue, ctime
         for cidx in range(crange):
@@ -67,7 +68,7 @@ def value_change_to_value_array_uint64(
                 while vidx + 1 < vrange and value_time[vidx + 1] <= ctime:
                     vidx += 1
                 value_res[ccnt]=value[vidx]
-                clock_res[ccnt]=ccnt
+                clock_res[ccnt]=clock_offset + ccnt
                 time_res[ccnt]=ctime
                 ccnt += 1
 
@@ -80,7 +81,8 @@ def value_change_to_value_array_uint64(
 def value_change_to_value_array_object(
         np.ndarray value_change,
         np.ndarray[np.uint64_t, ndim=2] clock_changes,
-        bint sample_on_posedge
+        bint sample_on_posedge,
+        unsigned long clock_offset = 0
     )-> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
         cdef np.ndarray[object, ndim=1] value = value_change[:,1]
@@ -93,7 +95,7 @@ def value_change_to_value_array_object(
         cdef np.ndarray[np.uint64_t, ndim=1] time_res = np.zeros([clock.size], dtype=np.uint64)
 
         cdef int sample_clock_value = 1 if sample_on_posedge else 0
-        cdef unsigned long vidx = 0, cidx = 0 , ccnt = 0
+        cdef unsigned long vidx = 0, cidx = 0, ccnt = 0
         cdef unsigned long crange = clock.size, vrange = value.size
         cdef unsigned long cvalue, ctime
         for cidx in range(crange):
@@ -103,7 +105,7 @@ def value_change_to_value_array_object(
                 while vidx + 1 < vrange and value_time[vidx + 1] <= ctime:
                     vidx += 1
                 value_res[ccnt]=value[vidx]
-                clock_res[ccnt]=ccnt
+                clock_res[ccnt]=clock_offset + ccnt
                 time_res[ccnt]=ctime
                 ccnt += 1
 
@@ -114,9 +116,10 @@ def value_change_to_value_array_object(
 def value_change_to_value_array(
     np.ndarray value_change,
     np.ndarray clock_changes,
-    bint sample_on_posedge
+    bint sample_on_posedge,
+    unsigned long clock_offset = 0
 ):
     if value_change.dtype == np.object_:
-        return value_change_to_value_array_object(value_change, clock_changes, sample_on_posedge)
+        return value_change_to_value_array_object(value_change, clock_changes, sample_on_posedge, clock_offset)
     else:
-        return value_change_to_value_array_uint64(value_change, clock_changes, sample_on_posedge)
+        return value_change_to_value_array_uint64(value_change, clock_changes, sample_on_posedge, clock_offset)

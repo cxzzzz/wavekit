@@ -1193,6 +1193,55 @@ class Waveform:
             signal=dataclasses.replace(self.signal),
         )
 
+    def cycle_slice(
+        self,
+        begin_cycle: int | None = None,
+        end_cycle: int | None = None,
+        include_end: bool = False,
+    ) -> Waveform:
+        """Return a new Waveform trimmed to the given absolute clock cycle range.
+
+        Uses binary search on the sorted ``clock`` array so the operation is
+        O(log n) regardless of waveform length.  The ``clock`` values are
+        absolute cycle numbers from the start of simulation (not relative to
+        this waveform's window), so the same cycle number means the same
+        simulation instant across different waveforms.
+
+        Parameters
+        ----------
+        begin_cycle:
+            First clock cycle to include (inclusive).  Defaults to the first
+            sample's cycle number.
+        end_cycle:
+            Last clock cycle.  Exclusive by default; set ``include_end=True``
+            to make it inclusive.
+        include_end:
+            If ``True``, samples exactly at *end_cycle* are included.
+
+        See Also
+        --------
+        time_slice : slice by simulation timestamp instead of cycle number.
+
+        Example
+        -------
+        ::
+
+            # Analyse cycles 100 to 199 (exclusive end)
+            window = wave.cycle_slice(100, 200)
+        """
+        if begin_cycle is None:
+            begin_cycle = int(self.clock[0])
+        if end_cycle is None:
+            end_cycle = int(self.clock[-1]) + 1
+        start_idx = np.searchsorted(self.clock, begin_cycle, side='left')
+        end_idx = np.searchsorted(self.clock, end_cycle, side='right' if include_end else 'left')
+        return Waveform(
+            value=self.value[start_idx:end_idx],
+            clock=self.clock[start_idx:end_idx],
+            time=self.time[start_idx:end_idx],
+            signal=dataclasses.replace(self.signal),
+        )
+
     def slice(self, begin_idx: int, end_idx: int, include_end: bool = False) -> Waveform:
         """Return a new Waveform trimmed to the given sample index range.
 

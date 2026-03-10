@@ -51,8 +51,12 @@ Load one signal, sampled on every clock edge.
 | `xz_value` | `int` | `0` | Value substituted for X/Z states. |
 | `signed` | `bool` | `False` | Interpret values as two's-complement signed. |
 | `sample_on_posedge` | `bool` | `False` | `False` = sample on negedge (default); `True` = posedge. |
-| `begin_time` | `int\|None` | `None` | Start of time window (inclusive, file time units). |
-| `end_time` | `int\|None` | `None` | End of time window (exclusive). |
+| `begin_time` | `int\|None` | `None` | Start of time window (inclusive, file time units). Mutually exclusive with `begin_cycle`. |
+| `end_time` | `int\|None` | `None` | End of time window (exclusive). Mutually exclusive with `end_cycle`. |
+| `begin_cycle` | `int\|None` | `None` | Start of window as absolute clock cycle number (inclusive). Mutually exclusive with `begin_time`. |
+| `end_cycle` | `int\|None` | `None` | End of window as absolute clock cycle number (exclusive). Mutually exclusive with `end_time`. |
+
+**Clock cycle semantics**: the `.clock` array in every `Waveform` holds **absolute** cycle numbers counted from the start of simulation (cycle 0 = first sampling edge in the file). The clock signal is always loaded in full so cycle numbers are consistent across multiple `load_waveform` calls, regardless of `begin_time`/`begin_cycle`.
 
 ---
 
@@ -141,7 +145,7 @@ Every operation returns a **new** `Waveform`; none mutate in place.
 | Property | Type | Description |
 |----------|------|-------------|
 | `.value` | `ndarray` | Signal values (int64 / uint64 / object for >64-bit) |
-| `.clock` | `ndarray` | Clock edge counter per sample |
+| `.clock` | `ndarray` | Clock edge counter per sample — **absolute** cycle number from start of simulation (cycle 0 = first sampling edge in file) |
 | `.time` | `ndarray` | Simulation timestamp per sample |
 | `.width` | `int\|None` | Bit-width of the signal |
 | `.signed` | `bool` | Whether values are two's-complement signed |
@@ -156,6 +160,7 @@ Every operation returns a **new** `Waveform`; none mutate in place.
 | `wave.filter(fn)` | Keep samples where scalar `fn(value)` returns True |
 | `wave.vectorized_filter(fn)` | Same but `fn` receives the whole array |
 | `wave.time_slice(begin, end)` | Trim to simulation time range (binary search) |
+| `wave.cycle_slice(begin, end)` | Trim to absolute clock cycle range (binary search on `.clock`) |
 | `wave.slice(begin_idx, end_idx)` | Trim by array index range |
 | `wave.take(indices)` | Select samples at integer index positions |
 
@@ -224,7 +229,11 @@ Every operation returns a **new** `Waveform`; none mutate in place.
 5. **Width > 64**: stored as Python `object` arrays; arithmetic still works but
    is slower.
 6. **Time units**: `begin_time` / `end_time` are in the file's native simulator
-   time unit (no automatic conversion).
+   time unit (no automatic conversion).  Use `begin_cycle` / `end_cycle` for
+   clock-cycle-based windowing (mutually exclusive with time parameters).
+7. **Absolute cycle numbers**: `.clock` values are always absolute from simulation
+   start, so two waveforms loaded with different `begin_time` windows can still
+   be compared by `.clock` value for alignment.
 
 ---
 

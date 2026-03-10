@@ -43,8 +43,6 @@ class Scope:
         (not recursively).
     child_scope_list:
         Direct child :class:`Scope` nodes.
-    begin_time / end_time:
-        Simulation time boundaries for this scope (inherited from the file).
     """
 
     def __init__(self, name: str):
@@ -84,16 +82,6 @@ class Scope:
 
     def find_scope_by_module(self, module_name: str, depth: int = 0) -> list[Scope]:
         raise NotImplementedError()
-
-    @property
-    @abstractmethod
-    def begin_time(self) -> int:
-        pass
-
-    @property
-    @abstractmethod
-    def end_time(self) -> int:
-        pass
 
 
 def _traverse_scope_tree(

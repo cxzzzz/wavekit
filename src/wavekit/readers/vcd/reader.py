@@ -54,13 +54,6 @@ class VcdScope(Scope):
             if isinstance(v, VcdVcdScope)
         ]
 
-    @property
-    def begin_time(self) -> int:
-        return self.parent_scope.begin_time if self.parent_scope else 0
-
-    @property
-    def end_time(self) -> int:
-        return self.parent_scope.end_time if self.parent_scope else 0
 
 
 class VcdReader(Reader):
@@ -95,7 +88,14 @@ class VcdReader(Reader):
         sample_on_posedge: bool = False,
         begin_time: int | None = None,
         end_time: int | None = None,
+        begin_cycle: int | None = None,
+        end_cycle: int | None = None,
     ) -> Waveform:
+        if begin_time is not None and begin_cycle is not None:
+            raise ValueError("begin_time and begin_cycle are mutually exclusive")
+        if end_time is not None and end_cycle is not None:
+            raise ValueError("end_time and end_cycle are mutually exclusive")
+
         signal_path = signal.full_name if isinstance(signal, Signal) else signal
         clock_path = clock.full_name if isinstance(clock, Signal) else clock
 
@@ -124,15 +124,32 @@ class VcdReader(Reader):
         signal_handle = self.file_handle[lookup_path]
         width = int(signal_handle.size)
 
-        signal_value_change = np.array(
-            [(v[0], int(re.sub(r'[xXzZ]', str(xz_value), v[1]), 2)) for v in signal_handle.tv],
-            dtype=np.object_ if width > 64 else np.uint64,
-        )
+        # Always load the full clock to compute absolute cycle numbers
         clock_value_change = np.array(
             [(v[0], int(re.sub(r'[xXzZ]', '0', v[1]), 2)) for v in self.file_handle[clock_path].tv],
             dtype=np.uint64,
         )
 
+        # Determine clock edge timestamps for the sampling edge
+        sample_value = 1 if sample_on_posedge else 0
+        clock_edge_times = clock_value_change[clock_value_change[:, 1] == sample_value, 0]
+
+        # Convert begin_cycle/end_cycle to begin_time/end_time
+        if begin_cycle is not None:
+            begin_time = int(clock_edge_times[begin_cycle])
+        if end_cycle is not None:
+            end_time = int(clock_edge_times[end_cycle])
+
+        # clock_offset = number of sampling edges before begin_time
+        if begin_time is not None:
+            clock_offset = int(np.searchsorted(clock_edge_times, begin_time, side='left'))
+        else:
+            clock_offset = 0
+
+        signal_value_change = np.array(
+            [(v[0], int(re.sub(r'[xXzZ]', str(xz_value), v[1]), 2)) for v in signal_handle.tv],
+            dtype=np.object_ if width > 64 else np.uint64,
+        )
         full_wave = self.value_change_to_waveform(
             signal_value_change,
             clock_value_change,
@@ -140,6 +157,7 @@ class VcdReader(Reader):
             signed=signed,
             sample_on_posedge=sample_on_posedge,
             signal=lookup_path,
+            clock_offset=clock_offset,
         )
 
         result = full_wave.time_slice(begin_time, end_time)

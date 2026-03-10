@@ -73,6 +73,8 @@ class Reader:
         sample_on_posedge: bool = False,
         begin_time: int | None = None,
         end_time: int | None = None,
+        begin_cycle: int | None = None,
+        end_cycle: int | None = None,
     ) -> Waveform:
         """Load a single signal as a clock-synchronised :class:`~wavekit.Waveform`.
 
@@ -103,15 +105,32 @@ class Reader:
             edges (default).
         begin_time:
             Simulation time to start loading from (inclusive).  ``None`` means
-            start of simulation.
+            start of simulation.  Mutually exclusive with *begin_cycle*.
         end_time:
             Simulation time to stop loading at (exclusive).  ``None`` means
-            end of simulation.
+            end of simulation.  Mutually exclusive with *end_cycle*.
+        begin_cycle:
+            Absolute clock cycle number to start loading from (inclusive).
+            ``None`` means start of simulation.  Mutually exclusive with
+            *begin_time*.  The clock is always loaded from time 0 so cycle
+            numbers are absolute and comparable across different waveforms.
+        end_cycle:
+            Absolute clock cycle number to stop loading at (exclusive).
+            ``None`` means end of simulation.  Mutually exclusive with
+            *end_time*.
 
         Returns
         -------
         Waveform:
-            One sample per clock edge within the requested time range.
+            One sample per clock edge within the requested window.  The
+            ``.clock`` array contains absolute cycle numbers from the start
+            of simulation.
+
+        Raises
+        ------
+        ValueError:
+            If both *begin_time* and *begin_cycle* (or both *end_time* and
+            *end_cycle*) are provided simultaneously.
         """
 
     @abstractmethod
@@ -132,9 +151,11 @@ class Reader:
         signed: bool,
         sample_on_posedge: bool = False,
         signal: str = '',
+        clock_offset: int = 0,
     ) -> Waveform:
         value, clock, time = value_change_to_value_array(
-            value_change, clock_changes, sample_on_posedge=sample_on_posedge
+            value_change, clock_changes, sample_on_posedge=sample_on_posedge,
+            clock_offset=clock_offset,
         )
 
         return Waveform(
@@ -286,6 +307,8 @@ class Reader:
         sample_on_posedge: bool = False,
         begin_time: int | None = None,
         end_time: int | None = None,
+        begin_cycle: int | None = None,
+        end_cycle: int | None = None,
         root_scope: Scope | None = None,
     ) -> dict[tuple[Any, ...], Waveform]:
         """Batch-load all signals matching *pattern*, each paired with its clock.
@@ -307,7 +330,7 @@ class Reader:
             Signal path pattern (brace/regex).  See class docstring.
         clock_pattern:
             Clock signal path or pattern.  Must match at least one signal.
-        xz_value, signed, sample_on_posedge, begin_time, end_time:
+        xz_value, signed, sample_on_posedge, begin_time, end_time, begin_cycle, end_cycle:
             Forwarded to :meth:`load_waveform` for every loaded signal.
         root_scope:
             If provided, both *pattern* and *clock_pattern* are searched within
@@ -347,6 +370,8 @@ class Reader:
             sample_on_posedge=sample_on_posedge,
             begin_time=begin_time,
             end_time=end_time,
+            begin_cycle=begin_cycle,
+            end_cycle=end_cycle,
         )
 
         if len(matched_clocks) == 1:
@@ -385,6 +410,8 @@ class Reader:
         sample_on_posedge: bool = False,
         begin_time: int | None = None,
         end_time: int | None = None,
+        begin_cycle: int | None = None,
+        end_cycle: int | None = None,
         mode: Literal['single', 'zip'] = 'single',
         root_scope: Scope | None = None,
     ) -> Waveform | dict[tuple[Any, ...], Waveform]:
@@ -421,6 +448,8 @@ class Reader:
             sample_on_posedge=sample_on_posedge,
             begin_time=begin_time,
             end_time=end_time,
+            begin_cycle=begin_cycle,
+            end_cycle=end_cycle,
         )
 
         # Resolve each path to its matched signal(s)
