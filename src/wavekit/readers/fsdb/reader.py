@@ -9,10 +9,61 @@ from typing import Any
 import numpy as np
 
 from ...scope import Scope
-from ...signal import Signal
+from ...signal import Signal, SignalCompositeType
 from ...waveform import Waveform
 from ..base import Reader
-from .npi_fsdb_reader import NpiFsdbReader, NpiFsdbScope, NpiFsdbSignalScope
+from .npi_fsdb_reader import (
+    NPI_FSDB_CT_ARRAY,
+    NPI_FSDB_CT_RECORD,
+    NPI_FSDB_CT_STRUCT,
+    NPI_FSDB_CT_TAGGED_UNION,
+    NPI_FSDB_CT_UNION,
+    NpiFsdbReader,
+    NpiFsdbScope,
+    NpiFsdbSignalScope,
+)
+
+_NPI_CT_TO_ENUM = {
+    NPI_FSDB_CT_ARRAY: SignalCompositeType.ARRAY,
+    NPI_FSDB_CT_STRUCT: SignalCompositeType.STRUCT,
+    NPI_FSDB_CT_UNION: SignalCompositeType.UNION,
+    NPI_FSDB_CT_TAGGED_UNION: SignalCompositeType.TAGGED_UNION,
+    NPI_FSDB_CT_RECORD: SignalCompositeType.RECORD,
+}
+
+
+def _build_signal_from_handle(
+    sig_scope: NpiFsdbSignalScope,
+    full_name: str,
+    reader: FsdbReader,
+) -> Signal:
+    """Recursively build a Signal (with children) from a NpiFsdbSignalScope handle."""
+    width = reader._get_signal_width(full_name)
+    rng = reader._get_signal_range(full_name)
+    ct_raw = sig_scope.composite_type()
+    if ct_raw is None:
+        composite_type = None
+    elif ct_raw in _NPI_CT_TO_ENUM:
+        composite_type = _NPI_CT_TO_ENUM[ct_raw]
+    else:
+        raise ValueError(f"Unknown NPI composite type value: {ct_raw} for signal '{full_name}'")
+
+    children = None
+    if composite_type is not None:
+        children = []
+        for child_scope in sig_scope.child_scope_list():
+            child_full_name = f'{full_name}.{child_scope.name()}'
+            children.append(_build_signal_from_handle(child_scope, child_full_name, reader))
+
+    return Signal(
+        name=sig_scope.name(),
+        full_name=full_name,
+        width=width,
+        range=rng,
+        signed=False,
+        composite_type=composite_type,
+        children=children,
+    )
 
 
 class FsdbScope(Scope):
@@ -26,19 +77,11 @@ class FsdbScope(Scope):
     def signal_list(self) -> Sequence[Signal]:
         full_scope_name = self.full_name()
         signals = []
-        for s in self.handle.signal_list():
-            signal_path = f'{full_scope_name}.{s}'
-            width = self.reader._get_signal_width(signal_path)
-            rng = self.reader._get_signal_range(signal_path)
-            signals.append(
-                Signal(
-                    name=s,
-                    full_name=signal_path,
-                    width=width,
-                    range=rng,
-                    signed=False,
-                )
-            )
+        for sig_scope in self.handle.child_scope_list(include_signal_scope=True):
+            if not isinstance(sig_scope, NpiFsdbSignalScope):
+                continue
+            signal_path = f'{full_scope_name}.{sig_scope.name()}'
+            signals.append(_build_signal_from_handle(sig_scope, signal_path, self.reader))
         return signals
 
     @cached_property

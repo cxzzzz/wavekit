@@ -84,6 +84,31 @@ class Scope:
         raise NotImplementedError()
 
 
+def _range_str_to_tuple(range_str: str) -> tuple[int, int] | None:
+    """Extract the innermost (last) ``[high:low]`` or ``[n]`` from *range_str*.
+
+    For multi-dimensional suffixes such as ``"[3][7:0]"`` only the final
+    bracket pair is returned (``(7, 0)``), because in practice only the last
+    dimension carries a bit-range; all preceding dimensions are index
+    selectors of the form ``[n]`` and are encoded in the signal name only.
+    Returns ``None`` if *range_str* is empty or contains no bracket expression.
+    """
+    if not range_str:
+        return None
+    last = re.search(r'\[(\d+)(?::(\d+))?\]$', range_str)
+    if last is None:
+        return None
+    high = int(last.group(1))
+    low = int(last.group(2)) if last.group(2) is not None else high
+    return (high, low)
+
+
+def _prepend_scope_name(value: Any, scope_name: str) -> Any:
+    if isinstance(value, Signal):
+        return dataclasses.replace(value, full_name=f'{scope_name}.{value.full_name}')
+    return value
+
+
 def _traverse_scope_tree(
     scope: Scope,
     descendant_scope_pattern_list: list[PatternMap],
@@ -110,11 +135,6 @@ def _traverse_scope_tree(
     -------
     dict mapping expansion key tuples to values produced by *leaf_fn*.
     """
-
-    def prepend_scope_name(value: Any, scope_name: str) -> Any:
-        if isinstance(value, Signal):
-            return dataclasses.replace(value, full_name=f'{scope_name}.{value.full_name}')
-        return value
 
     res: dict[tuple[Any, ...], T] = {}
     if len(descendant_scope_pattern_list) == 0:
@@ -144,11 +164,11 @@ def _traverse_scope_tree(
                 for lk, lv in leaf_fn(scope, remaining).items():
                     key = (scope.name,) + lk
                     assert key not in res
-                    res[key] = prepend_scope_name(lv, scope.name)
+                    res[key] = _prepend_scope_name(lv, scope.name)
 
                 for child_scope in scope.child_scope_list:
                     for ck, cv in _traverse_scope_tree(child_scope, remaining, leaf_fn).items():
-                        res[(scope.name,) + ck] = prepend_scope_name(cv, scope.name)
+                        res[(scope.name,) + ck] = _prepend_scope_name(cv, scope.name)
             else:
                 for child_scope in module_scopes:
                     for ck, cv in _traverse_scope_tree(
@@ -159,7 +179,7 @@ def _traverse_scope_tree(
                             raise ValueError('parent scope is None')
                         parent_name = parent_scope.full_name(scope)
                         key = (f'{parent_name}.{ck[0]}',) + ck[1:]
-                        res[key] = prepend_scope_name(cv, parent_name)
+                        res[key] = _prepend_scope_name(cv, parent_name)
         else:
             # Exact or regex match against current scope name
             matched = False
@@ -181,14 +201,76 @@ def _traverse_scope_tree(
                     key = new_k + lk
                     if key in res:
                         raise Exception(f'pattern {p} match more than one result')
-                    res[key] = prepend_scope_name(lv, scope.name)
+                    res[key] = _prepend_scope_name(lv, scope.name)
 
                 for child_scope in scope.child_scope_list:
                     for ck, cv in _traverse_scope_tree(child_scope, remaining, leaf_fn).items():
                         key = new_k + ck
                         if key in res:
                             raise Exception(f'pattern {p} match more than one result')
-                        res[key] = prepend_scope_name(cv, scope.name)
+                        res[key] = _prepend_scope_name(cv, scope.name)
+    return res
+
+
+def _match_signals_in_list(
+    signals: Sequence[Signal], pattern_list: list[PatternMap]
+) -> dict[tuple[Any, ...], Signal]:
+    """Match *pattern_list* against *signals*, recursing into composite children.
+
+    The first element of *pattern_list* is matched against signal names in
+    *signals*.  When more patterns remain and the matched signal is composite
+    (``signal.children is not None``), the function recurses into those
+    children with the remaining patterns, allowing patterns to address
+    struct/union members across multiple levels.
+
+    .. note::
+        Composite member path separators are assumed to be ``"."`` (the same
+        as scope separators).  For array elements such as ``a[10].b`` this
+        means the pattern segment for the array element is ``"a[10]"`` and the
+        next segment is ``"b"``.
+
+    TODO: Verify actual NPI naming for composite members — NPI may return the
+    full name from the root signal rather than just the local node name, and
+    array-element separators may differ from ``"."``.  Adjust accordingly once
+    confirmed.
+    """
+    if not pattern_list:
+        return {}
+
+    def resolve_leaf(sig: Signal, sig_bare: str, range_suffix: str) -> Signal:
+        new_range = _range_str_to_tuple(range_suffix) if range_suffix else sig.range
+        new_local = f'{sig_bare}{range_suffix}' if range_suffix else sig.name
+        return dataclasses.replace(sig, full_name=new_local, range=new_range)
+
+    res: dict[tuple[Any, ...], Signal] = {}
+    for sig in signals:
+        sig_bare, _ = split_by_range_expr(sig.name)
+        for k, p in pattern_list[0].items():
+            if p[0] == '@':
+                name_regex, range_suffix = split_by_range_expr(p[1:])
+                if match := re.fullmatch(name_regex, sig.name):
+                    assert len(k) == 0
+                    key = (match.groups(),)
+                    if len(pattern_list) == 1:
+                        assert key not in res, f'pattern {name_regex} matches more than one signal'
+                        res[key] = resolve_leaf(sig, sig_bare, range_suffix)
+                    elif sig.children is not None:
+                        for ck, cv in _match_signals_in_list(
+                            sig.children, pattern_list[1:]
+                        ).items():
+                            res[key + ck] = _prepend_scope_name(cv, sig.name)
+            else:
+                p_bare, range_suffix = split_by_range_expr(p)
+                if p_bare != sig_bare:
+                    continue
+                key = k
+                if len(pattern_list) == 1:
+                    assert key not in res
+                    res[key] = resolve_leaf(sig, sig_bare, range_suffix)
+                elif sig.children is not None:
+                    for ck, cv in _match_signals_in_list(sig.children, pattern_list[1:]).items():
+                        res[key + ck] = _prepend_scope_name(cv, sig.name)
+                break
     return res
 
 
@@ -207,51 +289,7 @@ def match_signals(
     def match_signals_in_scope(
         scope: Scope, signal_pattern_list: list[PatternMap]
     ) -> dict[tuple[Any, ...], Signal]:
-        def range_str_to_tuple(range_str: str) -> tuple[int, int] | None:
-            if not range_str:
-                return None
-            last = re.search(r'\[(\d+)(?::(\d+))?\]$', range_str)
-            if last is None:
-                return None
-            high = int(last.group(1))
-            low = int(last.group(2)) if last.group(2) is not None else high
-            return (high, low)
-
-        res: dict[tuple[Any, ...], Signal] = {}
-        if len(signal_pattern_list) != 1:
-            return res
-        for signal in scope.signal_list:
-            sig_bare, _ = split_by_range_expr(signal.name)
-            for k, p in signal_pattern_list[0].items():
-                if p[0] == '@':
-                    name_regex, range_suffix = split_by_range_expr(p[1:])
-                    if match := re.fullmatch(name_regex, signal.name):
-                        assert len(k) == 0
-                        key = (match.groups(),)
-                        if key in res:
-                            raise Exception(f'pattern {name_regex} match more than one signal')
-                        if range_suffix:
-                            new_local = f'{sig_bare}{range_suffix}'
-                            new_range = range_str_to_tuple(range_suffix)
-                        else:
-                            new_local = signal.name
-                            new_range = signal.range
-                        res[key] = dataclasses.replace(signal, full_name=new_local, range=new_range)
-                else:
-                    p_bare, range_suffix = split_by_range_expr(p)
-                    if p_bare != sig_bare:
-                        continue
-                    key = k
-                    assert key not in res
-                    if range_suffix:
-                        new_local = f'{sig_bare}{range_suffix}'
-                        new_range = range_str_to_tuple(range_suffix)
-                    else:
-                        new_local = signal.name
-                        new_range = signal.range
-                    res[key] = dataclasses.replace(signal, full_name=new_local, range=new_range)
-                    break
-        return res
+        return _match_signals_in_list(scope.signal_list, signal_pattern_list)
 
     return _traverse_scope_tree(scope, descendant_scope_pattern_list, match_signals_in_scope)
 

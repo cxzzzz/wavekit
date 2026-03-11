@@ -10,6 +10,12 @@ from libc.stdlib cimport malloc, free
 from libc.string cimport strcpy, strlen
 from .npi_fsdb cimport *
 
+NPI_FSDB_CT_ARRAY        = <int>npiFsdbSigCtArray
+NPI_FSDB_CT_STRUCT       = <int>npiFsdbSigCtStruct
+NPI_FSDB_CT_UNION        = <int>npiFsdbSigCtUnion
+NPI_FSDB_CT_TAGGED_UNION = <int>npiFsdbSigCtTaggedUnion
+NPI_FSDB_CT_RECORD       = <int>npiFsdbSigCtRecord
+
 
 cdef class NpiFsdbScope:
     pass
@@ -147,6 +153,24 @@ cdef class NpiFsdbSignalScope(NpiFsdbScope):
         name = name[len(name)-1]
         return name
 
+    def has_member(self) -> bool:
+        assert self.sig_handle != NULL
+        cdef int has_member
+        if npi_fsdb_sig_property(npiFsdbSigHasMember, self.sig_handle, &has_member):
+            return has_member != 0
+        return False
+
+    def composite_type(self):
+        """Return the npiFsdbSigCompositeType_e int value, or None if not composite."""
+        assert self.sig_handle != NULL
+        cdef int has_member
+        cdef int ct
+        if not (npi_fsdb_sig_property(npiFsdbSigHasMember, self.sig_handle, &has_member) and has_member):
+            return None
+        if npi_fsdb_sig_property(npiFsdbSigCompositeType, self.sig_handle, &ct):
+            return ct
+        return None
+
     def type(self) -> str:
         raise NotImplementedError("type property of signal scope is not supported")
 
@@ -261,12 +285,12 @@ cdef get_signal_handle_range(npiFsdbSigHandle signal_handle):
     assert(npi_fsdb_sig_property(npiFsdbSigHasMember, signal_handle, &has_member))
     assert(npi_fsdb_sig_property(npiFsdbSigLeftRange, signal_handle, &left_range))
     assert(npi_fsdb_sig_property(npiFsdbSigRightRange, signal_handle, &right_range))
-    return (left_range, right_range)
 
-    if(has_member != 0):
+    if has_member != 0:
         assert(npi_fsdb_sig_property(npiFsdbSigCompositeType, signal_handle, &type))
-        if(type == <int>npiFsdbSigCtArray):
+        if type == <int>npiFsdbSigCtArray:
             return (left_range, right_range)
+        return None
     return None
 
 cdef class NpiFsdbReader:

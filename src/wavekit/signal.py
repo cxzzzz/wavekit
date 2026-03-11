@@ -1,6 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
+
+
+class SignalCompositeType(Enum):
+    """Composite (non-leaf) signal type as reported by the waveform backend.
+
+    Not all backends support composite signals.  When a backend does not
+    distinguish composite types the field is ``None``.
+    """
+
+    ARRAY = 'array'
+    STRUCT = 'struct'
+    UNION = 'union'
+    TAGGED_UNION = 'tagged_union'
+    RECORD = 'record'
 
 
 @dataclass
@@ -8,7 +23,9 @@ class Signal:
     """Metadata descriptor for a single hardware signal.
 
     Stores the signal's local name, full hierarchical path, bit-width,
-    declared bit-range, and signedness.
+    declared bit-range, and signedness.  For composite signals (structs,
+    unions, arrays) the ``composite_type`` and ``children`` fields carry
+    the internal structure.
 
     Attributes
     ----------
@@ -26,14 +43,28 @@ class Signal:
         Bit-width of the signal, e.g. ``8`` for ``[7:0]``.  ``None`` if not
         yet resolved.
     range:
-        The declared or user-requested bit-range of the signal as a
-        ``(high, low)`` integer tuple, e.g. ``(7, 0)`` for ``[7:0]``.
-        For single-bit selection ``[n]`` this is stored as ``(n, n)``.
-        ``None`` if the signal is scalar or the format does not expose
-        range information.
+        The innermost (last) bit-range of the signal as a ``(high, low)``
+        integer tuple.  For a plain vector ``data[7:0]`` this is ``(7, 0)``;
+        for a multi-dimensional signal ``mem[3][7:0]`` this is ``(7, 0)``
+        (the ``[3]`` dimension index is encoded in ``name``/``full_name`` only).
+        For a single-bit index ``[n]`` this is ``(n, n)``.
+        ``None`` if the signal is scalar, composite, or the format does not
+        expose range information.
     signed:
         Whether the signal value should be interpreted as a two's-complement
         signed integer.  Defaults to ``False``.
+    composite_type:
+        ``None`` for leaf (non-composite) signals.  For composite signals
+        (struct, union, array, …) this holds the :class:`SignalCompositeType`
+        value describing the kind of composite.  Not all backends populate
+        this field; backends that do not support composite introspection leave
+        it as ``None`` (e.g. VCD).
+    children:
+        ``None`` for leaf signals.  For composite signals this is the list of
+        direct member :class:`Signal` objects, populated in the same order the
+        backend reports them.  Always ``None`` when ``composite_type`` is
+        ``None``, and always a list (possibly empty) when ``composite_type``
+        is set.
     """
 
     name: str
@@ -41,6 +72,8 @@ class Signal:
     width: int | None
     range: tuple[int, int] | None
     signed: bool = False
+    composite_type: SignalCompositeType | None = None
+    children: list[Signal] | None = None
 
     def __str__(self) -> str:
         return (
