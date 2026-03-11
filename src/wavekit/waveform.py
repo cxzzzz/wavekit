@@ -833,6 +833,7 @@ class Waveform:
             # Average occupancy in 100-cycle windows
             avg = occupancy.downsample(100, np.mean)
         """
+
         def helper(
             arr: npt.NDArray[Any],
             func: Callable[[npt.NDArray[Any]], float],
@@ -885,7 +886,9 @@ class Waveform:
             value=new_value,
             clock=np.copy(self.clock),
             time=np.copy(self.time),
-            signal=Signal('', '', width or self.width, None, signed if signed is not None else self.signed),
+            signal=Signal(
+                '', '', width or self.width, None, signed if signed is not None else self.signed
+            ),
         )
 
     def map(
@@ -1134,7 +1137,9 @@ class Waveform:
         ::
 
             # Compute bitwise majority across three 1-bit signals
-            majority = Waveform.merge([a, b, c], lambda vs: int(sum(vs) >= 2), width=1, signed=False)
+            majority = Waveform.merge(
+                [a, b, c], lambda vs: int(sum(vs) >= 2), width=1, signed=False
+            )
         """
         wave_len = len(waves[0].value)
         assert all([wave_len == len(w.value) for w in waves])

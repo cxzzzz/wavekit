@@ -154,7 +154,9 @@ class Reader:
         clock_offset: int = 0,
     ) -> Waveform:
         value, clock, time = value_change_to_value_array(
-            value_change, clock_changes, sample_on_posedge=sample_on_posedge,
+            value_change,
+            clock_changes,
+            sample_on_posedge=sample_on_posedge,
             clock_offset=clock_offset,
         )
 
@@ -201,6 +203,7 @@ class Reader:
         Exception:
             If two different signals resolve to the same key.
         """
+
         def combine_dict(
             dict1: dict[tuple[Any, ...], Signal],
             dict2: dict[tuple[Any, ...], Signal],
@@ -273,6 +276,7 @@ class Reader:
                     "w_ptr[2:0]", clock_pattern="clk", root_scope=scope
                 )
         """
+
         def combine_dict(
             dict1: dict[tuple[Any, ...], Scope],
             dict2: dict[tuple[Any, ...], Scope],
@@ -280,8 +284,7 @@ class Reader:
             common_keys = set(dict1.keys()).intersection(dict2.keys())
             if common_keys:
                 raise Exception(
-                    'found more than one scope with the same keys: '
-                    f'keys:{list(common_keys)}'
+                    'found more than one scope with the same keys: ' f'keys:{list(common_keys)}'
                 )
             return {**dict1, **dict2}
 
@@ -468,7 +471,9 @@ class Reader:
                         f" use mode='zip'. Matched: {[sig.full_name for sig in matched.values()]}"
                     )
             ns: dict[str, Any] = {
-                placeholder: self.load_waveform(next(iter(matched.values())).full_name, **load_kwargs)
+                placeholder: self.load_waveform(
+                    next(iter(matched.values())).full_name, **load_kwargs
+                )
                 for placeholder, _, matched in matched_per_path
             }
             try:
@@ -501,7 +506,9 @@ class Reader:
 
             # Pre-load broadcast waveforms (single-match paths)
             broadcast_ns: dict[str, Waveform] = {
-                placeholder: self.load_waveform(next(iter(matched.values())).full_name, **load_kwargs)
+                placeholder: self.load_waveform(
+                    next(iter(matched.values())).full_name, **load_kwargs
+                )
                 for placeholder, _, matched in single_paths
             }
 

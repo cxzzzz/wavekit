@@ -20,7 +20,7 @@ class VcdScope(Scope):
         self,
         vcdvcd_scope: VcdVcdScope,
         parent_scope: Scope | None,
-        reader: Reader,
+        reader: VcdReader,
     ):
         super().__init__(name=vcdvcd_scope.name.split('.')[-1])
         self.vcdvcd_scope = vcdvcd_scope
@@ -53,7 +53,6 @@ class VcdScope(Scope):
             for _, v in self.vcdvcd_scope.subElements.items()
             if isinstance(v, VcdVcdScope)
         ]
-
 
 
 class VcdReader(Reader):
@@ -92,9 +91,9 @@ class VcdReader(Reader):
         end_cycle: int | None = None,
     ) -> Waveform:
         if begin_time is not None and begin_cycle is not None:
-            raise ValueError("begin_time and begin_cycle are mutually exclusive")
+            raise ValueError('begin_time and begin_cycle are mutually exclusive')
         if end_time is not None and end_cycle is not None:
-            raise ValueError("end_time and end_cycle are mutually exclusive")
+            raise ValueError('end_time and end_cycle are mutually exclusive')
 
         signal_path = signal.full_name if isinstance(signal, Signal) else signal
         clock_path = clock.full_name if isinstance(clock, Signal) else clock
@@ -106,7 +105,7 @@ class VcdReader(Reader):
         if range_suffix and len(re.findall(r'\[[\d:]+\]', range_suffix)) > 1:
             raise ValueError(
                 f"VCD does not support multi-dimensional range access: '{signal_path}'. "
-                "Use FSDB or load the full signal and slice manually."
+                'Use FSDB or load the full signal and slice manually.'
             )
 
         # Resolve the actual VCD signal name (may include a range suffix in the file)
@@ -176,10 +175,10 @@ class VcdReader(Reader):
                 if high >= width:
                     raise ValueError(
                         f"bit index {high} out of range for signal '{lookup_path}' "
-                        f"with width {width}"
+                        f'with width {width}'
                     )
                 if low < 0:
-                    raise ValueError(f"bit index {low} cannot be negative")
+                    raise ValueError(f'bit index {low} cannot be negative')
                 slice_width = high - low + 1
                 if slice_width < width:
                     result = result[high:low]

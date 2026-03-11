@@ -45,5 +45,5 @@ class Signal:
     def __str__(self) -> str:
         return (
             f"Signal(name='{self.name}', full_name='{self.full_name}', "
-            f"width={self.width}, signed={self.signed}, range={self.range})"
+            f'width={self.width}, signed={self.signed}, range={self.range})'
         )

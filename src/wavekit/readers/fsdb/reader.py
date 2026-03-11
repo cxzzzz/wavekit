@@ -16,7 +16,7 @@ from .npi_fsdb_reader import NpiFsdbReader, NpiFsdbScope, NpiFsdbSignalScope
 
 
 class FsdbScope(Scope):
-    def __init__(self, handle: NpiFsdbScope, parent_scope: FsdbScope | None, reader: Reader):
+    def __init__(self, handle: NpiFsdbScope, parent_scope: FsdbScope | None, reader: FsdbReader):
         super().__init__(name=handle.name())
         self.handle = handle
         self.parent_scope = parent_scope
@@ -116,9 +116,9 @@ class FsdbReader(Reader):
         end_cycle: int | None = None,
     ) -> Waveform:
         if begin_time is not None and begin_cycle is not None:
-            raise ValueError("begin_time and begin_cycle are mutually exclusive")
+            raise ValueError('begin_time and begin_cycle are mutually exclusive')
         if end_time is not None and end_cycle is not None:
-            raise ValueError("end_time and end_cycle are mutually exclusive")
+            raise ValueError('end_time and end_cycle are mutually exclusive')
 
         signal_path = signal.full_name if isinstance(signal, Signal) else signal
         clock_path = clock.full_name if isinstance(clock, Signal) else clock

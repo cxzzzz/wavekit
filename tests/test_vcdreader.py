@@ -324,8 +324,10 @@ def test_load_waveform_mutually_exclusive_begin(vcd_path):
     with VcdReader(str(vcd_path)) as reader:
         with pytest.raises(ValueError, match='mutually exclusive'):
             reader.load_waveform(
-                'tb.u0.J_state[3:0]', clock='tb.tck',
-                begin_time=100, begin_cycle=10,
+                'tb.u0.J_state[3:0]',
+                clock='tb.tck',
+                begin_time=100,
+                begin_cycle=10,
             )
 
 
@@ -333,8 +335,10 @@ def test_load_waveform_mutually_exclusive_end(vcd_path):
     with VcdReader(str(vcd_path)) as reader:
         with pytest.raises(ValueError, match='mutually exclusive'):
             reader.load_waveform(
-                'tb.u0.J_state[3:0]', clock='tb.tck',
-                end_time=200, end_cycle=20,
+                'tb.u0.J_state[3:0]',
+                clock='tb.tck',
+                end_time=200,
+                end_cycle=20,
             )
 
 
@@ -344,12 +348,21 @@ def test_value_change_to_waveform_clock_offset():
     clock_changes = np.array([[0, 0], [5, 1], [10, 0], [15, 1]], dtype=np.uint64)
 
     wave_no_offset = Reader.value_change_to_waveform(
-        value_change, clock_changes, width=1, signed=False,
-        sample_on_posedge=True, signal='tb.sig',
+        value_change,
+        clock_changes,
+        width=1,
+        signed=False,
+        sample_on_posedge=True,
+        signal='tb.sig',
     )
     wave_with_offset = Reader.value_change_to_waveform(
-        value_change, clock_changes, width=1, signed=False,
-        sample_on_posedge=True, signal='tb.sig', clock_offset=50,
+        value_change,
+        clock_changes,
+        width=1,
+        signed=False,
+        sample_on_posedge=True,
+        signal='tb.sig',
+        clock_offset=50,
     )
 
     assert np.all(wave_no_offset.clock == np.array([0, 1]))
@@ -376,4 +389,3 @@ def test_cycle_slice_include_end(vcd_path):
     sliced = full.cycle_slice(10, 20, include_end=True)
     assert len(sliced.value) == 11
     assert sliced.clock[-1] == 20
-

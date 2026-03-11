@@ -147,9 +147,7 @@ def _traverse_scope_tree(
                     res[key] = prepend_scope_name(lv, scope.name)
 
                 for child_scope in scope.child_scope_list:
-                    for ck, cv in _traverse_scope_tree(
-                        child_scope, remaining, leaf_fn
-                    ).items():
+                    for ck, cv in _traverse_scope_tree(child_scope, remaining, leaf_fn).items():
                         res[(scope.name,) + ck] = prepend_scope_name(cv, scope.name)
             else:
                 for child_scope in module_scopes:
@@ -186,9 +184,7 @@ def _traverse_scope_tree(
                     res[key] = prepend_scope_name(lv, scope.name)
 
                 for child_scope in scope.child_scope_list:
-                    for ck, cv in _traverse_scope_tree(
-                        child_scope, remaining, leaf_fn
-                    ).items():
+                    for ck, cv in _traverse_scope_tree(child_scope, remaining, leaf_fn).items():
                         key = new_k + ck
                         if key in res:
                             raise Exception(f'pattern {p} match more than one result')
