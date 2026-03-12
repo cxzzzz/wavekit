@@ -256,9 +256,9 @@ def match_signals(
                         assert len(k) == 0
                         key = (match.groups(),)
                         if len(pattern_list) == 1:
-                            assert key not in res, (
-                                f'pattern {name_regex} matches more than one signal'
-                            )
+                            assert (
+                                key not in res
+                            ), f'pattern {name_regex} matches more than one signal'
                             res[key] = resolve_leaf(sig, sig_bare, range_suffix)
                         elif sig.member_list is not None:
                             for ck, cv in _match_signals_in_list(

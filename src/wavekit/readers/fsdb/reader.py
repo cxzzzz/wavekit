@@ -52,9 +52,7 @@ class FsdbSignal(Signal):
         elif ct_raw in _npi_ct_to_enum:
             composite_type = _npi_ct_to_enum[ct_raw]
         else:
-            raise ValueError(
-                f"Unknown NPI composite type value: {ct_raw} for signal '{full_name}'"
-            )
+            raise ValueError(f"Unknown NPI composite type value: {ct_raw} for signal '{full_name}'")
         return cls(
             name=npi_sig.name(),
             full_name=full_name,
