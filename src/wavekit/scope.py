@@ -235,6 +235,7 @@ def match_signals(
                 # Extract (high, low) from the innermost bracket of range_suffix,
                 # e.g. "[7:0]" → (7, 0), "[3]" → (3, 3).
                 m = re.search(r'\[(\d+)(?::(\d+))?\]$', range_suffix)
+                assert m is not None
                 h = int(m.group(1))
                 low = int(m.group(2)) if m.group(2) is not None else h
                 new_range: tuple[int, int] | None = (h, low)
