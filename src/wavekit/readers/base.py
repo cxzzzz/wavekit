@@ -38,7 +38,7 @@ class Reader:
     If the bit-range suffix is omitted and the file stores the signal with a
     range, the range is appended automatically.
 
-    Pattern syntax (used by :meth:`get_matched_signals`,
+    Pattern syntax (used by :meth:`get_matched_signals`, :meth:`get_matched_scopes`,
     :meth:`load_matched_waveforms`, :meth:`eval`)
     -------------------------------------------------
     * ``{a,b,c}``     — matches ``a``, ``b``, or ``c``; captures each as a key.
@@ -233,7 +233,7 @@ class Reader:
             )
         return matched_signals
 
-    def get_matched_scope(
+    def get_matched_scopes(
         self,
         pattern: str,
         root_scope: Scope | None = None,
@@ -270,7 +270,7 @@ class Reader:
         ::
 
             # Find all fifo_N sub-scopes under tb.dut
-            scopes = reader.get_matched_scope("tb.dut.fifo_{0..3}")
+            scopes = reader.get_matched_scopes("tb.dut.fifo_{0..3}")
             for (idx,), scope in scopes.items():
                 waves = reader.load_matched_waveforms(
                     "w_ptr[2:0]", clock_pattern="clk", root_scope=scope

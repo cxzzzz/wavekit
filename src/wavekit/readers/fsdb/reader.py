@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Any
 
@@ -20,91 +21,98 @@ from .npi_fsdb_reader import (
     NPI_FSDB_CT_UNION,
     NpiFsdbReader,
     NpiFsdbScope,
-    NpiFsdbSignalScope,
+    NpiFsdbSignal,
 )
 
-_NPI_CT_TO_ENUM = {
-    NPI_FSDB_CT_ARRAY: SignalCompositeType.ARRAY,
-    NPI_FSDB_CT_STRUCT: SignalCompositeType.STRUCT,
-    NPI_FSDB_CT_UNION: SignalCompositeType.UNION,
-    NPI_FSDB_CT_TAGGED_UNION: SignalCompositeType.TAGGED_UNION,
-    NPI_FSDB_CT_RECORD: SignalCompositeType.RECORD,
-}
 
+@dataclass
+class FsdbSignal(Signal):
+    """FSDB-backed :class:`~wavekit.signal.Signal` with lazy member loading.
 
-def _build_signal_from_handle(
-    sig_scope: NpiFsdbSignalScope,
-    full_name: str,
-    reader: FsdbReader,
-) -> Signal:
-    """Recursively build a Signal (with children) from a NpiFsdbSignalScope handle."""
-    width = reader._get_signal_width(full_name)
-    rng = reader._get_signal_range(full_name)
-    ct_raw = sig_scope.composite_type()
-    if ct_raw is None:
-        composite_type = None
-    elif ct_raw in _NPI_CT_TO_ENUM:
-        composite_type = _NPI_CT_TO_ENUM[ct_raw]
-    else:
-        raise ValueError(f"Unknown NPI composite type value: {ct_raw} for signal '{full_name}'")
+    Extends :class:`~wavekit.signal.Signal` by holding an NPI signal handle
+    directly, enabling on-demand loading of composite members without any
+    reader reference.  Construct via :meth:`from_handle`.
+    """
 
-    children = None
-    if composite_type is not None:
-        children = []
-        for child_scope in sig_scope.child_scope_list():
-            child_full_name = f'{full_name}.{child_scope.name()}'
-            children.append(_build_signal_from_handle(child_scope, child_full_name, reader))
+    _npi_signal: NpiFsdbSignal | None = field(default=None, repr=False, compare=False)
 
-    return Signal(
-        name=sig_scope.name(),
-        full_name=full_name,
-        width=width,
-        range=rng,
-        signed=False,
-        composite_type=composite_type,
-        children=children,
-    )
+    @classmethod
+    def from_handle(cls, npi_sig: NpiFsdbSignal, full_name: str) -> FsdbSignal:
+        """Build an :class:`FsdbSignal` from an NPI signal handle and its full path."""
+        _npi_ct_to_enum = {
+            NPI_FSDB_CT_ARRAY: SignalCompositeType.ARRAY,
+            NPI_FSDB_CT_STRUCT: SignalCompositeType.STRUCT,
+            NPI_FSDB_CT_UNION: SignalCompositeType.UNION,
+            NPI_FSDB_CT_TAGGED_UNION: SignalCompositeType.TAGGED_UNION,
+            NPI_FSDB_CT_RECORD: SignalCompositeType.RECORD,
+        }
+        ct_raw = npi_sig.composite_type()
+        if ct_raw is None:
+            composite_type = None
+        elif ct_raw in _npi_ct_to_enum:
+            composite_type = _npi_ct_to_enum[ct_raw]
+        else:
+            raise ValueError(
+                f"Unknown NPI composite type value: {ct_raw} for signal '{full_name}'"
+            )
+        return cls(
+            name=npi_sig.name(),
+            full_name=full_name,
+            width=npi_sig.width(),
+            range=npi_sig.range(),
+            composite_type=composite_type,
+            _npi_signal=npi_sig,
+        )
+
+    @cached_property
+    def member_list(self) -> list[Signal] | None:
+        if self.composite_type is None:
+            return None
+        assert self._npi_signal is not None
+        npi_members = self._npi_signal.member_list()
+        if self.composite_type == SignalCompositeType.ARRAY:
+            # Array members' NPI names already include the array base name at every
+            # level, e.g. parent "a" has members "a[0]", "a[1]", and "a[0]" further
+            # has members "a[0][0]", "a[0][1]", etc.  The member name is therefore an
+            # extension of the parent name with no extra "." separator, so we must NOT
+            # prepend full_name (which would produce "tb.dut.a.a[0]").  Instead we use
+            # the parent scope path (full_name minus the signal's own local name) as
+            # the base, giving "tb.dut.a[0]", "tb.dut.a[0][1]", etc.
+            scope_path = self.full_name[: -(len(self.name) + 1)]
+            return [FsdbSignal.from_handle(m, f'{scope_path}.{m.name()}') for m in npi_members]
+        else:
+            return [FsdbSignal.from_handle(m, f'{self.full_name}.{m.name()}') for m in npi_members]
 
 
 class FsdbScope(Scope):
     def __init__(self, handle: NpiFsdbScope, parent_scope: FsdbScope | None, reader: FsdbReader):
         super().__init__(name=handle.name())
-        self.handle = handle
+        self._npi_scope = handle
         self.parent_scope = parent_scope
         self.reader = reader
 
     @cached_property
     def signal_list(self) -> Sequence[Signal]:
         full_scope_name = self.full_name()
-        signals = []
-        for sig_scope in self.handle.child_scope_list(include_signal_scope=True):
-            if not isinstance(sig_scope, NpiFsdbSignalScope):
-                continue
-            signal_path = f'{full_scope_name}.{sig_scope.name()}'
-            signals.append(_build_signal_from_handle(sig_scope, signal_path, self.reader))
-        return signals
+        return [
+            FsdbSignal.from_handle(npi_sig, f'{full_scope_name}.{npi_sig.name()}')
+            for npi_sig in self._npi_scope.signal_list()
+        ]
 
     @cached_property
     def child_scope_list(self) -> Sequence[Scope]:
-        return [FsdbScope(c, self, self.reader) for c in self.handle.child_scope_list()]
-
-    @cached_property
-    def child_normal_scope_list(self) -> Sequence[Scope]:
-        return [
-            FsdbScope(c, self, self.reader)
-            for c in self.handle.child_scope_list(include_signal_scope=False)
-        ]
+        return [FsdbScope(c, self, self.reader) for c in self._npi_scope.child_scope_list()]
 
     @property
     def type(self) -> str:
         if not hasattr(self, '_type'):
-            self._type = self.handle.type()
+            self._type = self._npi_scope.type()
         return self._type
 
     @property
     def def_name(self) -> str | None:
         if not hasattr(self, '_def_name'):
-            self._def_name = self.handle.def_name()
+            self._def_name = self._npi_scope.def_name()
         return self._def_name
 
     def find_scope_by_module(self, module_name: str, depth: int = 0) -> list[Scope]:
@@ -113,11 +121,8 @@ class FsdbScope(Scope):
         return self._preloaded_module_scope[module_name]
 
     def preload_module_scope(self):
-        if isinstance(self.handle, NpiFsdbSignalScope):
-            return {}
-
         preloaded_module_scope = defaultdict(list)
-        for c in self.child_normal_scope_list:
+        for c in self.child_scope_list:
             for module_name, module_scope_list in c.preload_module_scope().items():
                 preloaded_module_scope[module_name].extend(module_scope_list)
 
@@ -166,9 +171,21 @@ class FsdbReader(Reader):
         signal_path = signal.full_name if isinstance(signal, Signal) else signal
         clock_path = clock.full_name if isinstance(clock, Signal) else clock
 
+        # Resolve NPI signal handles — reuse the handle if already available
+        npi_signal = (
+            signal._npi_signal
+            if isinstance(signal, FsdbSignal) and signal._npi_signal is not None
+            else self.file_handle.get_signal(signal_path)
+        )
+        npi_clock = (
+            clock._npi_signal
+            if isinstance(clock, FsdbSignal) and clock._npi_signal is not None
+            else self.file_handle.get_signal(clock_path)
+        )
+
         # Always load the full clock to compute absolute cycle numbers
         all_clock_changes = self.file_handle.load_value_change(
-            clock_path,
+            npi_clock,
             begin_time=0,
             end_time=2**64 - 1,
             xz_value=0,
@@ -199,7 +216,7 @@ class FsdbReader(Reader):
         # Load signal within the requested window only (FSDB NPI provides the
         # correct initial value at begin_time even if the last change was earlier)
         signal_value_change = self.file_handle.load_value_change(
-            signal_path,
+            npi_signal,
             begin_time=begin_time_actual,
             end_time=end_time_actual,
             xz_value=xz_value,
@@ -208,7 +225,7 @@ class FsdbReader(Reader):
         full_wave = self.value_change_to_waveform(
             signal_value_change,
             windowed_clock_changes,
-            width=self.file_handle.get_signal_width(signal_path),
+            width=npi_signal.width(),
             signed=signed,
             sample_on_posedge=sample_on_posedge,
             signal=signal_path,
@@ -228,12 +245,6 @@ class FsdbReader(Reader):
                 FsdbScope(s, None, self) for s in self.file_handle.top_scope_list()
             ]
         return self._top_scope_list
-
-    def _get_signal_width(self, signal: str) -> int:
-        return self.file_handle.get_signal_width(signal)
-
-    def _get_signal_range(self, signal: str) -> tuple[int, int]:
-        return self.file_handle.get_signal_range(signal)
 
     @property
     def begin_time(self) -> str:

@@ -75,9 +75,6 @@ class VcdReader(Reader):
     def end_time(self) -> int:
         return self.file_handle.endtime
 
-    def _get_signal_width(self, signal: str) -> int:
-        return int(self.file_handle[signal].size)
-
     def load_waveform(
         self,
         signal: Signal | str,

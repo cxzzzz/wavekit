@@ -11,7 +11,7 @@ from .readers.pattern_parser import (
     PatternMap,
     split_by_range_expr,
 )
-from .signal import Signal
+from .signal import Signal, SignalCompositeType
 
 T = TypeVar('T')
 
@@ -82,25 +82,6 @@ class Scope:
 
     def find_scope_by_module(self, module_name: str, depth: int = 0) -> list[Scope]:
         raise NotImplementedError()
-
-
-def _range_str_to_tuple(range_str: str) -> tuple[int, int] | None:
-    """Extract the innermost (last) ``[high:low]`` or ``[n]`` from *range_str*.
-
-    For multi-dimensional suffixes such as ``"[3][7:0]"`` only the final
-    bracket pair is returned (``(7, 0)``), because in practice only the last
-    dimension carries a bit-range; all preceding dimensions are index
-    selectors of the form ``[n]`` and are encoded in the signal name only.
-    Returns ``None`` if *range_str* is empty or contains no bracket expression.
-    """
-    if not range_str:
-        return None
-    last = re.search(r'\[(\d+)(?::(\d+))?\]$', range_str)
-    if last is None:
-        return None
-    high = int(last.group(1))
-    low = int(last.group(2)) if last.group(2) is not None else high
-    return (high, low)
 
 
 def _prepend_scope_name(value: Any, scope_name: str) -> Any:
@@ -212,68 +193,6 @@ def _traverse_scope_tree(
     return res
 
 
-def _match_signals_in_list(
-    signals: Sequence[Signal], pattern_list: list[PatternMap]
-) -> dict[tuple[Any, ...], Signal]:
-    """Match *pattern_list* against *signals*, recursing into composite children.
-
-    The first element of *pattern_list* is matched against signal names in
-    *signals*.  When more patterns remain and the matched signal is composite
-    (``signal.children is not None``), the function recurses into those
-    children with the remaining patterns, allowing patterns to address
-    struct/union members across multiple levels.
-
-    .. note::
-        Composite member path separators are assumed to be ``"."`` (the same
-        as scope separators).  For array elements such as ``a[10].b`` this
-        means the pattern segment for the array element is ``"a[10]"`` and the
-        next segment is ``"b"``.
-
-    TODO: Verify actual NPI naming for composite members — NPI may return the
-    full name from the root signal rather than just the local node name, and
-    array-element separators may differ from ``"."``.  Adjust accordingly once
-    confirmed.
-    """
-    if not pattern_list:
-        return {}
-
-    def resolve_leaf(sig: Signal, sig_bare: str, range_suffix: str) -> Signal:
-        new_range = _range_str_to_tuple(range_suffix) if range_suffix else sig.range
-        new_local = f'{sig_bare}{range_suffix}' if range_suffix else sig.name
-        return dataclasses.replace(sig, full_name=new_local, range=new_range)
-
-    res: dict[tuple[Any, ...], Signal] = {}
-    for sig in signals:
-        sig_bare, _ = split_by_range_expr(sig.name)
-        for k, p in pattern_list[0].items():
-            if p[0] == '@':
-                name_regex, range_suffix = split_by_range_expr(p[1:])
-                if match := re.fullmatch(name_regex, sig.name):
-                    assert len(k) == 0
-                    key = (match.groups(),)
-                    if len(pattern_list) == 1:
-                        assert key not in res, f'pattern {name_regex} matches more than one signal'
-                        res[key] = resolve_leaf(sig, sig_bare, range_suffix)
-                    elif sig.children is not None:
-                        for ck, cv in _match_signals_in_list(
-                            sig.children, pattern_list[1:]
-                        ).items():
-                            res[key + ck] = _prepend_scope_name(cv, sig.name)
-            else:
-                p_bare, range_suffix = split_by_range_expr(p)
-                if p_bare != sig_bare:
-                    continue
-                key = k
-                if len(pattern_list) == 1:
-                    assert key not in res
-                    res[key] = resolve_leaf(sig, sig_bare, range_suffix)
-                elif sig.children is not None:
-                    for ck, cv in _match_signals_in_list(sig.children, pattern_list[1:]).items():
-                        res[key + ck] = _prepend_scope_name(cv, sig.name)
-                break
-    return res
-
-
 def match_signals(
     scope: Scope, descendant_scope_pattern_list: list[PatternMap]
 ) -> dict[tuple[Any, ...], Signal]:
@@ -285,6 +204,88 @@ def match_signals(
     Returns a ``dict`` mapping expansion key tuples to :class:`~wavekit.signal.Signal`
     objects whose ``full_name`` is the complete hierarchical path.
     """
+
+    def _match_signals_in_list(
+        signals: Sequence[Signal], pattern_list: list[PatternMap]
+    ) -> dict[tuple[Any, ...], Signal]:
+        """Match *pattern_list* against *signals*, recursing into composite members.
+
+        The first element of *pattern_list* is matched against signal names in
+        *signals*.  When more patterns remain and the matched signal is composite
+        (``signal.member_list is not None``), the function recurses into those
+        members with the remaining patterns, allowing patterns to address
+        struct/union members across multiple levels.
+
+        **Array signals** require special treatment because NPI reports each
+        element's name as an extension of the parent name with no ``"."``
+        separator.  For example, signal ``a`` (ARRAY) has members ``a[0]``,
+        ``a[1]``, which in turn have members ``a[0][0]``, ``a[0][1]``, etc.
+        A user pattern like ``a[10][0]`` therefore cannot be resolved by a
+        single exact-name match at the top level.  Instead, for ARRAY signals
+        we check whether the signal name is a string prefix of the pattern:
+        if yes, we recurse into members with the **same** pattern (not
+        advancing to the next element), letting each member self-select by the
+        same prefix rule until an exact match is found.
+        """
+        if not pattern_list:
+            return {}
+
+        def resolve_leaf(sig: Signal, sig_bare: str, range_suffix: str) -> Signal:
+            if range_suffix:
+                # Extract (high, low) from the innermost bracket of range_suffix,
+                # e.g. "[7:0]" → (7, 0), "[3]" → (3, 3).
+                m = re.search(r'\[(\d+)(?::(\d+))?\]$', range_suffix)
+                h = int(m.group(1))
+                low = int(m.group(2)) if m.group(2) is not None else h
+                new_range: tuple[int, int] | None = (h, low)
+            else:
+                new_range = sig.range
+            return dataclasses.replace(
+                sig,
+                full_name=f'{sig_bare}{range_suffix}' if range_suffix else sig.name,
+                range=new_range,
+            )
+
+        res: dict[tuple[Any, ...], Signal] = {}
+        for sig in signals:
+            sig_bare, _ = split_by_range_expr(sig.name)
+            for k, p in pattern_list[0].items():
+                if p[0] == '@':
+                    name_regex, range_suffix = split_by_range_expr(p[1:])
+                    if match := re.fullmatch(name_regex, sig.name):
+                        assert len(k) == 0
+                        key = (match.groups(),)
+                        if len(pattern_list) == 1:
+                            assert key not in res, (
+                                f'pattern {name_regex} matches more than one signal'
+                            )
+                            res[key] = resolve_leaf(sig, sig_bare, range_suffix)
+                        elif sig.member_list is not None:
+                            for ck, cv in _match_signals_in_list(
+                                sig.member_list, pattern_list[1:]
+                            ).items():
+                                res[key + ck] = _prepend_scope_name(cv, sig.name)
+                else:
+                    p_bare, range_suffix = split_by_range_expr(p)
+                    if p_bare != sig_bare:
+                        continue
+                    key = k
+                    if sig.composite_type == SignalCompositeType.ARRAY and range_suffix:
+                        if sig.member_list is not None:
+                            for ck, cv in _match_signals_in_list(
+                                sig.member_list, pattern_list
+                            ).items():
+                                res[key + ck] = cv
+                    elif len(pattern_list) == 1:
+                        assert key not in res
+                        res[key] = resolve_leaf(sig, sig_bare, range_suffix)
+                    elif sig.member_list is not None:
+                        for ck, cv in _match_signals_in_list(
+                            sig.member_list, pattern_list[1:]
+                        ).items():
+                            res[key + ck] = _prepend_scope_name(cv, sig.name)
+                    break
+        return res
 
     def match_signals_in_scope(
         scope: Scope, signal_pattern_list: list[PatternMap]

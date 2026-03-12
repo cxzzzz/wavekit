@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from functools import cached_property
 
 
 class SignalCompositeType(Enum):
@@ -24,7 +25,7 @@ class Signal:
 
     Stores the signal's local name, full hierarchical path, bit-width,
     declared bit-range, and signedness.  For composite signals (structs,
-    unions, arrays) the ``composite_type`` and ``children`` fields carry
+    unions, arrays) the ``composite_type`` and ``member_list`` fields carry
     the internal structure.
 
     Attributes
@@ -59,12 +60,13 @@ class Signal:
         value describing the kind of composite.  Not all backends populate
         this field; backends that do not support composite introspection leave
         it as ``None`` (e.g. VCD).
-    children:
+    member_list:
         ``None`` for leaf signals.  For composite signals this is the list of
         direct member :class:`Signal` objects, populated in the same order the
         backend reports them.  Always ``None`` when ``composite_type`` is
         ``None``, and always a list (possibly empty) when ``composite_type``
-        is set.
+        is set.  Lazily evaluated on first access; backend-specific subclasses
+        override the ``member_list`` cached property to provide the actual loading logic.
     """
 
     name: str
@@ -73,7 +75,10 @@ class Signal:
     range: tuple[int, int] | None
     signed: bool = False
     composite_type: SignalCompositeType | None = None
-    children: list[Signal] | None = None
+
+    @cached_property
+    def member_list(self) -> list[Signal] | None:
+        return None
 
     def __str__(self) -> str:
         return (

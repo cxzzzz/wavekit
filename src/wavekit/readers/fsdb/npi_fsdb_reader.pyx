@@ -3,7 +3,6 @@ import math
 import sys
 import numpy as np
 cimport numpy as np
-#from cpython import PyBytes_FromString
 import cython
 from libcpp.vector cimport vector
 from libc.stdlib cimport malloc, free
@@ -17,138 +16,25 @@ NPI_FSDB_CT_TAGGED_UNION = <int>npiFsdbSigCtTaggedUnion
 NPI_FSDB_CT_RECORD       = <int>npiFsdbSigCtRecord
 
 
-cdef class NpiFsdbScope:
-    pass
-
-
-cdef class NpiFsdbNormalScope(NpiFsdbScope):
-    cdef npiFsdbScopeHandle scope_handle
-
-    @staticmethod
-    cdef init(npiFsdbScopeHandle scope_handle):
-        scope = NpiFsdbNormalScope()
-        scope.scope_handle = scope_handle
-        return scope
-
-    def __init__(self):
-        self.scope_handle = NULL
-
-    def child_scope_list(self, include_signal_scope:bool = True) -> list[NpiFsdbScope]:
-        assert self.scope_handle != NULL
-        res = []
-        child_scope_handle_iter = npi_fsdb_iter_child_scope(self.scope_handle)
-        
-        cdef npiFsdbScopeHandle child_scope_handle
-        while True:
-            child_scope_handle = npi_fsdb_iter_scope_next(child_scope_handle_iter)
-            if child_scope_handle == NULL:
-                break
-            res.append(NpiFsdbNormalScope.init(child_scope_handle))
-        npi_fsdb_iter_scope_stop(child_scope_handle_iter)
-
-
-        cdef npiFsdbSigHandle child_sig_handle
-        if include_signal_scope:
-            child_sig_handle_iter = npi_fsdb_iter_sig(self.scope_handle)
-            while True:
-                child_sig_handle = npi_fsdb_iter_sig_next(child_sig_handle_iter)
-                if child_sig_handle == NULL:
-                    break
-                res.append(NpiFsdbSignalScope.init(child_sig_handle))
-            npi_fsdb_iter_sig_stop(child_sig_handle_iter)
-        return res
-
-    def signal_list(self) -> list[str]:
-        assert self.scope_handle != NULL
-
-        res = []
-        sig_handle_iter = npi_fsdb_iter_sig(self.scope_handle)
-        cdef npiFsdbSigHandle sig_handle
-        cdef const char* c_str
-        while True:
-            sig_handle = npi_fsdb_iter_sig_next(sig_handle_iter)
-            if sig_handle == NULL:
-                break
-            c_str = npi_fsdb_sig_property_str(npiFsdbSigName, sig_handle)
-            name = c_str.decode('ascii')
-            res.append(name)
-        npi_fsdb_iter_sig_stop(sig_handle_iter)
-
-        return res
-
-    def name(self) -> str:
-        assert self.scope_handle != NULL
-        name = npi_fsdb_scope_property_str(npiFsdbScopeName, self.scope_handle).decode('ascii')
-        return name
-
-    def type(self) -> str:
-        assert self.scope_handle != NULL
-        type_str = npi_fsdb_scope_property_str(npiFsdbScopeType, self.scope_handle).decode('ascii')
-        return type_str
-
-    def def_name(self) -> str:
-        assert self.scope_handle != NULL
-        def_name = npi_fsdb_scope_property_str(npiFsdbScopeDefName, self.scope_handle).decode('ascii')
-        return def_name
-
-cdef class NpiFsdbSignalScope(NpiFsdbScope):
+cdef class NpiFsdbSignal:
+    """Wraps a npiFsdbSigHandle — a single signal (leaf or composite) in the FSDB hierarchy."""
     cdef npiFsdbSigHandle sig_handle
 
     @staticmethod
     cdef init(npiFsdbSigHandle sig_handle):
-        scope = NpiFsdbSignalScope()
-        scope.sig_handle = sig_handle
-        return scope
+        sig = NpiFsdbSignal()
+        sig.sig_handle = sig_handle
+        return sig
 
     def __init__(self):
         self.sig_handle = NULL
 
-    def child_scope_list(self, include_signal_scope:bool = True) -> list[NpiFsdbScope]:
-        assert self.sig_handle != NULL
-
-        cdef int has_member
-        cdef npiFsdbSigIter member_iter
-        cdef npiFsdbSigHandle member_handle
-
-        res = []
-        if include_signal_scope:
-            if npi_fsdb_sig_property(npiFsdbSigHasMember, self.sig_handle, &has_member) and has_member:
-                member_iter = npi_fsdb_iter_member(self.sig_handle)
-                while True:
-                    member_handle = npi_fsdb_iter_sig_next(member_iter)
-                    if member_handle == NULL:
-                        break
-                    res.append(NpiFsdbSignalScope.init(member_handle))
-                npi_fsdb_iter_sig_stop(member_iter)
-        return res
-
-    def signal_list(self) -> list[str]:
-        assert self.sig_handle != NULL
-
-        cdef const char* c_str
-        cdef npiFsdbSigIter member_iter
-        cdef npiFsdbSigHandle member_handle
-        cdef int has_member
-        res = []
-
-        if npi_fsdb_sig_property(npiFsdbSigHasMember, self.sig_handle, &has_member) and has_member:
-            member_iter = npi_fsdb_iter_member(self.sig_handle)
-            while True:
-                member_handle = npi_fsdb_iter_sig_next(member_iter)
-                if member_handle == NULL:
-                    break
-                c_str = npi_fsdb_sig_property_str(npiFsdbSigName, member_handle)
-                name = c_str.decode('ascii')
-                name = name.split(".")
-                name = name[len(name)-1]
-                res.append(name)
-            npi_fsdb_iter_sig_stop(member_iter)
-        return res
-
     def name(self) -> str:
         assert self.sig_handle != NULL
         name = npi_fsdb_sig_property_str(npiFsdbSigName, self.sig_handle).decode('ascii')
-        #TODO: this only works for non-array type (array's name is like data[0],can't be split by ".")
+        # NPI returns fully-qualified names like "tb.dut.field"; take only the last component.
+        # Array elements are named "a[0]", "a[0][1]" etc. — splitting by "." is safe since
+        # brackets cannot contain ".".
         name = name.split(".")
         name = name[len(name)-1]
         return name
@@ -171,11 +57,116 @@ cdef class NpiFsdbSignalScope(NpiFsdbScope):
             return ct
         return None
 
+    def width(self) -> int:
+        """Return the total bit-width of this signal (sum of all leaf members for composites)."""
+        assert self.sig_handle != NULL
+        cdef int has_member
+        cdef int w
+        cdef npiFsdbSigIter sub_signal_iter
+        cdef npiFsdbSigHandle sub_signal
+        assert npi_fsdb_sig_property(npiFsdbSigHasMember, self.sig_handle, &has_member)
+        if has_member == 0:
+            assert npi_fsdb_sig_property(npiFsdbSigRangeSize, self.sig_handle, &w)
+            return w
+        else:
+            sub_signal_iter = npi_fsdb_iter_member(self.sig_handle)
+            assert sub_signal_iter != NULL
+            w = 0
+            while (sub_signal := npi_fsdb_iter_sig_next(sub_signal_iter)):
+                w += NpiFsdbSignal.init(sub_signal).width()
+            return w
+
+    def range(self):
+        """Return the (high, low) bit-range tuple, or None for non-array composites."""
+        assert self.sig_handle != NULL
+        cdef int has_member
+        cdef int ct
+        cdef int left_range, right_range
+        assert npi_fsdb_sig_property(npiFsdbSigHasMember, self.sig_handle, &has_member)
+        assert npi_fsdb_sig_property(npiFsdbSigLeftRange, self.sig_handle, &left_range)
+        assert npi_fsdb_sig_property(npiFsdbSigRightRange, self.sig_handle, &right_range)
+        if has_member != 0:
+            assert npi_fsdb_sig_property(npiFsdbSigCompositeType, self.sig_handle, &ct)
+            if ct == <int>npiFsdbSigCtArray:
+                return (left_range, right_range)
+            return None
+        return None
+
+    def member_list(self) -> list:
+        """Return direct member NpiFsdbSignal objects for composite signals."""
+        assert self.sig_handle != NULL
+        cdef int has_member
+        cdef npiFsdbSigIter member_iter
+        cdef npiFsdbSigHandle member_handle
+
+        res = []
+        if npi_fsdb_sig_property(npiFsdbSigHasMember, self.sig_handle, &has_member) and has_member:
+            member_iter = npi_fsdb_iter_member(self.sig_handle)
+            while True:
+                member_handle = npi_fsdb_iter_sig_next(member_iter)
+                if member_handle == NULL:
+                    break
+                res.append(NpiFsdbSignal.init(member_handle))
+            npi_fsdb_iter_sig_stop(member_iter)
+        return res
+
+
+cdef class NpiFsdbScope:
+    """Wraps a npiFsdbScopeHandle — a scope node (module/block) in the FSDB hierarchy."""
+    cdef npiFsdbScopeHandle scope_handle
+
+    @staticmethod
+    cdef init(npiFsdbScopeHandle scope_handle):
+        scope = NpiFsdbScope()
+        scope.scope_handle = scope_handle
+        return scope
+
+    def __init__(self):
+        self.scope_handle = NULL
+
+    def child_scope_list(self) -> list:
+        """Return direct child NpiFsdbScope nodes (not signals)."""
+        assert self.scope_handle != NULL
+        res = []
+        child_scope_handle_iter = npi_fsdb_iter_child_scope(self.scope_handle)
+
+        cdef npiFsdbScopeHandle child_scope_handle
+        while True:
+            child_scope_handle = npi_fsdb_iter_scope_next(child_scope_handle_iter)
+            if child_scope_handle == NULL:
+                break
+            res.append(NpiFsdbScope.init(child_scope_handle))
+        npi_fsdb_iter_scope_stop(child_scope_handle_iter)
+        return res
+
+    def signal_list(self) -> list:
+        """Return direct child NpiFsdbSignal objects declared in this scope."""
+        assert self.scope_handle != NULL
+        res = []
+        child_sig_handle_iter = npi_fsdb_iter_sig(self.scope_handle)
+
+        cdef npiFsdbSigHandle child_sig_handle
+        while True:
+            child_sig_handle = npi_fsdb_iter_sig_next(child_sig_handle_iter)
+            if child_sig_handle == NULL:
+                break
+            res.append(NpiFsdbSignal.init(child_sig_handle))
+        npi_fsdb_iter_sig_stop(child_sig_handle_iter)
+        return res
+
+    def name(self) -> str:
+        assert self.scope_handle != NULL
+        return npi_fsdb_scope_property_str(npiFsdbScopeName, self.scope_handle).decode('ascii')
+
     def type(self) -> str:
-        raise NotImplementedError("type property of signal scope is not supported")
+        assert self.scope_handle != NULL
+        return npi_fsdb_scope_property_str(npiFsdbScopeType, self.scope_handle).decode('ascii')
 
     def def_name(self) -> str:
-        raise NotImplementedError("def_name property of signal scope is not supported")
+        assert self.scope_handle != NULL
+        return npi_fsdb_scope_property_str(npiFsdbScopeDefName, self.scope_handle).decode('ascii')
+
+
 @cython.boundscheck(False)  # 关闭边界检查以提升性能
 @cython.wraparound(False)   # 关闭负索引检查以提升性能
 cdef inline cstr_to_ull(char* str, unsigned int xz_value, int max_bit_num = 2147483647):
@@ -210,88 +201,6 @@ cdef inline cstr_to_bit(char* str, unsigned int xz_value):
         value = xz_value
     return value
 
-cdef inline fsdb_read_value_change(vct_handle: npiFsdbVctHandle, begin_time, end_time, width:int, xz_value:int):
-
-    cdef npiFsdbTime cur_time
-    cdef npiFsdbValue cur_value
-    cdef int stat
-
-    cdef vector[unsigned long long] time_array
-
-    cdef int value_array_num = math.ceil(width/64)
-    assert width <= 64*64
-    cdef vector[unsigned long long] value_array[64]
-
-    cdef int first = 1
-    cdef int i,j
-    cdef unsigned long long cur_int_value
-    while True:
-        if first:
-            if begin_time is None:
-                stat = npi_fsdb_goto_first(vct_handle)
-            else:
-                stat = npi_fsdb_goto_time(vct_handle,  <npiFsdbTime> begin_time)
-        else:
-            stat = npi_fsdb_goto_next(vct_handle)
-        if stat == 0:
-            break
-
-        cur_value.format = npiFsdbBinStrVal
-        npi_fsdb_vct_time(vct_handle, &cur_time)
-        npi_fsdb_vct_value(vct_handle, &cur_value)
-        if cur_time > end_time:
-            break
-
-        time_array.push_back(cur_time)
-        if width == 1: # opt for clk
-            value_array[0].push_back(cstr_to_bit(<char*>cur_value.value.str, xz_value))
-        else:
-            cur_lllint_value = 0
-            for i in range(value_array_num):
-                value_array[i].push_back(cstr_to_ull(<char*>cur_value.value.str + 64*i, xz_value, 64))
-
-    result = np.zeros((value_array[0].size(), 2), dtype=np.uint64 if width <= 64 else np.object_)  # 创建一个 (n, 2) 的二维数组，dtype 为 int32
-    for j in range(value_array[0].size()):
-        result[j][0] = time_array[j]
-        if width <= 64:
-            result[j][1] = value_array[0][j]
-        else:
-            for i in range(value_array_num):
-                result[j][1] = (result[j][1] << 64) + value_array[i][j]
-
-    return result
-
-cdef get_signal_handle_width(npiFsdbSigHandle signal_handle):
-    cdef int has_member
-    cdef int width
-    cdef npiFsdbSigIter sub_signal_iter
-    cdef npiFsdbSigHandle sub_signal
-    assert(npi_fsdb_sig_property(npiFsdbSigHasMember, signal_handle, &has_member))
-    if(has_member == 0):
-        assert(npi_fsdb_sig_property(npiFsdbSigRangeSize, signal_handle, &width))
-        return width
-    else:
-        sub_signal_iter = npi_fsdb_iter_member(signal_handle)
-        assert(sub_signal_iter != NULL)
-        width = 0
-        while(sub_signal := npi_fsdb_iter_sig_next(sub_signal_iter)):
-            width += get_signal_handle_width(sub_signal)
-        return width
-
-cdef get_signal_handle_range(npiFsdbSigHandle signal_handle):
-    cdef int has_member
-    cdef int type
-    cdef int left_range, right_range
-    assert(npi_fsdb_sig_property(npiFsdbSigHasMember, signal_handle, &has_member))
-    assert(npi_fsdb_sig_property(npiFsdbSigLeftRange, signal_handle, &left_range))
-    assert(npi_fsdb_sig_property(npiFsdbSigRightRange, signal_handle, &right_range))
-
-    if has_member != 0:
-        assert(npi_fsdb_sig_property(npiFsdbSigCompositeType, signal_handle, &type))
-        if type == <int>npiFsdbSigCtArray:
-            return (left_range, right_range)
-        return None
-    return None
 
 cdef class NpiFsdbReader:
     cdef npiFsdbFileHandle fsdb_handle
@@ -299,69 +208,36 @@ cdef class NpiFsdbReader:
 
     def __init__(self, str file):
         import os
-        
+
         # 检查VERDI_HOME环境变量
         verdi_home = os.environ.get('VERDI_HOME')
         if verdi_home:
             npi_lib_path = os.path.join(verdi_home, 'share/NPI/lib/LINUX64/libNPI.so')
-        
-        #cdef int argc = len(sys.argv)
-        #cdef char** argv = <char**>malloc((argc + 1) * sizeof(char*))
 
-        #for i in range(argc):
-        #    argv[i] = <char*>malloc(strlen(sys.argv[i].encode('ascii')))
-        #    strcpy(argv[i], sys.argv[i].encode('ascii'))
-        #argv[argc] = NULL  # Null-terminate the array
-
-        #npi_init(argc, argv)
-        #self.file = file
-        #free(argv)
-
-        #cdef npiFsdbFileHandle fsdb_handle
         file_str = file.encode('utf-8')
         cdef char* file_s = file_str
         self.fsdb_handle = npi_fsdb_open(file_s)
         if(self.fsdb_handle == NULL):
             raise OSError(f"Failed to open fsdb file :{file_str}")
 
-
-
-    def get_signal_width(
-        self,
-        str signal
-    ) -> int:
-        
-        cdef npiFsdbSigHandle signal_handle = npi_fsdb_sig_by_name(self.fsdb_handle,  signal.encode('ascii'), NULL)
+    def get_signal(self, str signal) -> NpiFsdbSignal:
+        """Look up a signal by its full hierarchical path and return an NpiFsdbSignal handle."""
+        cdef npiFsdbSigHandle signal_handle = npi_fsdb_sig_by_name(self.fsdb_handle, signal.encode('ascii'), NULL)
         assert signal_handle != NULL, f"can't find signal: {signal}"
-        
-        cdef int width = get_signal_handle_width(signal_handle)
-        return width
-
-    def get_signal_range(
-        self,
-        str signal
-    ) -> tuple[int,int]:
-        
-        cdef npiFsdbSigHandle signal_handle = npi_fsdb_sig_by_name(self.fsdb_handle,  signal.encode('ascii'), NULL)
-        assert signal_handle != NULL, f"can't find signal: {signal}"
-
-        return get_signal_handle_range(signal_handle)
+        return NpiFsdbSignal.init(signal_handle)
 
     @cython.boundscheck(False)  # 关闭边界检查以提升性能
     @cython.wraparound(False)   # 关闭负索引检查以提升性能
     def load_value_change(
         self,
-        str signal,
+        NpiFsdbSignal signal,
         unsigned long long begin_time,
         unsigned long long end_time,
         int xz_value
     ) -> np.ndarray:
-        
-        cdef npiFsdbSigHandle signal_handle = npi_fsdb_sig_by_name(self.fsdb_handle,  signal.encode('ascii'), NULL)
-        assert signal_handle != NULL, f"can't find signal: {signal}"
-        cdef int width = get_signal_handle_width(signal_handle)
 
-        cdef npiFsdbVctHandle signal_vct_handle = npi_fsdb_create_vct(signal_handle)
+        cdef int width = signal.width()
+        cdef npiFsdbVctHandle signal_vct_handle = npi_fsdb_create_vct(signal.sig_handle)
         cdef npiFsdbTime cur_time
         cdef npiFsdbValue cur_value
         cdef int stat
@@ -382,7 +258,7 @@ cdef class NpiFsdbReader:
                     stat = npi_fsdb_goto_time(signal_vct_handle,  <npiFsdbTime> begin_time)
             else:
                 stat = npi_fsdb_goto_next(signal_vct_handle)
-            
+
             if stat == 0:
                 break
 
@@ -422,11 +298,7 @@ cdef class NpiFsdbReader:
                 result_object[:,1] = (result_object[:,1] << shift) + value_np_array
             return result_object
 
-        #npi_fsdb_release_vct(signal_vct_handle)
-        #npi_fsdb_unload_vc(self.fsdb_handle)
-        #return result
-
-    def top_scope_list(self) -> list[NpiFsdbScope]:
+    def top_scope_list(self) -> list:
         cdef npiFsdbScopeIter top_scope_iter
         cdef npiFsdbScopeHandle top_scope_handle
 
@@ -436,7 +308,7 @@ cdef class NpiFsdbReader:
             top_scope_handle = npi_fsdb_iter_scope_next(top_scope_iter)
             if top_scope_handle == NULL:
                 break
-            res.append(NpiFsdbNormalScope.init(top_scope_handle))
+            res.append(NpiFsdbScope.init(top_scope_handle))
         npi_fsdb_iter_scope_stop(top_scope_iter)
         return res
 
