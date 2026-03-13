@@ -138,7 +138,13 @@ class FsdbReader(Reader):
             import os
             import sys
 
-            rel_lib_path = os.environ['VERDI_HOME'] + '/share/NPI/python'
+            verdi_home = os.environ.get('VERDI_HOME')
+            if verdi_home is None:
+                raise RuntimeError(
+                    'VERDI_HOME environment variable is not set.\n'
+                    'Please set VERDI_HOME to your Verdi installation path.'
+                )
+            rel_lib_path = verdi_home + '/share/NPI/python'
             sys.path.append(os.path.abspath(rel_lib_path))
             FsdbReader.pynpi['npisys'] = importlib.import_module('pynpi.npisys')
             FsdbReader.pynpi['waveform'] = importlib.import_module('pynpi.waveform')

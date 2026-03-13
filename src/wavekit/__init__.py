@@ -34,11 +34,35 @@ __all__ = [
     'MatchResult',
     'MatchStatus',
     'PatternError',
+    'has_fsdb_support',
 ]
 
-try:
-    from .readers.fsdb.reader import FsdbReader as FsdbReader
+# Detect if FSDB support is available (compiled with VERDI_HOME)
+import importlib.util
 
-    __all__.append('FsdbReader')
-except ImportError:
-    pass
+_fsdb_available = (
+    importlib.util.find_spec('.readers.fsdb.npi_fsdb_reader', package=__name__) is not None
+)
+
+
+def has_fsdb_support() -> bool:
+    """Check if FsdbReader is available in the current installation."""
+    return _fsdb_available
+
+
+class _FsdbReaderStub:
+    """Placeholder that raises an error when FsdbReader is used without Verdi support."""
+
+    def __init__(self, *args, **kwargs):
+        raise RuntimeError(
+            'FsdbReader requires Verdi to be installed and configured.\n\n'
+            '1. Set VERDI_HOME environment variable to your Verdi installation path.\n'
+            '2. Reinstall wavekit:\n'
+            '    pip install --force-reinstall --no-cache-dir --no-deps wavekit'
+        )
+
+
+if _fsdb_available:
+    from .readers.fsdb.reader import FsdbReader as FsdbReader
+else:
+    FsdbReader = _FsdbReaderStub  # type: ignore[assignment]
