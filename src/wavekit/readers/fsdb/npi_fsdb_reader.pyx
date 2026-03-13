@@ -162,8 +162,10 @@ cdef class NpiFsdbScope:
         assert self.scope_handle != NULL
         return npi_fsdb_scope_property_str(npiFsdbScopeType, self.scope_handle).decode('ascii')
 
-    def def_name(self) -> str:
-        assert self.scope_handle != NULL
+    def def_name(self) -> str | None:
+        """Return the module definition name, or None if this scope is not a module."""
+        if self.type() != 'npiFsdbScopeSvModule':
+            return None
         return npi_fsdb_scope_property_str(npiFsdbScopeDefName, self.scope_handle).decode('ascii')
 
 

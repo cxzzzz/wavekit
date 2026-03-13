@@ -101,17 +101,15 @@ class FsdbScope(Scope):
     def child_scope_list(self) -> Sequence[Scope]:
         return [FsdbScope(c, self, self.reader) for c in self._npi_scope.child_scope_list()]
 
-    @property
+    @cached_property
     def type(self) -> str:
-        if not hasattr(self, '_type'):
-            self._type = self._npi_scope.type()
-        return self._type
+        """Return the NPI scope type string, e.g. 'npiFsdbScopeSvModule'."""
+        return self._npi_scope.type()
 
-    @property
+    @cached_property
     def def_name(self) -> str | None:
-        if not hasattr(self, '_def_name'):
-            self._def_name = self._npi_scope.def_name()
-        return self._def_name
+        """Return the module definition name, or None if this scope is not a module."""
+        return self._npi_scope.def_name()
 
     def find_scope_by_module(self, module_name: str, depth: int = 0) -> list[Scope]:
         if not hasattr(self, '_preloaded_module_scope'):
