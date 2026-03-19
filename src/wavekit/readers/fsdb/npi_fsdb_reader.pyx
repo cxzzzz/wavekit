@@ -1,13 +1,367 @@
 # cython: language_level=3
-import math
-import sys
+import ctypes.util
+import os
 import numpy as np
 cimport numpy as np
 import cython
 from libcpp.vector cimport vector
-from libc.stdlib cimport malloc, free
-from libc.string cimport strcpy, strlen
 from .npi_fsdb cimport *
+
+cdef extern from "dlfcn.h":
+    enum:
+        RTLD_NOW
+        RTLD_LOCAL
+
+    void* dlopen(const char* filename, int flags)
+    void* dlsym(void* handle, const char* symbol)
+    int dlclose(void* handle)
+    const char* dlerror()
+
+ctypedef npiFsdbFileHandle (*npi_fsdb_open_fn)(const NPI_BYTE8* name)
+ctypedef NPI_INT32 (*npi_fsdb_close_fn)(npiFsdbFileHandle file)
+ctypedef NPI_INT32 (*npi_fsdb_min_time_fn)(npiFsdbFileHandle file, npiFsdbTime* time)
+ctypedef NPI_INT32 (*npi_fsdb_max_time_fn)(npiFsdbFileHandle file, npiFsdbTime* time)
+ctypedef npiFsdbSigHandle (*npi_fsdb_sig_by_name_fn)(
+    npiFsdbFileHandle file,
+    const NPI_BYTE8* name,
+    npiFsdbScopeHandle scope,
+)
+ctypedef npiFsdbVctHandle (*npi_fsdb_create_vct_fn)(npiFsdbSigHandle sig)
+ctypedef NPI_INT32 (*npi_fsdb_goto_time_fn)(npiFsdbVctHandle vct, npiFsdbTime time)
+ctypedef NPI_INT32 (*npi_fsdb_goto_first_fn)(npiFsdbVctHandle vct)
+ctypedef NPI_INT32 (*npi_fsdb_goto_next_fn)(npiFsdbVctHandle vct)
+ctypedef NPI_INT32 (*npi_fsdb_vct_time_fn)(npiFsdbVctHandle vct, npiFsdbTime* time)
+ctypedef NPI_INT32 (*npi_fsdb_vct_value_fn)(npiFsdbVctHandle vct, npiFsdbValue* value)
+ctypedef NPI_INT32 (*npi_fsdb_sig_property_fn)(
+    npiFsdbSigPropertyType type,
+    npiFsdbSigHandle sig,
+    NPI_INT32* prop,
+)
+ctypedef const NPI_BYTE8* (*npi_fsdb_sig_property_str_fn)(
+    npiFsdbSigPropertyType type,
+    npiFsdbSigHandle sig,
+)
+ctypedef const NPI_BYTE8* (*npi_fsdb_scope_property_str_fn)(
+    npiFsdbScopePropertyType type,
+    npiFsdbScopeHandle scope,
+)
+ctypedef npiFsdbScopeIter (*npi_fsdb_iter_top_scope_fn)(npiFsdbFileHandle file)
+ctypedef npiFsdbScopeIter (*npi_fsdb_iter_child_scope_fn)(npiFsdbScopeHandle scope)
+ctypedef npiFsdbScopeHandle (*npi_fsdb_iter_scope_next_fn)(npiFsdbScopeIter iter)
+ctypedef npiFsdbSigHandle (*npi_fsdb_iter_sig_next_fn)(npiFsdbSigIter iter)
+ctypedef npiFsdbSigIter (*npi_fsdb_iter_sig_fn)(npiFsdbScopeHandle scope)
+ctypedef npiFsdbSigIter (*npi_fsdb_iter_member_fn)(npiFsdbSigHandle sig)
+ctypedef NPI_INT32 (*npi_fsdb_iter_scope_stop_fn)(npiFsdbScopeIter iter)
+ctypedef NPI_INT32 (*npi_fsdb_iter_sig_stop_fn)(npiFsdbSigIter iter)
+
+cdef void* _npi_lib_handle = NULL
+cdef object _npi_lib_path = None
+cdef npi_fsdb_open_fn _npi_fsdb_open = NULL
+cdef npi_fsdb_close_fn _npi_fsdb_close = NULL
+cdef npi_fsdb_min_time_fn _npi_fsdb_min_time = NULL
+cdef npi_fsdb_max_time_fn _npi_fsdb_max_time = NULL
+cdef npi_fsdb_sig_by_name_fn _npi_fsdb_sig_by_name = NULL
+cdef npi_fsdb_create_vct_fn _npi_fsdb_create_vct = NULL
+cdef npi_fsdb_goto_time_fn _npi_fsdb_goto_time = NULL
+cdef npi_fsdb_goto_first_fn _npi_fsdb_goto_first = NULL
+cdef npi_fsdb_goto_next_fn _npi_fsdb_goto_next = NULL
+cdef npi_fsdb_vct_time_fn _npi_fsdb_vct_time = NULL
+cdef npi_fsdb_vct_value_fn _npi_fsdb_vct_value = NULL
+cdef npi_fsdb_sig_property_fn _npi_fsdb_sig_property = NULL
+cdef npi_fsdb_sig_property_str_fn _npi_fsdb_sig_property_str = NULL
+cdef npi_fsdb_scope_property_str_fn _npi_fsdb_scope_property_str = NULL
+cdef npi_fsdb_iter_top_scope_fn _npi_fsdb_iter_top_scope = NULL
+cdef npi_fsdb_iter_child_scope_fn _npi_fsdb_iter_child_scope = NULL
+cdef npi_fsdb_iter_scope_next_fn _npi_fsdb_iter_scope_next = NULL
+cdef npi_fsdb_iter_sig_next_fn _npi_fsdb_iter_sig_next = NULL
+cdef npi_fsdb_iter_sig_fn _npi_fsdb_iter_sig = NULL
+cdef npi_fsdb_iter_member_fn _npi_fsdb_iter_member = NULL
+cdef npi_fsdb_iter_scope_stop_fn _npi_fsdb_iter_scope_stop = NULL
+cdef npi_fsdb_iter_sig_stop_fn _npi_fsdb_iter_sig_stop = NULL
+
+
+cdef str _decode_cstr(const char* value):
+    if value == NULL:
+        return ''
+    return (<bytes>value).decode('utf-8', 'replace')
+
+
+cdef str _last_dlerror():
+    return _decode_cstr(dlerror())
+
+
+cdef void _clear_npi_symbols():
+    global _npi_fsdb_open, _npi_fsdb_close, _npi_fsdb_min_time, _npi_fsdb_max_time
+    global _npi_fsdb_sig_by_name, _npi_fsdb_create_vct, _npi_fsdb_goto_time
+    global _npi_fsdb_goto_first, _npi_fsdb_goto_next, _npi_fsdb_vct_time
+    global _npi_fsdb_vct_value, _npi_fsdb_sig_property, _npi_fsdb_sig_property_str
+    global _npi_fsdb_scope_property_str, _npi_fsdb_iter_top_scope
+    global _npi_fsdb_iter_child_scope, _npi_fsdb_iter_scope_next, _npi_fsdb_iter_sig_next
+    global _npi_fsdb_iter_sig, _npi_fsdb_iter_member, _npi_fsdb_iter_scope_stop
+    global _npi_fsdb_iter_sig_stop
+    _npi_fsdb_open = NULL
+    _npi_fsdb_close = NULL
+    _npi_fsdb_min_time = NULL
+    _npi_fsdb_max_time = NULL
+    _npi_fsdb_sig_by_name = NULL
+    _npi_fsdb_create_vct = NULL
+    _npi_fsdb_goto_time = NULL
+    _npi_fsdb_goto_first = NULL
+    _npi_fsdb_goto_next = NULL
+    _npi_fsdb_vct_time = NULL
+    _npi_fsdb_vct_value = NULL
+    _npi_fsdb_sig_property = NULL
+    _npi_fsdb_sig_property_str = NULL
+    _npi_fsdb_scope_property_str = NULL
+    _npi_fsdb_iter_top_scope = NULL
+    _npi_fsdb_iter_child_scope = NULL
+    _npi_fsdb_iter_scope_next = NULL
+    _npi_fsdb_iter_sig_next = NULL
+    _npi_fsdb_iter_sig = NULL
+    _npi_fsdb_iter_member = NULL
+    _npi_fsdb_iter_scope_stop = NULL
+    _npi_fsdb_iter_sig_stop = NULL
+
+
+cdef void* _require_symbol(void* handle, const char* symbol_name) except NULL:
+    cdef void* symbol
+
+    dlerror()
+    symbol = dlsym(handle, symbol_name)
+    if symbol == NULL:
+        raise OSError(
+            f"Failed to resolve symbol {_decode_cstr(symbol_name)!r} from "
+            f"{_npi_lib_path or 'libNPI.so'}: {_last_dlerror() or 'symbol not found'}"
+        )
+    return symbol
+
+
+cdef void _bind_npi_symbols(void* handle) except *:
+    global _npi_fsdb_open, _npi_fsdb_close, _npi_fsdb_min_time, _npi_fsdb_max_time
+    global _npi_fsdb_sig_by_name, _npi_fsdb_create_vct, _npi_fsdb_goto_time
+    global _npi_fsdb_goto_first, _npi_fsdb_goto_next, _npi_fsdb_vct_time
+    global _npi_fsdb_vct_value, _npi_fsdb_sig_property, _npi_fsdb_sig_property_str
+    global _npi_fsdb_scope_property_str, _npi_fsdb_iter_top_scope
+    global _npi_fsdb_iter_child_scope, _npi_fsdb_iter_scope_next, _npi_fsdb_iter_sig_next
+    global _npi_fsdb_iter_sig, _npi_fsdb_iter_member, _npi_fsdb_iter_scope_stop
+    global _npi_fsdb_iter_sig_stop
+    _npi_fsdb_open = <npi_fsdb_open_fn>_require_symbol(handle, b'npi_fsdb_open')
+    _npi_fsdb_close = <npi_fsdb_close_fn>_require_symbol(handle, b'npi_fsdb_close')
+    _npi_fsdb_min_time = <npi_fsdb_min_time_fn>_require_symbol(handle, b'npi_fsdb_min_time')
+    _npi_fsdb_max_time = <npi_fsdb_max_time_fn>_require_symbol(handle, b'npi_fsdb_max_time')
+    _npi_fsdb_sig_by_name = <npi_fsdb_sig_by_name_fn>_require_symbol(
+        handle, b'npi_fsdb_sig_by_name'
+    )
+    _npi_fsdb_create_vct = <npi_fsdb_create_vct_fn>_require_symbol(handle, b'npi_fsdb_create_vct')
+    _npi_fsdb_goto_time = <npi_fsdb_goto_time_fn>_require_symbol(handle, b'npi_fsdb_goto_time')
+    _npi_fsdb_goto_first = <npi_fsdb_goto_first_fn>_require_symbol(handle, b'npi_fsdb_goto_first')
+    _npi_fsdb_goto_next = <npi_fsdb_goto_next_fn>_require_symbol(handle, b'npi_fsdb_goto_next')
+    _npi_fsdb_vct_time = <npi_fsdb_vct_time_fn>_require_symbol(handle, b'npi_fsdb_vct_time')
+    _npi_fsdb_vct_value = <npi_fsdb_vct_value_fn>_require_symbol(handle, b'npi_fsdb_vct_value')
+    _npi_fsdb_sig_property = <npi_fsdb_sig_property_fn>_require_symbol(
+        handle, b'npi_fsdb_sig_property'
+    )
+    _npi_fsdb_sig_property_str = <npi_fsdb_sig_property_str_fn>_require_symbol(
+        handle, b'npi_fsdb_sig_property_str'
+    )
+    _npi_fsdb_scope_property_str = <npi_fsdb_scope_property_str_fn>_require_symbol(
+        handle, b'npi_fsdb_scope_property_str'
+    )
+    _npi_fsdb_iter_top_scope = <npi_fsdb_iter_top_scope_fn>_require_symbol(
+        handle, b'npi_fsdb_iter_top_scope'
+    )
+    _npi_fsdb_iter_child_scope = <npi_fsdb_iter_child_scope_fn>_require_symbol(
+        handle, b'npi_fsdb_iter_child_scope'
+    )
+    _npi_fsdb_iter_scope_next = <npi_fsdb_iter_scope_next_fn>_require_symbol(
+        handle, b'npi_fsdb_iter_scope_next'
+    )
+    _npi_fsdb_iter_sig_next = <npi_fsdb_iter_sig_next_fn>_require_symbol(
+        handle, b'npi_fsdb_iter_sig_next'
+    )
+    _npi_fsdb_iter_sig = <npi_fsdb_iter_sig_fn>_require_symbol(handle, b'npi_fsdb_iter_sig')
+    _npi_fsdb_iter_member = <npi_fsdb_iter_member_fn>_require_symbol(handle, b'npi_fsdb_iter_member')
+    _npi_fsdb_iter_scope_stop = <npi_fsdb_iter_scope_stop_fn>_require_symbol(
+        handle, b'npi_fsdb_iter_scope_stop'
+    )
+    _npi_fsdb_iter_sig_stop = <npi_fsdb_iter_sig_stop_fn>_require_symbol(
+        handle, b'npi_fsdb_iter_sig_stop'
+    )
+
+
+cdef list _npi_library_candidates(object preferred_path):
+    cdef list candidates = []
+    cdef set seen = set()
+    cdef object candidate
+    verdi_home = os.environ.get('VERDI_HOME')
+
+    for candidate in [
+        preferred_path,
+        os.environ.get('WAVEKIT_NPI_LIB'),
+        os.path.join(verdi_home, 'share', 'NPI', 'lib', 'LINUX64', 'libNPI.so')
+        if verdi_home
+        else None,
+        os.path.join(verdi_home, 'share', 'NPI', 'lib', 'linux64', 'libNPI.so')
+        if verdi_home
+        else None,
+        os.path.join(verdi_home, 'share', 'NPI', 'lib', 'libNPI.so') if verdi_home else None,
+        ctypes.util.find_library('NPI'),
+        'libNPI.so',
+    ]:
+        if candidate and candidate not in seen:
+            candidates.append(candidate)
+            seen.add(candidate)
+    return candidates
+
+
+cdef void _ensure_npi_loaded(object preferred_path=None) except *:
+    global _npi_lib_handle, _npi_lib_path
+
+    cdef void* handle
+    cdef list errors = []
+    cdef bytes path_bytes
+    cdef object candidate
+
+    if _npi_lib_handle != NULL:
+        return
+
+    for candidate in _npi_library_candidates(preferred_path):
+        path_bytes = str(candidate).encode('utf-8')
+        handle = dlopen(path_bytes, RTLD_NOW | RTLD_LOCAL)
+        if handle == NULL:
+            errors.append(f'{candidate}: {_last_dlerror() or "dlopen failed"}')
+            continue
+        try:
+            _npi_lib_path = str(candidate)
+            _bind_npi_symbols(handle)
+        except Exception as exc:
+            _clear_npi_symbols()
+            dlclose(handle)
+            errors.append(f'{candidate}: {exc}')
+            _npi_lib_path = None
+            continue
+        _npi_lib_handle = handle
+        return
+
+    raise OSError(
+        'Failed to load Verdi FSDB runtime library libNPI.so. '
+        'Set VERDI_HOME or WAVEKIT_NPI_LIB, or add libNPI.so to LD_LIBRARY_PATH.\n'
+        + '\n'.join(errors)
+    )
+
+
+cpdef bint fsdb_runtime_available(object preferred_path=None):
+    try:
+        _ensure_npi_loaded(preferred_path)
+        return True
+    except Exception:
+        return False
+
+
+cpdef object fsdb_runtime_library_path():
+    return _npi_lib_path
+
+
+cdef inline npiFsdbFileHandle npi_fsdb_open(const NPI_BYTE8* name):
+    return _npi_fsdb_open(name)
+
+
+cdef inline NPI_INT32 npi_fsdb_close(npiFsdbFileHandle file):
+    return _npi_fsdb_close(file)
+
+
+cdef inline NPI_INT32 npi_fsdb_min_time(npiFsdbFileHandle file, npiFsdbTime* time):
+    return _npi_fsdb_min_time(file, time)
+
+
+cdef inline NPI_INT32 npi_fsdb_max_time(npiFsdbFileHandle file, npiFsdbTime* time):
+    return _npi_fsdb_max_time(file, time)
+
+
+cdef inline npiFsdbSigHandle npi_fsdb_sig_by_name(
+    npiFsdbFileHandle file,
+    const NPI_BYTE8* name,
+    npiFsdbScopeHandle scope,
+):
+    return _npi_fsdb_sig_by_name(file, name, scope)
+
+
+cdef inline npiFsdbVctHandle npi_fsdb_create_vct(npiFsdbSigHandle sig):
+    return _npi_fsdb_create_vct(sig)
+
+
+cdef inline NPI_INT32 npi_fsdb_goto_time(npiFsdbVctHandle vct, npiFsdbTime time):
+    return _npi_fsdb_goto_time(vct, time)
+
+
+cdef inline NPI_INT32 npi_fsdb_goto_first(npiFsdbVctHandle vct):
+    return _npi_fsdb_goto_first(vct)
+
+
+cdef inline NPI_INT32 npi_fsdb_goto_next(npiFsdbVctHandle vct):
+    return _npi_fsdb_goto_next(vct)
+
+
+cdef inline NPI_INT32 npi_fsdb_vct_time(npiFsdbVctHandle vct, npiFsdbTime* time):
+    return _npi_fsdb_vct_time(vct, time)
+
+
+cdef inline NPI_INT32 npi_fsdb_vct_value(npiFsdbVctHandle vct, npiFsdbValue* value):
+    return _npi_fsdb_vct_value(vct, value)
+
+
+cdef inline NPI_INT32 npi_fsdb_sig_property(
+    npiFsdbSigPropertyType type,
+    npiFsdbSigHandle sig,
+    NPI_INT32* prop,
+):
+    return _npi_fsdb_sig_property(type, sig, prop)
+
+
+cdef inline const NPI_BYTE8* npi_fsdb_sig_property_str(
+    npiFsdbSigPropertyType type,
+    npiFsdbSigHandle sig,
+):
+    return _npi_fsdb_sig_property_str(type, sig)
+
+
+cdef inline const NPI_BYTE8* npi_fsdb_scope_property_str(
+    npiFsdbScopePropertyType type,
+    npiFsdbScopeHandle scope,
+):
+    return _npi_fsdb_scope_property_str(type, scope)
+
+
+cdef inline npiFsdbScopeIter npi_fsdb_iter_top_scope(npiFsdbFileHandle file):
+    return _npi_fsdb_iter_top_scope(file)
+
+
+cdef inline npiFsdbScopeIter npi_fsdb_iter_child_scope(npiFsdbScopeHandle scope):
+    return _npi_fsdb_iter_child_scope(scope)
+
+
+cdef inline npiFsdbScopeHandle npi_fsdb_iter_scope_next(npiFsdbScopeIter iter):
+    return _npi_fsdb_iter_scope_next(iter)
+
+
+cdef inline npiFsdbSigHandle npi_fsdb_iter_sig_next(npiFsdbSigIter iter):
+    return _npi_fsdb_iter_sig_next(iter)
+
+
+cdef inline npiFsdbSigIter npi_fsdb_iter_sig(npiFsdbScopeHandle scope):
+    return _npi_fsdb_iter_sig(scope)
+
+
+cdef inline npiFsdbSigIter npi_fsdb_iter_member(npiFsdbSigHandle sig):
+    return _npi_fsdb_iter_member(sig)
+
+
+cdef inline NPI_INT32 npi_fsdb_iter_scope_stop(npiFsdbScopeIter iter):
+    return _npi_fsdb_iter_scope_stop(iter)
+
+
+cdef inline NPI_INT32 npi_fsdb_iter_sig_stop(npiFsdbSigIter iter):
+    return _npi_fsdb_iter_sig_stop(iter)
 
 NPI_FSDB_CT_ARRAY        = <int>npiFsdbSigCtArray
 NPI_FSDB_CT_STRUCT       = <int>npiFsdbSigCtStruct
@@ -209,18 +563,15 @@ cdef class NpiFsdbReader:
     cdef str file
 
     def __init__(self, str file):
-        import os
-
-        # 检查VERDI_HOME环境变量
-        verdi_home = os.environ.get('VERDI_HOME')
-        if verdi_home:
-            npi_lib_path = os.path.join(verdi_home, 'share/NPI/lib/LINUX64/libNPI.so')
+        _ensure_npi_loaded()
 
         file_str = file.encode('utf-8')
         cdef char* file_s = file_str
         self.fsdb_handle = npi_fsdb_open(file_s)
         if(self.fsdb_handle == NULL):
-            raise OSError(f"Failed to open fsdb file :{file_str}")
+            raise OSError(
+                f"Failed to open fsdb file {file!r} using {_npi_lib_path or 'libNPI.so'}"
+            )
 
     def get_signal(self, str signal) -> NpiFsdbSignal:
         """Look up a signal by its full hierarchical path and return an NpiFsdbSignal handle."""

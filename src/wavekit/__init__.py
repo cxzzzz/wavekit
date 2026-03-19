@@ -37,32 +37,30 @@ __all__ = [
     'has_fsdb_support',
 ]
 
-# Detect if FSDB support is available (compiled with VERDI_HOME)
-import importlib.util
-
-_fsdb_available = (
-    importlib.util.find_spec('.readers.fsdb.npi_fsdb_reader', package=__name__) is not None
-)
-
-
-def has_fsdb_support() -> bool:
-    """Check if FsdbReader is available in the current installation."""
-    return _fsdb_available
-
-
-class _FsdbReaderStub:
-    """Placeholder that raises an error when FsdbReader is used without Verdi support."""
-
-    def __init__(self, *args, **kwargs):
-        raise RuntimeError(
-            'FsdbReader requires Verdi to be installed and configured.\n\n'
-            '1. Set VERDI_HOME environment variable to your Verdi installation path.\n'
-            '2. Reinstall wavekit:\n'
-            '    pip install --force-reinstall --no-cache-dir --no-deps wavekit'
-        )
-
-
-if _fsdb_available:
+try:
+    from .readers.fsdb.npi_fsdb_reader import fsdb_runtime_available as _fsdb_runtime_available
     from .readers.fsdb.reader import FsdbReader as FsdbReader
-else:
+except Exception as _fsdb_import_error:
+    _fsdb_available = False
+
+    def has_fsdb_support() -> bool:
+        """Check if FsdbReader is available in the current installation."""
+        return False
+
+    class _FsdbReaderStub:
+        """Placeholder that raises an error when the FSDB extension is unavailable."""
+
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError(
+                'FsdbReader is unavailable in this installation.\n\n'
+                'The FSDB extension failed to import:\n'
+                f'  {_fsdb_import_error}'
+            )
+
     FsdbReader = _FsdbReaderStub  # type: ignore[assignment]
+else:
+    _fsdb_available = True
+
+    def has_fsdb_support() -> bool:
+        """Check whether the Verdi FSDB runtime is available right now."""
+        return _fsdb_runtime_available()

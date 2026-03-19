@@ -37,7 +37,9 @@ print(valid_data.value)                # numpy array of integer values
 ### `VcdReader(file: str)` / `FsdbReader(file: str)`
 
 Open a waveform file.  Use as a context manager (`with`) to ensure the file is
-closed.  `FsdbReader` requires the `VERDI_HOME` environment variable to be set.
+closed.  `FsdbReader` requires Verdi runtime libraries at execution time.  Set
+`VERDI_HOME` or `WAVEKIT_NPI_LIB`, or make `libNPI.so` visible via
+`LD_LIBRARY_PATH`.
 
 ---
 
