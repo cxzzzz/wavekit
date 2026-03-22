@@ -130,17 +130,30 @@ class Waveform:
         dense sampled waveform to just the value-change events.
 
         Returns a new :class:`Waveform` where no two adjacent entries have the
-        same value.  :meth:`compress` is an alias for this method.
+        same value.  Behavior matches :func:`numpy.unique_consecutive`.
+        """
+        if len(self.value) <= 1:
+            return self.copy()
+        # Keep first element, then keep elements where value changed from previous
+        mask = np.concatenate(([True], np.diff(self.value) != 0))
+        return self.take(np.where(mask)[0])
+
+    def compress(self) -> Waveform:
+        """Remove consecutive duplicate values, keeping the last occurrence.
+
+        Unlike :meth:`unique_consecutive`, this preserves the final timestamp
+        and value, which is useful for waveforms where the end time matters.
+
+        Returns a new :class:`Waveform` where no two adjacent entries have the
+        same value, except the last sample is always preserved.
         """
         if len(self.value) <= 1:
             return self.copy()
         diff_mask = np.diff(self.value) != 0
-        padded_diff_mask = np.concatenate(([1], diff_mask[:-1], [1]))
-        diff_indices = np.where(padded_diff_mask)[0]
-        return self.take(diff_indices)
-
-    def compress(self) -> Waveform:
-        return self.unique_consecutive()
+        # Keep where next value changed (which means current is last of its group)
+        # plus always keep last element
+        mask = np.concatenate((diff_mask, [True]))
+        return self.take(np.where(mask)[0])
 
     def vectorized_filter(
         self,

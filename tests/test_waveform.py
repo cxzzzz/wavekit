@@ -267,15 +267,20 @@ def test_vectorized_filter():
 
 
 def test_compress():
-    # compress is now an alias for unique_consecutive
+    # compress keeps last occurrence (preserves end time)
     wave = build_waveform([1, 1, 2, 2, 3], width=8)
     compressed = wave.compress()
     assert np.all(compressed.value == np.array([1, 2, 3]))
+    # compress keeps last timestamp of each group
+    assert np.all(compressed.time == np.array([10, 30, 40]))
 
 
 def test_unique_consecutive():
     repeated = build_waveform([0, 0, 1, 1, 0, 0], width=1)
-    assert np.all(repeated.unique_consecutive().value == np.array([0, 1, 0, 0]))
+    # unique_consecutive keeps first occurrence (matches numpy behavior)
+    assert np.all(repeated.unique_consecutive().value == np.array([0, 1, 0]))
+    # unique_consecutive keeps first timestamp of each group
+    assert np.all(repeated.unique_consecutive().time == np.array([0, 20, 40]))
 
     empty = build_waveform([], width=1)
     assert np.all(empty.unique_consecutive().value == np.array([]))
