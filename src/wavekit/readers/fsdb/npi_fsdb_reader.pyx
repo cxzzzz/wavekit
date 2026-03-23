@@ -79,6 +79,34 @@ cdef npi_fsdb_iter_member_fn _npi_fsdb_iter_member = NULL
 cdef npi_fsdb_iter_scope_stop_fn _npi_fsdb_iter_scope_stop = NULL
 cdef npi_fsdb_iter_sig_stop_fn _npi_fsdb_iter_sig_stop = NULL
 
+# Verdi's libNPI.so exports these APIs as C++ symbols on some releases, so the
+# runtime binder must fall back to the mangled names when the plain C names are
+# not present.
+cdef dict _NPI_CPP_SYMBOL_ALIASES = {
+    b'npi_fsdb_open': (b'_Z13npi_fsdb_openPKc',),
+    b'npi_fsdb_close': (b'_Z14npi_fsdb_closePv',),
+    b'npi_fsdb_min_time': (b'_Z17npi_fsdb_min_timePvPy',),
+    b'npi_fsdb_max_time': (b'_Z17npi_fsdb_max_timePvPy',),
+    b'npi_fsdb_sig_by_name': (b'_Z20npi_fsdb_sig_by_namePvPKcS_',),
+    b'npi_fsdb_create_vct': (b'_Z19npi_fsdb_create_vctPv',),
+    b'npi_fsdb_goto_time': (b'_Z18npi_fsdb_goto_timePvy',),
+    b'npi_fsdb_goto_first': (b'_Z19npi_fsdb_goto_firstPv',),
+    b'npi_fsdb_goto_next': (b'_Z18npi_fsdb_goto_nextPv',),
+    b'npi_fsdb_vct_time': (b'_Z17npi_fsdb_vct_timePvPy',),
+    b'npi_fsdb_vct_value': (b'_Z18npi_fsdb_vct_valuePvP12npiFsdbValue',),
+    b'npi_fsdb_sig_property': (b'_Z21npi_fsdb_sig_property22npiFsdbSigPropertyTypePvPi',),
+    b'npi_fsdb_sig_property_str': (b'_Z25npi_fsdb_sig_property_str22npiFsdbSigPropertyTypePv',),
+    b'npi_fsdb_scope_property_str': (b'_Z27npi_fsdb_scope_property_str24npiFsdbScopePropertyTypePv',),
+    b'npi_fsdb_iter_top_scope': (b'_Z23npi_fsdb_iter_top_scopePv',),
+    b'npi_fsdb_iter_child_scope': (b'_Z25npi_fsdb_iter_child_scopePv',),
+    b'npi_fsdb_iter_scope_next': (b'_Z24npi_fsdb_iter_scope_nextPv',),
+    b'npi_fsdb_iter_sig_next': (b'_Z22npi_fsdb_iter_sig_nextPv',),
+    b'npi_fsdb_iter_sig': (b'_Z17npi_fsdb_iter_sigPv',),
+    b'npi_fsdb_iter_member': (b'_Z20npi_fsdb_iter_memberPv',),
+    b'npi_fsdb_iter_scope_stop': (b'_Z24npi_fsdb_iter_scope_stopPv',),
+    b'npi_fsdb_iter_sig_stop': (b'_Z22npi_fsdb_iter_sig_stopPv',),
+}
+
 
 cdef str _decode_cstr(const char* value):
     if value == NULL:
@@ -88,6 +116,15 @@ cdef str _decode_cstr(const char* value):
 
 cdef str _last_dlerror():
     return _decode_cstr(dlerror())
+
+
+cdef tuple _symbol_candidates(object symbol_name):
+    cdef bytes symbol_bytes
+    cdef tuple aliases
+
+    symbol_bytes = symbol_name if isinstance(symbol_name, bytes) else str(symbol_name).encode('ascii')
+    aliases = _NPI_CPP_SYMBOL_ALIASES.get(symbol_bytes, ())
+    return (symbol_bytes,) + aliases
 
 
 cdef void _clear_npi_symbols():
@@ -123,17 +160,26 @@ cdef void _clear_npi_symbols():
     _npi_fsdb_iter_sig_stop = NULL
 
 
-cdef void* _require_symbol(void* handle, const char* symbol_name) except NULL:
+cdef void* _require_symbol(void* handle, object symbol_name) except NULL:
     cdef void* symbol
+    cdef tuple symbol_candidates = _symbol_candidates(symbol_name)
+    cdef bytes candidate
+    cdef const char* candidate_name
+    cdef list tried_names = []
 
-    dlerror()
-    symbol = dlsym(handle, symbol_name)
-    if symbol == NULL:
-        raise OSError(
-            f"Failed to resolve symbol {_decode_cstr(symbol_name)!r} from "
-            f"{_npi_lib_path or 'libNPI.so'}: {_last_dlerror() or 'symbol not found'}"
-        )
-    return symbol
+    for candidate in symbol_candidates:
+        candidate_name = candidate
+        dlerror()
+        symbol = dlsym(handle, candidate_name)
+        if symbol != NULL:
+            return symbol
+        tried_names.append(repr(candidate.decode('ascii')))
+
+    raise OSError(
+        f"Failed to resolve symbol {symbol_candidates[0].decode('ascii')!r} from "
+        f"{_npi_lib_path or 'libNPI.so'}; tried {', '.join(tried_names)}: "
+        f"{_last_dlerror() or 'symbol not found'}"
+    )
 
 
 cdef void _bind_npi_symbols(void* handle) except *:
