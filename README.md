@@ -19,7 +19,10 @@
 pip install wavekit
 ```
 
-**Note**: To read FSDB files, you still need Verdi runtime libraries at execution time, but you no longer need `VERDI_HOME` set during installation. At runtime, set `VERDI_HOME` or `WAVEKIT_NPI_LIB`, or ensure `libNPI.so` is discoverable via `LD_LIBRARY_PATH`.
+**Note**: To read FSDB files, the Verdi runtime library (`libNPI.so`) must be available at runtime. Configure via:
+- `WAVEKIT_NPI_LIB` — direct path to `libNPI.so`
+- `VERDI_HOME` — Verdi installation directory (searches `$VERDI_HOME/share/NPI/lib/...`)
+- `LD_LIBRARY_PATH` — system library search path
 
 ## 🚀 Quick Start
 
@@ -174,7 +177,7 @@ print(f"Stall durations: {stalls.duration.value} cycles")
 
 | Method | Description |
 |--------|-------------|
-| `VcdReader(file)` / `FsdbReader(file)` | Open a waveform file. Use as a context manager. `FsdbReader` requires Verdi runtime libraries at execution time (`VERDI_HOME`, `WAVEKIT_NPI_LIB`, or `LD_LIBRARY_PATH`). |
+| `VcdReader(file)` / `FsdbReader(file)` | Open a waveform file. Use as a context manager. `FsdbReader` requires Verdi runtime (`WAVEKIT_NPI_LIB`, `VERDI_HOME`, or `LD_LIBRARY_PATH`). |
 | `reader.load_waveform(signal, clock, ...)` | Load one signal sampled on every clock edge. Returns `Waveform`. |
 | `reader.load_matched_waveforms(pattern, clock_pattern, ...)` | Batch-load signals matching a brace/regex pattern. Returns `dict[tuple, Waveform]`. |
 | `reader.eval(expr, clock, mode='single'\|'zip', ...)` | Evaluate an arithmetic expression with embedded signal paths. |

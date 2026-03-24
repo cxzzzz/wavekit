@@ -290,8 +290,10 @@ cdef void _ensure_npi_loaded(object preferred_path=None) except *:
         return
 
     raise OSError(
-        'Failed to load Verdi FSDB runtime library libNPI.so. '
-        'Set VERDI_HOME or WAVEKIT_NPI_LIB, or add libNPI.so to LD_LIBRARY_PATH.\n'
+        'Failed to load Verdi FSDB runtime library (libNPI.so). Configure via:\n'
+        '  - WAVEKIT_NPI_LIB — direct path to libNPI.so\n'
+        '  - VERDI_HOME — Verdi installation directory\n'
+        '  - LD_LIBRARY_PATH — system library search path\n'
         + '\n'.join(errors)
     )
 

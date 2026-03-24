@@ -37,9 +37,11 @@ print(valid_data.value)                # numpy array of integer values
 ### `VcdReader(file: str)` / `FsdbReader(file: str)`
 
 Open a waveform file.  Use as a context manager (`with`) to ensure the file is
-closed.  `FsdbReader` requires Verdi runtime libraries at execution time.  Set
-`VERDI_HOME` or `WAVEKIT_NPI_LIB`, or make `libNPI.so` visible via
-`LD_LIBRARY_PATH`.
+closed.  `FsdbReader` requires the Verdi runtime library (`libNPI.so`):
+
+- `WAVEKIT_NPI_LIB` — direct path to `libNPI.so`
+- `VERDI_HOME` — Verdi installation directory (searches `$VERDI_HOME/share/NPI/lib/...`)
+- `LD_LIBRARY_PATH` — system library search path
 
 ---
 

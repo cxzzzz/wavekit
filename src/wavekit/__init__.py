@@ -44,17 +44,18 @@ except Exception as _fsdb_import_error:
     _fsdb_available = False
 
     def has_fsdb_support() -> bool:
-        """Check if FsdbReader is available in the current installation."""
+        """Check whether the Verdi FSDB runtime is available."""
         return False
 
     class _FsdbReaderStub:
-        """Placeholder that raises an error when the FSDB extension is unavailable."""
+        """Placeholder that raises an error when the Verdi FSDB runtime is unavailable."""
 
         def __init__(self, *args, **kwargs):
             raise RuntimeError(
-                'FsdbReader is unavailable in this installation.\n\n'
-                'The FSDB extension failed to import:\n'
-                f'  {_fsdb_import_error}'
+                'FsdbReader requires the Verdi FSDB runtime (libNPI.so).\n\n'
+                'Set WAVEKIT_NPI_LIB to the library path, set VERDI_HOME to the Verdi '
+                'installation directory, or ensure libNPI.so is in LD_LIBRARY_PATH.\n\n'
+                f'Import error: {_fsdb_import_error}'  # noqa: F821
             )
 
     FsdbReader = _FsdbReaderStub  # type: ignore[assignment]

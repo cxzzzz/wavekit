@@ -160,9 +160,10 @@ class FsdbReader(Reader):
     def _runtime_error(init_error: Exception | None, open_error: Exception) -> RuntimeError:
         details = [
             'Failed to initialize FSDB runtime.',
-            'wavekit no longer needs Verdi during build/install, but reading FSDB files still '
-            'requires Verdi runtime libraries at execution time.',
-            'Set VERDI_HOME or WAVEKIT_NPI_LIB, or add libNPI.so to LD_LIBRARY_PATH.',
+            'FsdbReader requires the Verdi runtime library (libNPI.so). Configure via:',
+            '  - WAVEKIT_NPI_LIB — direct path to libNPI.so',
+            '  - VERDI_HOME — Verdi installation directory',
+            '  - LD_LIBRARY_PATH — system library search path',
             f'Open error: {open_error}',
         ]
         if init_error is not None:
