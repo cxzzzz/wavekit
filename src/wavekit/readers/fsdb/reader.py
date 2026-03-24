@@ -131,27 +131,53 @@ class FsdbScope(Scope):
 class FsdbReader(Reader):
     pynpi: dict[str, Any] = {}
 
+    @classmethod
+    def _maybe_init_pynpi(cls) -> Exception | None:
+        if cls.pynpi:
+            return None
+
+        import os
+        import sys
+
+        verdi_home = os.environ.get('VERDI_HOME')
+        if verdi_home is None:
+            return None
+
+        rel_lib_path = os.path.abspath(os.path.join(verdi_home, 'share', 'NPI', 'python'))
+        if rel_lib_path not in sys.path:
+            sys.path.append(rel_lib_path)
+
+        try:
+            cls.pynpi['npisys'] = importlib.import_module('pynpi.npisys')
+            cls.pynpi['waveform'] = importlib.import_module('pynpi.waveform')
+            cls.pynpi['npisys'].init([''])
+        except Exception as exc:
+            cls.pynpi.clear()
+            return exc
+        return None
+
+    @staticmethod
+    def _runtime_error(init_error: Exception | None, open_error: Exception) -> RuntimeError:
+        details = [
+            'Failed to initialize FSDB runtime.',
+            'wavekit no longer needs Verdi during build/install, but reading FSDB files still '
+            'requires Verdi runtime libraries at execution time.',
+            'Set VERDI_HOME or WAVEKIT_NPI_LIB, or add libNPI.so to LD_LIBRARY_PATH.',
+            f'Open error: {open_error}',
+        ]
+        if init_error is not None:
+            details.append(f'Optional pynpi bootstrap error: {init_error}')
+        return RuntimeError('\n'.join(details))
+
     def __init__(self, file: str):
         super().__init__()
-
-        if len(FsdbReader.pynpi) == 0:
-            import os
-            import sys
-
-            verdi_home = os.environ.get('VERDI_HOME')
-            if verdi_home is None:
-                raise RuntimeError(
-                    'VERDI_HOME environment variable is not set.\n'
-                    'Please set VERDI_HOME to your Verdi installation path.'
-                )
-            rel_lib_path = verdi_home + '/share/NPI/python'
-            sys.path.append(os.path.abspath(rel_lib_path))
-            FsdbReader.pynpi['npisys'] = importlib.import_module('pynpi.npisys')
-            FsdbReader.pynpi['waveform'] = importlib.import_module('pynpi.waveform')
-            FsdbReader.pynpi['npisys'].init([''])
+        init_error = self._maybe_init_pynpi()
 
         self.file = file
-        self.file_handle = NpiFsdbReader(file)
+        try:
+            self.file_handle = NpiFsdbReader(file)
+        except Exception as exc:
+            raise self._runtime_error(init_error, exc) from exc
 
     def load_waveform(
         self,
