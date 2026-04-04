@@ -7,6 +7,8 @@
 
 **Wavekit** is a fundamental Python library for digital waveform analysis. By seamlessly converting VCD and FSDB data into Numpy arrays, it empowers engineers to perform high-performance signal processing, protocol analysis, and automated verification with ease.
 
+> 🤖 **AI Integration**: [wavekit-mcp](https://github.com/cxzzzz/wavekit-mcp) — MCP server for AI-assisted waveform analysis. Let AI load signals and run pattern matching — no manual coding required.
+
 ## ✨ Features
 
 - **High Performance & Easy Loading**: Cython-optimized VCD/FSDB parsers with Numpy-backed storage for speed and memory efficiency, plus flexible batch signal extraction via brace expansion, integer ranges, and regular expressions.
