@@ -244,7 +244,8 @@ compliance checking, and temporal data extraction.
 
 | Step | Blocking? | Description |
 |------|-----------|-------------|
-| `.wait(cond, guard=None, channel=None)` | yes | Block until `cond` is True. `guard` is checked each waiting cycle (not the match cycle); violation → `REQUIRE_VIOLATED`. `channel` enforces FIFO ordering among concurrent instances on the same named channel. |
+| `.wait(cond, guard=None)` | yes | Block until `cond` is True. `guard` is checked each waiting cycle (not the match cycle); violation → `REQUIRE_VIOLATED`. |
+| `.wait_exclusive(cond, queue, guard=None)` | yes | Block until `cond` is True with exclusive FIFO consumption. `queue` can be a static string or `callable(index, captures) -> str` for dynamic routing (e.g., per-ID queues for AXI). |
 | `.delay(n, guard=None)` | yes (n≥1) / epsilon (n=0) | Advance exactly `n` cycles. `delay(0)` is a no-op. |
 | `.capture(name, signal)` | no | Record signal value at current cycle into `captures[name]`. Use `name[]` to append to a list (inside loop/repeat). `signal` can be a Waveform or `callable(index, captures)`. |
 | `.require(cond)` | no | Assert condition; terminate with `REQUIRE_VIOLATED` if False. |
@@ -296,11 +297,48 @@ Pattern()
 .match()
 ```
 
-### Channel ordering
+### Queue ordering with wait_exclusive
 
-When multiple concurrent instances wait on the same `channel` name, they
+When multiple concurrent instances call `wait_exclusive` with the same `queue` name, they
 consume events in FIFO order (oldest instance first). This is how
 request/response pairing is implemented without explicit demultiplexing.
+
+```python
+# Each request matches the next response in order
+result = (
+    Pattern()
+    .wait(req_valid & req_ready)
+    .capture('req_data', req_data)
+    .wait_exclusive(rsp_valid & rsp_ready, queue='response')
+    .capture('rsp_data', rsp_data)
+    .match()
+)
+```
+
+**Dynamic queue for AXI-style ID routing:**
+
+For protocols where responses must be matched to requests by ID (e.g., AXI), use
+a callable for `queue` to create independent FIFOs per ID:
+
+```python
+# Match responses to requests by ARID/RID
+def match_id(idx, cap):
+    """Condition: response valid AND ID matches the captured request ID."""
+    return bool(rvalid.value[idx] & rready.value[idx]) and int(rid.value[idx]) == int(cap['arid'])
+
+result = (
+    Pattern()
+    .wait(arvalid & arready)
+    .capture('arid', arid)
+    .capture('araddr', araddr)
+    .wait_exclusive(
+        match_id,  # Condition checks ID match
+        queue=lambda idx, cap: f'read_{cap["arid"]}'  # Per-ID queue
+    )
+    .capture('rdata', rdata)
+    .match()
+)
+```
 
 ---
 

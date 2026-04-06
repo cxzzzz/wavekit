@@ -58,6 +58,17 @@ def _eval_signal(signal, index: int, captures: dict) -> Any:
     raise TypeError(f'Invalid signal type: {type(signal)}')
 
 
+def _eval_queue(queue, index: int, captures: dict) -> str | None:
+    """Evaluate queue parameter (static string or callable)."""
+    if queue is None:
+        return None
+    if isinstance(queue, str):
+        return queue
+    if callable(queue):
+        return str(queue(index, captures))
+    raise TypeError(f'Invalid queue type: {type(queue)}')
+
+
 # ---------------------------------------------------------------------------
 # Waveform collection & validation
 # ---------------------------------------------------------------------------
@@ -125,7 +136,7 @@ class PatternEngine:
     def __init__(self, pattern) -> None:
         self._steps: list[Step] = pattern._steps
         self._timeout_cycles: int | None = pattern._timeout_cycles
-        self._consumed_channels: set[str] = set()
+        self._consumed_queues: set[str] = set()
 
     def run(
         self,
@@ -170,8 +181,8 @@ class PatternEngine:
         completed: list[Instance] = []
 
         for t in range(start_idx, end_idx):
-            # Reset per-cycle channel consumption tracking (oldest instance wins)
-            self._consumed_channels = set()
+            # Reset per-cycle queue consumption tracking (oldest instance wins)
+            self._consumed_queues = set()
 
             # Tick all active instances in creation order (oldest first)
             still_active: list[Instance] = []
@@ -245,8 +256,8 @@ class PatternEngine:
         """Advance the instance, consuming at most *blocking_budget* blocking steps.
 
         Instances are always processed oldest-first within a cycle, so the first
-        instance to reach a channel WaitStep wins and marks the channel consumed
-        in ``self._consumed_channels``; later instances see it as blocked.
+        instance to reach a queued WaitStep wins and marks the queue consumed
+        in ``self._consumed_queues``; later instances see it as blocked.
         """
         epsilon_count = 0
 
@@ -280,12 +291,14 @@ class PatternEngine:
             # -- blocking steps --
 
             if isinstance(step, WaitStep):
-                # Channel check: only the first instance to reach this channel
+                # Evaluate queue dynamically (static string or callable)
+                queue_name = _eval_queue(step.queue, t, inst.captures)
+                # Queue check: only the first instance to reach this queue
                 # this cycle may advance; later instances are blocked.
-                channel_free = step.channel is None or step.channel not in self._consumed_channels
-                if blocking_budget > 0 and channel_free and _eval_bool(step.cond, t, inst.captures):
-                    if step.channel is not None:
-                        self._consumed_channels.add(step.channel)
+                queue_free = queue_name is None or queue_name not in self._consumed_queues
+                if blocking_budget > 0 and queue_free and _eval_bool(step.cond, t, inst.captures):
+                    if queue_name is not None:
+                        self._consumed_queues.add(queue_name)
                     frame.step_idx += 1
                     blocking_budget -= 1
                     continue
@@ -294,7 +307,7 @@ class PatternEngine:
                     inst.status = MatchStatus.REQUIRE_VIOLATED
                     inst.end_cycle = int(ref_wf.clock[t])
                     return
-                return  # wait for next tick (budget exhausted or channel blocked)
+                return  # wait for next tick (budget exhausted or queue blocked)
 
             if isinstance(step, DelayStep):
                 if step.remaining is None:

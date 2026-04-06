@@ -7,6 +7,7 @@ from .steps import (
     CaptureStep,
     DelayStep,
     LoopStep,
+    QueueValue,
     RepeatStep,
     RequireStep,
     Step,
@@ -44,7 +45,6 @@ class Pattern:
         self,
         cond: Condition,
         guard: Condition | None = None,
-        channel: str | None = None,
     ) -> Pattern:
         """Block until *cond* becomes True.
 
@@ -55,10 +55,64 @@ class Pattern:
         guard:
             Must remain True every cycle while waiting; violation terminates
             the instance with ``REQUIRE_VIOLATED``.
-        channel:
-            Named channel for FIFO event-consumption (see channel docs).
         """
-        self._steps.append(WaitStep(cond=cond, guard=guard, channel=channel))
+        self._steps.append(WaitStep(cond=cond, guard=guard, queue=None))
+        return self
+
+    def wait_exclusive(
+        self,
+        cond: Condition,
+        queue: QueueValue,
+        guard: Condition | None = None,
+    ) -> Pattern:
+        """Block until *cond* becomes True with exclusive FIFO consumption.
+
+        Unlike :meth:`wait`, this method requires a *queue* name and ensures
+        that when multiple instances are waiting on the same condition, only
+        one (the oldest) advances per occurrence. This models hardware
+        protocols where a handshake must be consumed by exactly one requester.
+
+        Parameters
+        ----------
+        cond:
+            Waveform (static) or ``callable(index, captures) -> bool`` (dynamic).
+        queue:
+            Named queue for FIFO consumption. Instances waiting on the same
+            queue are served in creation order (oldest first). Can be a static
+            string or ``callable(index, captures) -> str`` for dynamic routing
+            (e.g., based on transaction ID).
+        guard:
+            Must remain True every cycle while waiting; violation terminates
+            the instance with ``REQUIRE_VIOLATED``.
+
+        Examples
+        --------
+        Static queue (all requests share one FIFO):
+
+        .. code-block:: python
+
+            Pattern()
+            .wait(req)
+            .wait_exclusive(rsp, queue='response')
+            .match()
+
+        Dynamic queue (per-ID routing for AXI):
+
+        .. code-block:: python
+
+            Pattern()
+            .wait(arvalid & arready)
+            .capture('arid', arid)
+            .wait_exclusive(
+                rvalid & rready,
+                queue=lambda idx, cap: f'read_{cap["arid"]}'
+            )
+            .capture('rdata', rdata)
+            .match()
+        """
+        if queue is None:
+            raise ValueError("wait_exclusive requires a 'queue' parameter")
+        self._steps.append(WaitStep(cond=cond, guard=guard, queue=queue))
         return self
 
     def delay(self, n: IntValue, guard: Condition | None = None) -> Pattern:

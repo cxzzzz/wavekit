@@ -180,11 +180,13 @@ class TestDelay:
 
 
 # ---------------------------------------------------------------------------
-# 6. channel (ordered FIFO pairing)
+# 6. wait_exclusive (ordered FIFO pairing)
 # ---------------------------------------------------------------------------
 
 
-class TestChannel:
+class TestWaitExclusive:
+    """Tests for wait_exclusive method (FIFO queue consumption)."""
+
     def test_fifo_pairing(self):
         """Three requests followed by three responses — FIFO order."""
         req = _bool_wf([1, 1, 1, 0, 0, 0, 0, 0, 0])
@@ -195,7 +197,7 @@ class TestChannel:
             Pattern()
             .wait(req)
             .capture('req', req_data)
-            .wait(rsp, channel='rsp')
+            .wait_exclusive(rsp, queue='response')
             .capture('rsp', rsp_data)
             .match()
         )
@@ -203,6 +205,204 @@ class TestChannel:
         assert len(valid) == 3
         np.testing.assert_array_equal(valid.captures['req'].value, [10, 20, 30])
         np.testing.assert_array_equal(valid.captures['rsp'].value, [55, 66, 77])
+
+    def test_queue_required(self):
+        """wait_exclusive requires queue parameter."""
+        trigger = _bool_wf([1, 0, 0])
+        with pytest.raises(ValueError, match='queue'):
+            Pattern().wait_exclusive(trigger, queue=None)
+
+    def test_multiple_queues(self):
+        """Different queue names within the SAME Pattern via branching.
+
+        When a Pattern uses branch() to select different wait_exclusive queues,
+        each queue maintains its own independent FIFO state.
+        """
+        # Two transaction types: read (type=0) and write (type=1)
+        # Cycle:    0  1  2  3  4  5  6  7
+        req = _bool_wf([1, 1, 1, 1, 0, 0, 0, 0])  # reqs at 0, 1, 2, 3
+        req_type = _wf([0, 1, 0, 1, 0, 0, 0, 0], width=4)  # types: rd, wr, rd, wr
+        req_data = _wf([10, 20, 30, 40, 0, 0, 0, 0], width=8)
+
+        # Responses: rd_rsp and wr_rsp are independent
+        rd_rsp = _bool_wf([0, 0, 0, 1, 0, 1, 0, 0])  # rd rsps at 3, 5
+        wr_rsp = _bool_wf([0, 0, 0, 0, 1, 0, 1, 0])  # wr rsps at 4, 6
+        rd_rsp_data = _wf([0, 0, 0, 111, 0, 333, 0, 0], width=8)
+        wr_rsp_data = _wf([0, 0, 0, 0, 222, 0, 444, 0], width=8)
+
+        result = (
+            Pattern()
+            .wait(req)
+            .capture('req_type', req_type)
+            .capture('req_data', req_data)
+            .branch(
+                lambda idx, cap: cap['req_type'] == 0,  # read
+                Pattern()
+                .wait_exclusive(rd_rsp, queue='rd')
+                .capture('rsp_data', rd_rsp_data),
+                Pattern()
+                .wait_exclusive(wr_rsp, queue='wr')
+                .capture('rsp_data', wr_rsp_data),
+            )
+            .match()
+        )
+        valid = result.filter_valid()
+        assert len(valid) == 4
+
+        # Check FIFO per queue:
+        # rd queue: req_data [10, 30] → rsp_data [111, 333]
+        # wr queue: req_data [20, 40] → rsp_data [222, 444]
+        rd_matches = [i for i in range(len(valid)) if valid.captures['req_type'].value[i] == 0]
+        wr_matches = [i for i in range(len(valid)) if valid.captures['req_type'].value[i] == 1]
+
+        rd_req = [valid.captures['req_data'].value[i] for i in rd_matches]
+        rd_rsp_val = [valid.captures['rsp_data'].value[i] for i in rd_matches]
+        wr_req = [valid.captures['req_data'].value[i] for i in wr_matches]
+        wr_rsp_val = [valid.captures['rsp_data'].value[i] for i in wr_matches]
+
+        assert rd_req == [10, 30], f"rd queue FIFO: {rd_req}"
+        assert rd_rsp_val == [111, 333], f"rd rsp FIFO: {rd_rsp_val}"
+        assert wr_req == [20, 40], f"wr queue FIFO: {wr_req}"
+        assert wr_rsp_val == [222, 444], f"wr rsp FIFO: {wr_rsp_val}"
+
+    def test_multi_id_multi_match_per_id(self):
+        """Multiple IDs with multiple transactions per ID - each queue maintains FIFO order independently.
+
+        This tests the key scenario: each ID has its own FIFO queue, and multiple
+        transactions with the same ID are matched in FIFO order within that queue,
+        while different IDs are independent.
+        """
+        # Scenario: 4 requests with IDs [0, 1, 0, 1] (2 per ID)
+        #           4 responses with IDs [1, 0, 1, 0] (out of order per-ID, but FIFO per queue)
+        # Cycle:    0  1  2  3  4  5  6  7  8  9  10 11
+        req = _bool_wf([1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0])  # reqs at 0, 1, 2, 3
+        req_id = _wf([0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0], width=4)  # IDs: 0, 1, 0, 1
+        req_data = _wf([10, 20, 30, 40, 0, 0, 0, 0, 0, 0, 0, 0], width=8)  # data: 10, 20, 30, 40
+
+        # Responses arrive out of order globally, but we want FIFO per ID queue
+        # ID 0's FIFO: req_data=10@cycle0, req_data=30@cycle2 → expect rsp in order [first 0's rsp, second 0's rsp]
+        # ID 1's FIFO: req_data=20@cycle1, req_data=40@cycle3 → expect rsp in order [first 1's rsp, second 1's rsp]
+        # Response order: ID 1@5, ID 0@7, ID 1@9, ID 0@10
+        rsp = _bool_wf([0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0])  # rsps at 5, 7, 9, 10
+        rsp_id = _wf([0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0], width=4)  # IDs: 1, 0, 1, 0
+        rsp_data = _wf([0, 0, 0, 0, 0, 111, 0, 222, 0, 333, 444, 0], width=8)  # 111, 222, 333, 444
+
+        def match_rsp_with_id(idx, cap):
+            """Condition: rsp is True AND rsp_id matches the captured req_id."""
+            return bool(rsp.value[idx]) and int(rsp_id.value[idx]) == int(cap['req_id'])
+
+        result = (
+            Pattern()
+            .wait(req)
+            .capture('req_id', req_id)
+            .capture('req_data', req_data)
+            .wait_exclusive(
+                match_rsp_with_id,
+                queue=lambda idx, cap: f'id_{cap["req_id"]}'
+            )
+            .capture('rsp_id', rsp_id)
+            .capture('rsp_data', rsp_data)
+            .match()
+        )
+        valid = result.filter_valid()
+        assert len(valid) == 4
+
+        # Verify FIFO order per ID:
+        # ID 0 queue: req_data [10, 30] matched with rsp_data [222, 444] (responses at cycles 7, 10)
+        # ID 1 queue: req_data [20, 40] matched with rsp_data [111, 333] (responses at cycles 5, 9)
+        id_0_matches = [i for i in range(len(valid)) if valid.captures['req_id'].value[i] == 0]
+        id_1_matches = [i for i in range(len(valid)) if valid.captures['req_id'].value[i] == 1]
+
+        assert len(id_0_matches) == 2
+        assert len(id_1_matches) == 2
+
+        # Check ID 0: FIFO order should be [10, 30] → [222, 444]
+        id_0_req_data = [valid.captures['req_data'].value[i] for i in id_0_matches]
+        id_0_rsp_data = [valid.captures['rsp_data'].value[i] for i in id_0_matches]
+        assert id_0_req_data == [10, 30], f"ID 0 req_data should be FIFO: {id_0_req_data}"
+        assert id_0_rsp_data == [222, 444], f"ID 0 rsp_data should be FIFO: {id_0_rsp_data}"
+
+        # Check ID 1: FIFO order should be [20, 40] → [111, 333]
+        id_1_req_data = [valid.captures['req_data'].value[i] for i in id_1_matches]
+        id_1_rsp_data = [valid.captures['rsp_data'].value[i] for i in id_1_matches]
+        assert id_1_req_data == [20, 40], f"ID 1 req_data should be FIFO: {id_1_req_data}"
+        assert id_1_rsp_data == [111, 333], f"ID 1 rsp_data should be FIFO: {id_1_rsp_data}"
+
+    def test_dynamic_queue_per_id(self):
+        """Dynamic queue based on captured transaction ID (AXI-like routing).
+
+        Key insight: Dynamic queue creates independent FIFOs per queue value.
+        For AXI-style ID routing, combine:
+        1. Dynamic queue to separate queues per ID
+        2. Condition that checks response ID matches request ID
+        """
+        # Simulate AXI: requests with different IDs
+        # Cycle:    0  1  2  3  4  5  6  7  8  9  10 11
+        req = _bool_wf([1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # req at 0, 2
+        req_id = _wf([0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0], width=4)  # ID 0, 1
+        req_data = _wf([100, 0, 200, 0, 0, 0, 0, 0, 0, 0, 0, 0], width=8)
+
+        # Responses arrive out of order (ID 1 first, then ID 0)
+        rsp = _bool_wf([0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0])  # rsp at 5, 8
+        rsp_id = _wf([0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0], width=4)  # ID 1 at cycle 5, ID 0 at cycle 8
+        rsp_data = _wf([0, 0, 0, 0, 0, 222, 0, 0, 111, 0, 0, 0], width=8)
+
+        # Full AXI-style: dynamic queue + condition checks ID match
+        def match_id(idx, cap):
+            """Condition: rsp is True AND rsp_id matches the captured req_id."""
+            return bool(rsp.value[idx]) and int(rsp_id.value[idx]) == int(cap['req_id'])
+
+        result = (
+            Pattern()
+            .wait(req)
+            .capture('req_id', req_id)
+            .capture('req_data', req_data)
+            .wait_exclusive(
+                match_id,  # Condition checks ID match
+                queue=lambda idx, cap: f'id_{cap["req_id"]}'
+            )
+            .capture('rsp_id', rsp_id)
+            .capture('rsp_data', rsp_data)
+            .match()
+        )
+        valid = result.filter_valid()
+        assert len(valid) == 2
+
+        # Check that request ID matches response ID (routing worked)
+        for i in range(len(valid)):
+            req_id_val = valid.captures['req_id'].value[i]
+            rsp_id_val = valid.captures['rsp_id'].value[i]
+            assert req_id_val == rsp_id_val, f'ID mismatch: req={req_id_val}, rsp={rsp_id_val}'
+
+    def test_dynamic_queue_fifo_per_queue(self):
+        """Each dynamic queue value maintains its own FIFO order.
+
+        When two instances have the same queue value, they share a FIFO.
+        When they have different queue values, they are independent.
+        """
+        # Two requests with same derived queue value
+        req = _bool_wf([1, 1, 0, 0, 0, 0, 0, 0])
+        # 10//10=1, 20//10=2 → different queues, so let's use values that give same queue
+        # Use 10, 11 → both // 10 = 1 → same queue
+        req_data = _wf([10, 11, 0, 0, 0, 0, 0, 0], width=8)
+
+        rsp = _bool_wf([0, 0, 0, 1, 0, 1, 0, 0])  # responses at 3, 5
+        rsp_data = _wf([0, 0, 0, 111, 0, 222, 0, 0], width=8)
+
+        result = (
+            Pattern()
+            .wait(req)
+            .capture('req_data', req_data)
+            # Same queue for both (both // 10 = 1), so they share a FIFO
+            .wait_exclusive(rsp, queue=lambda idx, cap: f'id_{cap["req_data"] // 10}')
+            .capture('rsp_data', rsp_data)
+            .match()
+        )
+        valid = result.filter_valid()
+        assert len(valid) == 2
+        # FIFO order preserved within same queue
+        np.testing.assert_array_equal(valid.captures['req_data'].value, [10, 11])
+        np.testing.assert_array_equal(valid.captures['rsp_data'].value, [111, 222])
 
 
 # ---------------------------------------------------------------------------
