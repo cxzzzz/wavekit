@@ -532,10 +532,10 @@ def test_relative_errors():
     """Test relative() error conditions."""
     wave = build_waveform([1, 2, 3], width=8)
 
-    with pytest.raises(ValueError, match="pad must be"):
+    with pytest.raises(ValueError, match='pad must be'):
         wave.relative(1, pad='invalid')
 
-    with pytest.raises(ValueError, match="pad_value is required"):
+    with pytest.raises(ValueError, match='pad_value is required'):
         wave.relative(1, pad='value')
 
 

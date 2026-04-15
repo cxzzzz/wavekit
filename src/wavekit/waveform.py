@@ -1357,19 +1357,23 @@ class Waveform:
             remaining = self.value[offset:]
             pad_count = n - len(remaining)
             fill = self.value[-1] if pad == 'repeat' else pad_value
-            value_padded = np.concatenate([
-                remaining,
-                np.full(pad_count, fill, dtype=dtype),
-            ])
+            value_padded = np.concatenate(
+                [
+                    remaining,
+                    np.full(pad_count, fill, dtype=dtype),
+                ]
+            )
         else:
             remaining_end = max(0, n + offset)  # offset is negative
             remaining = self.value[:remaining_end]
             pad_count = n - len(remaining)
             fill = self.value[0] if pad == 'repeat' else pad_value
-            value_padded = np.concatenate([
-                np.full(pad_count, fill, dtype=dtype),
-                remaining,
-            ])
+            value_padded = np.concatenate(
+                [
+                    np.full(pad_count, fill, dtype=dtype),
+                    remaining,
+                ]
+            )
 
         return Waveform(
             value=value_padded,
