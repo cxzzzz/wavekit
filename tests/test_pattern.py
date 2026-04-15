@@ -237,12 +237,8 @@ class TestWaitExclusive:
             .capture('req_data', req_data)
             .branch(
                 lambda idx, cap: cap['req_type'] == 0,  # read
-                Pattern()
-                .wait_exclusive(rd_rsp, queue='rd')
-                .capture('rsp_data', rd_rsp_data),
-                Pattern()
-                .wait_exclusive(wr_rsp, queue='wr')
-                .capture('rsp_data', wr_rsp_data),
+                Pattern().wait_exclusive(rd_rsp, queue='rd').capture('rsp_data', rd_rsp_data),
+                Pattern().wait_exclusive(wr_rsp, queue='wr').capture('rsp_data', wr_rsp_data),
             )
             .match()
         )
@@ -260,13 +256,15 @@ class TestWaitExclusive:
         wr_req = [valid.captures['req_data'].value[i] for i in wr_matches]
         wr_rsp_val = [valid.captures['rsp_data'].value[i] for i in wr_matches]
 
-        assert rd_req == [10, 30], f"rd queue FIFO: {rd_req}"
-        assert rd_rsp_val == [111, 333], f"rd rsp FIFO: {rd_rsp_val}"
-        assert wr_req == [20, 40], f"wr queue FIFO: {wr_req}"
-        assert wr_rsp_val == [222, 444], f"wr rsp FIFO: {wr_rsp_val}"
+        assert rd_req == [10, 30], f'rd queue FIFO: {rd_req}'
+        assert rd_rsp_val == [111, 333], f'rd rsp FIFO: {rd_rsp_val}'
+        assert wr_req == [20, 40], f'wr queue FIFO: {wr_req}'
+        assert wr_rsp_val == [222, 444], f'wr rsp FIFO: {wr_rsp_val}'
 
     def test_multi_id_multi_match_per_id(self):
-        """Multiple IDs with multiple transactions per ID - each queue maintains FIFO order independently.
+        """Multiple IDs with multiple transactions per ID.
+
+        Each queue maintains FIFO order independently.
 
         This tests the key scenario: each ID has its own FIFO queue, and multiple
         transactions with the same ID are matched in FIFO order within that queue,
@@ -280,8 +278,8 @@ class TestWaitExclusive:
         req_data = _wf([10, 20, 30, 40, 0, 0, 0, 0, 0, 0, 0, 0], width=8)  # data: 10, 20, 30, 40
 
         # Responses arrive out of order globally, but we want FIFO per ID queue
-        # ID 0's FIFO: req_data=10@cycle0, req_data=30@cycle2 → expect rsp in order [first 0's rsp, second 0's rsp]
-        # ID 1's FIFO: req_data=20@cycle1, req_data=40@cycle3 → expect rsp in order [first 1's rsp, second 1's rsp]
+        # ID 0's FIFO: req=10@cycle0, req=30@cycle2 → rsp in FIFO order
+        # ID 1's FIFO: req=20@cycle1, req=40@cycle3 → rsp in FIFO order
         # Response order: ID 1@5, ID 0@7, ID 1@9, ID 0@10
         rsp = _bool_wf([0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0])  # rsps at 5, 7, 9, 10
         rsp_id = _wf([0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0], width=4)  # IDs: 1, 0, 1, 0
@@ -296,10 +294,7 @@ class TestWaitExclusive:
             .wait(req)
             .capture('req_id', req_id)
             .capture('req_data', req_data)
-            .wait_exclusive(
-                match_rsp_with_id,
-                queue=lambda idx, cap: f'id_{cap["req_id"]}'
-            )
+            .wait_exclusive(match_rsp_with_id, queue=lambda idx, cap: f'id_{cap["req_id"]}')
             .capture('rsp_id', rsp_id)
             .capture('rsp_data', rsp_data)
             .match()
@@ -319,14 +314,14 @@ class TestWaitExclusive:
         # Check ID 0: FIFO order should be [10, 30] → [222, 444]
         id_0_req_data = [valid.captures['req_data'].value[i] for i in id_0_matches]
         id_0_rsp_data = [valid.captures['rsp_data'].value[i] for i in id_0_matches]
-        assert id_0_req_data == [10, 30], f"ID 0 req_data should be FIFO: {id_0_req_data}"
-        assert id_0_rsp_data == [222, 444], f"ID 0 rsp_data should be FIFO: {id_0_rsp_data}"
+        assert id_0_req_data == [10, 30], f'ID 0 req_data should be FIFO: {id_0_req_data}'
+        assert id_0_rsp_data == [222, 444], f'ID 0 rsp_data should be FIFO: {id_0_rsp_data}'
 
         # Check ID 1: FIFO order should be [20, 40] → [111, 333]
         id_1_req_data = [valid.captures['req_data'].value[i] for i in id_1_matches]
         id_1_rsp_data = [valid.captures['rsp_data'].value[i] for i in id_1_matches]
-        assert id_1_req_data == [20, 40], f"ID 1 req_data should be FIFO: {id_1_req_data}"
-        assert id_1_rsp_data == [111, 333], f"ID 1 rsp_data should be FIFO: {id_1_rsp_data}"
+        assert id_1_req_data == [20, 40], f'ID 1 req_data should be FIFO: {id_1_req_data}'
+        assert id_1_rsp_data == [111, 333], f'ID 1 rsp_data should be FIFO: {id_1_rsp_data}'
 
     def test_dynamic_queue_per_id(self):
         """Dynamic queue based on captured transaction ID (AXI-like routing).
@@ -344,7 +339,9 @@ class TestWaitExclusive:
 
         # Responses arrive out of order (ID 1 first, then ID 0)
         rsp = _bool_wf([0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0])  # rsp at 5, 8
-        rsp_id = _wf([0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0], width=4)  # ID 1 at cycle 5, ID 0 at cycle 8
+        rsp_id = _wf(
+            [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0], width=4
+        )  # ID 1 at cycle 5, ID 0 at cycle 8
         rsp_data = _wf([0, 0, 0, 0, 0, 222, 0, 0, 111, 0, 0, 0], width=8)
 
         # Full AXI-style: dynamic queue + condition checks ID match
@@ -359,7 +356,7 @@ class TestWaitExclusive:
             .capture('req_data', req_data)
             .wait_exclusive(
                 match_id,  # Condition checks ID match
-                queue=lambda idx, cap: f'id_{cap["req_id"]}'
+                queue=lambda idx, cap: f'id_{cap["req_id"]}',
             )
             .capture('rsp_id', rsp_id)
             .capture('rsp_data', rsp_data)
@@ -415,12 +412,7 @@ class TestWaitExclusive:
         rsp = _bool_wf([0, 0, 1, 0, 1, 0])
         rsp_data = _wf([0, 0, 111, 0, 222, 0], width=8)
 
-        result = (
-            Pattern()
-            .wait_exclusive(rsp, queue='rsp')
-            .capture('rsp_data', rsp_data)
-            .match()
-        )
+        result = Pattern().wait_exclusive(rsp, queue='rsp').capture('rsp_data', rsp_data).match()
         valid = result.filter_valid()
         # Only 2 valid matches (at cycles where rsp=1 and queue is consumed)
         assert len(valid) == 2
@@ -459,7 +451,7 @@ class TestWaitExclusive:
             .wait_exclusive(rsp, queue='Q')
             .capture('rsp_data', rsp_data)
             .timeout(5)  # Instance 0 (forked@0): elapsed=6 > 5 at cycle 5 → TIMEOUT
-            .match()     # Instance 1 (forked@1): elapsed=5 at cycle 5, 5 > 5? No → advance
+            .match()  # Instance 1 (forked@1): elapsed=5 at cycle 5, 5 > 5? No → advance
         )
         # Instance 0 times out; Instance 1 survives and consumes the queue
         assert len(result) == 2
