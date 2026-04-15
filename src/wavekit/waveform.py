@@ -1289,13 +1289,13 @@ class Waveform:
     def relative(
         self,
         offset: int,
-        pad: Literal['none', 'repeat', 'value'] = 'repeat',
+        pad: Literal['repeat', 'value'] = 'repeat',
         pad_value: Any = None,
     ) -> Waveform:
         """Return a new Waveform shifted by *offset* cycles.
 
-        This is the core method for relative time access. Use :meth:`next` and
-        :meth:`prev` for more readable positive/negative offsets.
+        This is the core method for relative time access. Use :meth:`ahead` and
+        :meth:`back` for more readable positive/negative offsets.
 
         Parameters
         ----------
@@ -1306,7 +1306,6 @@ class Waveform:
             Boundary handling strategy:
 
             - ``'repeat'`` (default): pad with boundary value (first/last element).
-            - ``'none'``: truncate, return shorter array.
             - ``'value'``: pad with *pad_value* (must be provided).
 
         pad_value:
@@ -1315,32 +1314,33 @@ class Waveform:
         Returns
         -------
         Waveform
-            A new waveform shifted by *offset* cycles.
+            A new waveform shifted by *offset* cycles. ``clock`` and ``time``
+            arrays are always preserved unchanged.
 
         Raises
         ------
         ValueError:
             If ``pad='value'`` but *pad_value* is not provided.
         ValueError:
-            If *pad* is not one of ``'none'``, ``'repeat'``, ``'value'``.
+            If *pad* is not one of ``'repeat'``, ``'value'``.
 
         Example
         -------
         ::
 
             # Rising edge detection
-            rising = (wave == 0) & wave.next()
+            rising = (wave == 0) & wave.ahead()
 
             # Look back 3 cycles
             past = wave.relative(-3)
 
         See Also
         --------
-        next : Shift forward (positive offset).
-        prev : Shift backward (negative offset).
+        ahead : Shift forward (positive offset).
+        back : Shift backward (negative offset).
         """
-        if pad not in ('none', 'repeat', 'value'):
-            raise ValueError(f"pad must be 'none', 'repeat', or 'value', got {pad!r}")
+        if pad not in ('repeat', 'value'):
+            raise ValueError(f"pad must be 'repeat' or 'value', got {pad!r}")
         if pad == 'value' and pad_value is None:
             raise ValueError("pad_value is required when pad='value'")
 
@@ -1351,37 +1351,25 @@ class Waveform:
         if offset == 0:
             return self.copy()
 
-        if pad == 'none':
-            # Truncate: shift and lose boundary elements
-            if offset > 0:
-                # Forward shift: drop first offset elements, keep clock/time from start
-                return Waveform(
-                    value=self.value[offset:],
-                    clock=self.clock[:-offset],
-                    time=self.time[:-offset],
-                    signal=dataclasses.replace(self.signal),
-                )
-            else:
-                # Backward shift: drop last |offset| elements
-                return Waveform(
-                    value=self.value[:offset],  # offset is negative
-                    clock=self.clock[-offset:],  # -offset is positive
-                    time=self.time[-offset:],
-                    signal=dataclasses.replace(self.signal),
-                )
-        elif pad == 'repeat':
-            # Pad with boundary value
-            if offset > 0:
-                # Forward shift: result[i] = original[i+offset], pad end with last value
-                value_padded = np.concatenate([self.value[offset:], [self.value[-1]] * offset])
-            else:
-                # Backward shift: result[i] = original[i-offset], pad start with first value
-                value_padded = np.concatenate([[self.value[0]] * (-offset), self.value[:offset]])
-        else:  # pad == 'value'
-            if offset > 0:
-                value_padded = np.concatenate([self.value[offset:], [pad_value] * offset])
-            else:
-                value_padded = np.concatenate([[pad_value] * (-offset), self.value[:offset]])
+        dtype = self.value.dtype
+
+        if offset > 0:
+            remaining = self.value[offset:]
+            pad_count = n - len(remaining)
+            fill = self.value[-1] if pad == 'repeat' else pad_value
+            value_padded = np.concatenate([
+                remaining,
+                np.full(pad_count, fill, dtype=dtype),
+            ])
+        else:
+            remaining_end = max(0, n + offset)  # offset is negative
+            remaining = self.value[:remaining_end]
+            pad_count = n - len(remaining)
+            fill = self.value[0] if pad == 'repeat' else pad_value
+            value_padded = np.concatenate([
+                np.full(pad_count, fill, dtype=dtype),
+                remaining,
+            ])
 
         return Waveform(
             value=value_padded,
@@ -1390,10 +1378,10 @@ class Waveform:
             signal=dataclasses.replace(self.signal),
         )
 
-    def next(
+    def ahead(
         self,
         n: int = 1,
-        pad: Literal['none', 'repeat', 'value'] = 'repeat',
+        pad: Literal['repeat', 'value'] = 'repeat',
         pad_value: Any = None,
     ) -> Waveform:
         """Return a new Waveform looking *n* cycles into the future.
@@ -1419,14 +1407,14 @@ class Waveform:
         ::
 
             # Rising edge detection
-            rising = (wave == 0) & wave.next()
+            rising = (wave == 0) & wave.ahead()
         """
         return self.relative(n, pad, pad_value)
 
-    def prev(
+    def back(
         self,
         n: int = 1,
-        pad: Literal['none', 'repeat', 'value'] = 'repeat',
+        pad: Literal['repeat', 'value'] = 'repeat',
         pad_value: Any = None,
     ) -> Waveform:
         """Return a new Waveform looking *n* cycles into the past.
@@ -1452,6 +1440,6 @@ class Waveform:
         ::
 
             # Check if current value equals previous
-            same = wave == wave.prev()
+            same = wave == wave.back()
         """
         return self.relative(-n, pad, pad_value)
