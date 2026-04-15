@@ -53,6 +53,7 @@ ctypedef npiFsdbSigIter (*npi_fsdb_iter_sig_fn)(npiFsdbScopeHandle scope)
 ctypedef npiFsdbSigIter (*npi_fsdb_iter_member_fn)(npiFsdbSigHandle sig)
 ctypedef NPI_INT32 (*npi_fsdb_iter_scope_stop_fn)(npiFsdbScopeIter iter)
 ctypedef NPI_INT32 (*npi_fsdb_iter_sig_stop_fn)(npiFsdbSigIter iter)
+ctypedef NPI_INT32 (*npi_fsdb_release_vct_fn)(npiFsdbVctHandle vct)
 
 cdef void* _npi_lib_handle = NULL
 cdef object _npi_lib_path = None
@@ -78,6 +79,7 @@ cdef npi_fsdb_iter_sig_fn _npi_fsdb_iter_sig = NULL
 cdef npi_fsdb_iter_member_fn _npi_fsdb_iter_member = NULL
 cdef npi_fsdb_iter_scope_stop_fn _npi_fsdb_iter_scope_stop = NULL
 cdef npi_fsdb_iter_sig_stop_fn _npi_fsdb_iter_sig_stop = NULL
+cdef npi_fsdb_release_vct_fn _npi_fsdb_release_vct = NULL
 
 # Verdi's libNPI.so exports these APIs as C++ symbols on some releases, so the
 # runtime binder must fall back to the mangled names when the plain C names are
@@ -105,6 +107,7 @@ cdef dict _NPI_CPP_SYMBOL_ALIASES = {
     b'npi_fsdb_iter_member': (b'_Z20npi_fsdb_iter_memberPv',),
     b'npi_fsdb_iter_scope_stop': (b'_Z24npi_fsdb_iter_scope_stopPv',),
     b'npi_fsdb_iter_sig_stop': (b'_Z22npi_fsdb_iter_sig_stopPv',),
+    b'npi_fsdb_release_vct': (b'_Z20npi_fsdb_release_vctPv',),
 }
 
 
@@ -135,7 +138,7 @@ cdef void _clear_npi_symbols():
     global _npi_fsdb_scope_property_str, _npi_fsdb_iter_top_scope
     global _npi_fsdb_iter_child_scope, _npi_fsdb_iter_scope_next, _npi_fsdb_iter_sig_next
     global _npi_fsdb_iter_sig, _npi_fsdb_iter_member, _npi_fsdb_iter_scope_stop
-    global _npi_fsdb_iter_sig_stop
+    global _npi_fsdb_iter_sig_stop, _npi_fsdb_release_vct
     _npi_fsdb_open = NULL
     _npi_fsdb_close = NULL
     _npi_fsdb_min_time = NULL
@@ -158,6 +161,7 @@ cdef void _clear_npi_symbols():
     _npi_fsdb_iter_member = NULL
     _npi_fsdb_iter_scope_stop = NULL
     _npi_fsdb_iter_sig_stop = NULL
+    _npi_fsdb_release_vct = NULL
 
 
 cdef void* _require_symbol(void* handle, object symbol_name) except NULL:
@@ -190,7 +194,7 @@ cdef void _bind_npi_symbols(void* handle) except *:
     global _npi_fsdb_scope_property_str, _npi_fsdb_iter_top_scope
     global _npi_fsdb_iter_child_scope, _npi_fsdb_iter_scope_next, _npi_fsdb_iter_sig_next
     global _npi_fsdb_iter_sig, _npi_fsdb_iter_member, _npi_fsdb_iter_scope_stop
-    global _npi_fsdb_iter_sig_stop
+    global _npi_fsdb_iter_sig_stop, _npi_fsdb_release_vct
     _npi_fsdb_open = <npi_fsdb_open_fn>_require_symbol(handle, b'npi_fsdb_open')
     _npi_fsdb_close = <npi_fsdb_close_fn>_require_symbol(handle, b'npi_fsdb_close')
     _npi_fsdb_min_time = <npi_fsdb_min_time_fn>_require_symbol(handle, b'npi_fsdb_min_time')
@@ -232,6 +236,9 @@ cdef void _bind_npi_symbols(void* handle) except *:
     )
     _npi_fsdb_iter_sig_stop = <npi_fsdb_iter_sig_stop_fn>_require_symbol(
         handle, b'npi_fsdb_iter_sig_stop'
+    )
+    _npi_fsdb_release_vct = <npi_fsdb_release_vct_fn>_require_symbol(
+        handle, b'npi_fsdb_release_vct'
     )
 
 
@@ -411,6 +418,10 @@ cdef inline NPI_INT32 npi_fsdb_iter_scope_stop(npiFsdbScopeIter iter):
 cdef inline NPI_INT32 npi_fsdb_iter_sig_stop(npiFsdbSigIter iter):
     return _npi_fsdb_iter_sig_stop(iter)
 
+
+cdef inline NPI_INT32 npi_fsdb_release_vct(npiFsdbVctHandle vct):
+    return _npi_fsdb_release_vct(vct)
+
 NPI_FSDB_CT_ARRAY        = <int>npiFsdbSigCtArray
 NPI_FSDB_CT_STRUCT       = <int>npiFsdbSigCtStruct
 NPI_FSDB_CT_UNION        = <int>npiFsdbSigCtUnion
@@ -571,39 +582,41 @@ cdef class NpiFsdbScope:
         return npi_fsdb_scope_property_str(npiFsdbScopeDefName, self.scope_handle).decode('ascii')
 
 
-@cython.boundscheck(False)  # 关闭边界检查以提升性能
-@cython.wraparound(False)   # 关闭负索引检查以提升性能
-cdef inline cstr_to_ull(char* str, unsigned int xz_value, int max_bit_num = 2147483647):
-    cdef unsigned long long value = 0
-    cdef int i = 0
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef inline int cstr_to_ull_array(char* str, unsigned int xz_value, unsigned long long* result, int total_bits):
+    cdef int bit_count = 0
+    cdef int pos = 0
+    cdef int chunk_idx = 0
+    cdef int bit_in_chunk = 0
     cdef char c
     cdef char zero = b'0'
-    while(i < max_bit_num):
-        c = str[i]
+
+    for i in range((total_bits + 63) // 64):
+        result[i] = 0
+
+    while bit_count < total_bits:
+        c = str[pos]
         if c == b'\0':
             break
         if c == b'0' or c == b'1':
-            value = (value << 1) + (c - zero)
+            result[chunk_idx] = (result[chunk_idx] << 1) + (c - zero)
+            bit_in_chunk += 1
+            bit_count += 1
         elif c == b'x' or c == b'z' or c == b'X' or c == b'Z':
-            value = (value << 1) + xz_value
-        elif c == b'{' or c == b'}' or c == b',': # for multi-dimension signal
+            result[chunk_idx] = (result[chunk_idx] << 1) + xz_value
+            bit_in_chunk += 1
+            bit_count += 1
+        elif c == b'{' or c == b'}' or c == b',':
             pass
         else:
             raise ValueError(f"unknown char '{chr(c)}' in fsdb signal value \"{str.decode('ascii')}\"")
-        i = i + 1
-    return value
+        if bit_in_chunk == 64:
+            chunk_idx += 1
+            bit_in_chunk = 0
+        pos += 1
 
-@cython.boundscheck(False)  # 关闭边界检查以提升性能
-@cython.wraparound(False)   # 关闭负索引检查以提升性能
-cdef inline cstr_to_bit(char* str, unsigned int xz_value):
-    cdef unsigned int value = 0
-    cdef char c = str[0]
-    cdef char zero = b'0'
-    if c == b'0' or c == b'1':
-        value = (c - zero)
-    else:
-        value = xz_value
-    return value
+    return bit_count
 
 
 cdef class NpiFsdbReader:
@@ -639,6 +652,7 @@ cdef class NpiFsdbReader:
 
         cdef int width = signal.width()
         cdef npiFsdbVctHandle signal_vct_handle = npi_fsdb_create_vct(signal.sig_handle)
+        assert signal_vct_handle != NULL, f"can't create vct for signal"
         cdef npiFsdbTime cur_time
         cdef npiFsdbValue cur_value
         cdef int stat
@@ -650,13 +664,11 @@ cdef class NpiFsdbReader:
         cdef vector[unsigned long long] value_array[64]
 
         cdef int first = 1
-        cdef int i,j
+        cdef int i
+        cdef unsigned long long chunk_values[64]
         while True:
             if first:
-                if begin_time is None:
-                    stat = npi_fsdb_goto_first(signal_vct_handle)
-                else:
-                    stat = npi_fsdb_goto_time(signal_vct_handle,  <npiFsdbTime> begin_time)
+                stat = npi_fsdb_goto_time(signal_vct_handle, <npiFsdbTime> begin_time)
             else:
                 stat = npi_fsdb_goto_next(signal_vct_handle)
 
@@ -670,18 +682,18 @@ cdef class NpiFsdbReader:
             if cur_time > end_time:
                 break
             time_array.push_back(cur_time)
-            first = False
 
-            if width == 1: # opt for clk
-                value_array[0].push_back(cstr_to_bit(<char*>cur_value.value.str, xz_value))
-            else:
-                for i in range(value_array_num):
-                    value_array[i].push_back(cstr_to_ull(<char*>cur_value.value.str + 64*i, xz_value, 64))
+            cstr_to_ull_array(<char*>cur_value.value.str, xz_value, chunk_values, width)
+            for i in range(value_array_num):
+                value_array[i].push_back(chunk_values[i])
             first = False
 
         cdef np.ndarray[np.uint64_t, ndim=2] result_uint64 = np.zeros((value_array[0].size(), 2), dtype=np.uint64)
         cdef result_object = np.zeros((value_array[0].size(), 2), dtype=np.object_)
         cdef unsigned int shift
+
+        npi_fsdb_release_vct(signal_vct_handle)
+
         if width <= 64:
             value_np_array = np.PyArray_SimpleNewFromData(1, [value_array[0].size()], np.NPY_UINT64, value_array[0].data())
             time_np_array =  np.PyArray_SimpleNewFromData(1, [time_array.size()], np.NPY_UINT64, time_array.data())
@@ -716,12 +728,12 @@ cdef class NpiFsdbReader:
     def min_time(self) -> int:
         cdef npiFsdbTime time
         npi_fsdb_min_time(self.fsdb_handle, &time)
-        return <int>time
+        return time
 
     def max_time(self) -> int:
         cdef npiFsdbTime time
         npi_fsdb_max_time(self.fsdb_handle, &time)
-        return <int>time
+        return time
 
     def close(self):
         npi_fsdb_close(self.fsdb_handle)
