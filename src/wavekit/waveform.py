@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, Callable, Union, cast
+from typing import Any, Callable, Literal, Union, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -1285,3 +1285,161 @@ class Waveform:
             time=self.time[begin_idx:end_idx],
             signal=dataclasses.replace(self.signal),
         )
+
+    def relative(
+        self,
+        offset: int,
+        pad: Literal['repeat', 'value'] = 'repeat',
+        pad_value: Any = None,
+    ) -> Waveform:
+        """Return a new Waveform shifted by *offset* cycles.
+
+        This is the core method for relative time access. Use :meth:`ahead` and
+        :meth:`back` for more readable positive/negative offsets.
+
+        Parameters
+        ----------
+        offset:
+            Number of cycles to shift. Positive looks forward (future),
+            negative looks backward (past).
+        pad:
+            Boundary handling strategy:
+
+            - ``'repeat'`` (default): pad with boundary value (first/last element).
+            - ``'value'``: pad with *pad_value* (must be provided).
+
+        pad_value:
+            Value to use when ``pad='value'``. Ignored otherwise.
+
+        Returns
+        -------
+        Waveform
+            A new waveform shifted by *offset* cycles. ``clock`` and ``time``
+            arrays are always preserved unchanged.
+
+        Raises
+        ------
+        ValueError:
+            If ``pad='value'`` but *pad_value* is not provided.
+        ValueError:
+            If *pad* is not one of ``'repeat'``, ``'value'``.
+
+        Example
+        -------
+        ::
+
+            # Rising edge detection
+            rising = (wave == 0) & wave.ahead()
+
+            # Look back 3 cycles
+            past = wave.relative(-3)
+
+        See Also
+        --------
+        ahead : Shift forward (positive offset).
+        back : Shift backward (negative offset).
+        """
+        if pad not in ('repeat', 'value'):
+            raise ValueError(f"pad must be 'repeat' or 'value', got {pad!r}")
+        if pad == 'value' and pad_value is None:
+            raise ValueError("pad_value is required when pad='value'")
+
+        n = len(self.value)
+        if n == 0:
+            return self.copy()
+
+        if offset == 0:
+            return self.copy()
+
+        dtype = self.value.dtype
+
+        if offset > 0:
+            remaining = self.value[offset:]
+            pad_count = n - len(remaining)
+            fill = self.value[-1] if pad == 'repeat' else pad_value
+            value_padded = np.concatenate([
+                remaining,
+                np.full(pad_count, fill, dtype=dtype),
+            ])
+        else:
+            remaining_end = max(0, n + offset)  # offset is negative
+            remaining = self.value[:remaining_end]
+            pad_count = n - len(remaining)
+            fill = self.value[0] if pad == 'repeat' else pad_value
+            value_padded = np.concatenate([
+                np.full(pad_count, fill, dtype=dtype),
+                remaining,
+            ])
+
+        return Waveform(
+            value=value_padded,
+            clock=self.clock.copy(),
+            time=self.time.copy(),
+            signal=dataclasses.replace(self.signal),
+        )
+
+    def ahead(
+        self,
+        n: int = 1,
+        pad: Literal['repeat', 'value'] = 'repeat',
+        pad_value: Any = None,
+    ) -> Waveform:
+        """Return a new Waveform looking *n* cycles into the future.
+
+        Convenience wrapper around :meth:`relative` for positive offsets.
+
+        Parameters
+        ----------
+        n:
+            Number of cycles to look ahead. Default is 1.
+        pad:
+            See :meth:`relative` for options.
+        pad_value:
+            See :meth:`relative` for usage.
+
+        Returns
+        -------
+        Waveform
+            A new waveform shifted forward by *n* cycles.
+
+        Example
+        -------
+        ::
+
+            # Rising edge detection
+            rising = (wave == 0) & wave.ahead()
+        """
+        return self.relative(n, pad, pad_value)
+
+    def back(
+        self,
+        n: int = 1,
+        pad: Literal['repeat', 'value'] = 'repeat',
+        pad_value: Any = None,
+    ) -> Waveform:
+        """Return a new Waveform looking *n* cycles into the past.
+
+        Convenience wrapper around :meth:`relative` for negative offsets.
+
+        Parameters
+        ----------
+        n:
+            Number of cycles to look back. Default is 1.
+        pad:
+            See :meth:`relative` for options.
+        pad_value:
+            See :meth:`relative` for usage.
+
+        Returns
+        -------
+        Waveform
+            A new waveform shifted backward by *n* cycles.
+
+        Example
+        -------
+        ::
+
+            # Check if current value equals previous
+            same = wave == wave.back()
+        """
+        return self.relative(-n, pad, pad_value)

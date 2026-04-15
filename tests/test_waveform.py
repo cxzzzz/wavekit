@@ -436,3 +436,210 @@ def test_signal_synchronization():
     wave.signal.signed = False
     assert wave.signed is False
     assert wave.signal.signed is False
+
+
+# ==========================================
+# Relative Time Access
+# ==========================================
+
+
+def test_relative_forward():
+    """Test relative() with positive offset (looking into future)."""
+    wave = build_waveform([1, 2, 3, 4, 5], width=8)
+
+    # Default pad='repeat' - same length
+    result = wave.relative(1)
+    assert np.all(result.value == np.array([2, 3, 4, 5, 5]))
+    assert len(result.value) == 5
+
+    # Forward by 2
+    result = wave.relative(2)
+    assert np.all(result.value == np.array([3, 4, 5, 5, 5]))
+
+
+def test_relative_backward():
+    """Test relative() with negative offset (looking into past)."""
+    wave = build_waveform([1, 2, 3, 4, 5], width=8)
+
+    # Default pad='repeat' - same length
+    result = wave.relative(-1)
+    assert np.all(result.value == np.array([1, 1, 2, 3, 4]))
+    assert len(result.value) == 5
+
+    # Backward by 2
+    result = wave.relative(-2)
+    assert np.all(result.value == np.array([1, 1, 1, 2, 3]))
+
+
+def test_relative_zero_offset():
+    """Test relative(0) returns a copy."""
+    wave = build_waveform([1, 2, 3], width=8)
+    result = wave.relative(0)
+    assert np.all(result.value == wave.value)
+    assert result is not wave
+
+
+def test_relative_pad_repeat():
+    """Test relative() with pad='repeat'."""
+    wave = build_waveform([1, 2, 3, 4, 5], width=8)
+
+    # Forward - result[i] = original[i+1], pad end with last value
+    result = wave.relative(1, pad='repeat')
+    assert np.all(result.value == np.array([2, 3, 4, 5, 5]))
+    assert len(result.value) == len(wave.value)
+
+    # Forward by 2
+    result = wave.relative(2, pad='repeat')
+    assert np.all(result.value == np.array([3, 4, 5, 5, 5]))
+
+    # Backward - result[i] = original[i-1], pad start with first value
+    result = wave.relative(-1, pad='repeat')
+    assert np.all(result.value == np.array([1, 1, 2, 3, 4]))
+
+    # Backward by 2 - first 2 positions padded
+    result = wave.relative(-2, pad='repeat')
+    assert np.all(result.value == np.array([1, 1, 1, 2, 3]))
+
+
+def test_relative_pad_value():
+    """Test relative() with pad='value'."""
+    wave = build_waveform([1, 2, 3, 4, 5], width=8)
+
+    # Forward - pad end with 0
+    result = wave.relative(1, pad='value', pad_value=0)
+    assert np.all(result.value == np.array([2, 3, 4, 5, 0]))
+
+    # Backward - pad start with 99
+    result = wave.relative(-1, pad='value', pad_value=99)
+    assert np.all(result.value == np.array([99, 1, 2, 3, 4]))
+
+
+def test_relative_pad_value_string():
+    """Test relative() with string pad_value for string-typed signals."""
+    value = np.array(['a', 'b', 'c', 'd'], dtype=object)
+    clock = np.arange(len(value))
+    time = clock * 10
+    wave = Waveform(value, clock, time, signal=Signal('', '', None, None, False))
+
+    result = wave.relative(1, pad='value', pad_value='X')
+    assert np.all(result.value == np.array(['b', 'c', 'd', 'X'], dtype=object))
+
+    result = wave.relative(-1, pad='value', pad_value='UNK')
+    assert np.all(result.value == np.array(['UNK', 'a', 'b', 'c'], dtype=object))
+
+
+def test_relative_errors():
+    """Test relative() error conditions."""
+    wave = build_waveform([1, 2, 3], width=8)
+
+    with pytest.raises(ValueError, match="pad must be"):
+        wave.relative(1, pad='invalid')
+
+    with pytest.raises(ValueError, match="pad_value is required"):
+        wave.relative(1, pad='value')
+
+
+def test_relative_empty():
+    """Test relative() on empty waveform."""
+    wave = build_waveform([], width=8)
+    result = wave.relative(1)
+    assert len(result.value) == 0
+
+
+def test_relative_offset_exceeds_length():
+    """Test relative() when abs(offset) >= len(value)."""
+    wave = build_waveform([1, 2, 3], width=8)
+
+    # offset == length: all padded
+    result = wave.relative(3, pad='repeat')
+    assert np.all(result.value == np.array([3, 3, 3]))
+
+    result = wave.relative(-3, pad='repeat')
+    assert np.all(result.value == np.array([1, 1, 1]))
+
+    # offset > length: all padded
+    result = wave.relative(5, pad='repeat')
+    assert np.all(result.value == np.array([3, 3, 3]))
+
+    result = wave.relative(-5, pad='repeat')
+    assert np.all(result.value == np.array([1, 1, 1]))
+
+    # Same with pad='value'
+    result = wave.relative(5, pad='value', pad_value=0)
+    assert np.all(result.value == np.array([0, 0, 0]))
+
+    result = wave.relative(-5, pad='value', pad_value=99)
+    assert np.all(result.value == np.array([99, 99, 99]))
+
+
+def test_relative_preserves_clock_time():
+    """Test that relative() preserves clock and time arrays unchanged."""
+    wave = build_waveform([1, 2, 3, 4, 5], width=8)
+
+    result = wave.relative(2)
+    assert np.array_equal(result.clock, wave.clock)
+    assert np.array_equal(result.time, wave.time)
+
+    result = wave.relative(-2)
+    assert np.array_equal(result.clock, wave.clock)
+    assert np.array_equal(result.time, wave.time)
+
+
+def test_relative_preserves_dtype():
+    """Test that relative() preserves value array dtype."""
+    wave = build_waveform([1, 2, 3, 4, 5], width=8)
+    result = wave.relative(1)
+    assert result.value.dtype == wave.value.dtype
+
+
+def test_ahead_back():
+    """Test ahead() and back() convenience methods."""
+    wave = build_waveform([1, 2, 3, 4, 5], width=8)
+
+    # ahead() with default n=1, pad='repeat'
+    result = wave.ahead()
+    assert np.all(result.value == np.array([2, 3, 4, 5, 5]))
+
+    # ahead(2) should equal relative(2)
+    result = wave.ahead(2)
+    expected = wave.relative(2)
+    assert np.all(result.value == expected.value)
+
+    # back() with default n=1, pad='repeat'
+    result = wave.back()
+    assert np.all(result.value == np.array([1, 1, 2, 3, 4]))
+
+    # back(2) should equal relative(-2)
+    result = wave.back(2)
+    expected = wave.relative(-2)
+    assert np.all(result.value == expected.value)
+
+    # ahead/back with pad='value'
+    result = wave.ahead(pad='value', pad_value=0)
+    assert np.all(result.value == np.array([2, 3, 4, 5, 0]))
+
+    result = wave.back(pad='value', pad_value=99)
+    assert np.all(result.value == np.array([99, 1, 2, 3, 4]))
+
+
+def test_rising_edge_with_ahead():
+    """Test rising edge detection using ahead()."""
+    wave = build_waveform([0, 0, 1, 1, 0, 1], width=1)
+
+    # Rising edge: current is 0, next is 1
+    # wave = [0, 0, 1, 1, 0, 1]
+    # wave.ahead() = [0, 1, 1, 0, 1, 1]
+    # wave == 0 = [1, 1, 0, 0, 1, 0]
+    # rising = [0, 1, 0, 0, 1, 0]
+    rising = (wave == 0) & wave.ahead()
+    assert np.all(rising.value == np.array([0, 1, 0, 0, 1, 0]))
+
+
+def test_relative_preserves_metadata():
+    """Test that relative() preserves signal metadata."""
+    wave = build_waveform([1, 2, 3, 4, 5], width=8)
+    wave.name = 'test_sig'
+
+    result = wave.ahead()
+    assert result.width == 8
+    assert result.name == 'test_sig'
