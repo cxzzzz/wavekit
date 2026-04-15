@@ -9,6 +9,7 @@ from ..waveform import Waveform
 Condition = Union[Waveform, Callable[[int, dict], bool]]
 IntValue = Union[int, Callable[[int, dict], int]]
 SignalValue = Union[Waveform, Callable[[int, dict], Any]]
+QueueValue = Union[str, Callable[[int, dict], str]]
 
 Step = Union[
     'WaitStep',
@@ -27,10 +28,10 @@ class WaitStep:
 
     cond: Condition
     guard: Condition | None = None
-    channel: str | None = None
+    queue: QueueValue | None = None
 
     def clone(self) -> WaitStep:
-        return WaitStep(cond=self.cond, guard=self.guard, channel=self.channel)
+        return WaitStep(cond=self.cond, guard=self.guard, queue=self.queue)
 
 
 @dataclass

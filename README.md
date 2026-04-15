@@ -266,7 +266,8 @@ changed = wave != wave.back(3)
 
 | Method | Description |
 |--------|-------------|
-| `.wait(cond, guard=None, channel=None)` | Block until `cond` is True. `guard` is checked each waiting cycle. `channel` enforces FIFO ordering among concurrent instances. |
+| `.wait(cond, guard=None)` | Block until `cond` is True. `guard` is checked each waiting cycle. |
+| `.wait_exclusive(cond, queue, guard=None)` | Block until `cond` is True with exclusive FIFO consumption. `queue` can be a string or `callable(index, captures) -> str` for dynamic routing (e.g., per-ID queues for AXI). |
 | `.delay(n, guard=None)` | Advance `n` cycles. `delay(0)` is a no-op. |
 | `.capture(name, signal)` | Record signal value at current cycle. `name[]` appends to a list. |
 | `.require(cond)` | Assert condition; fail with `REQUIRE_VIOLATED` if False. |
