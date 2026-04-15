@@ -242,6 +242,24 @@ A `Waveform` wraps three parallel numpy arrays (`.value`, `.clock`, `.time`). Al
 | `wave.rising_edge()` | True at 0→1 transitions |
 | `wave.falling_edge()` | True at 1→0 transitions |
 
+**Relative time access**
+
+| Method | Description |
+|--------|-------------|
+| `wave.relative(offset, pad, pad_value)` | Shift by *offset* cycles (positive = future, negative = past) |
+| `wave.ahead(n, pad, pad_value)` | Look *n* cycles into the future (shorthand for `relative(n)`) |
+| `wave.back(n, pad, pad_value)` | Look *n* cycles into the past (shorthand for `relative(-n)`) |
+
+`pad` controls boundary handling: `'repeat'` (default) pads with the first/last value, `'value'` pads with a given `pad_value`.
+
+```python
+# Rising edge detection
+rising = (wave == 0) & wave.ahead()
+
+# Compare current vs 3 cycles ago
+changed = wave != wave.back(3)
+```
+
 ---
 
 ### Pattern
