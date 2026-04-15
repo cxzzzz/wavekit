@@ -23,3 +23,7 @@ example/**/*.vvp
 .vscode/
 .pypirc
 poetry.toml
+
+.claude/
+.opencode/
+.trellis/
