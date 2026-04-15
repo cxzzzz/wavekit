@@ -150,11 +150,12 @@ class PatternEngine:
         n = len(ref_wf.value)
 
         # ---- determine trigger mode ----
-        # If first step is a WaitStep, use its cond as trigger and skip it on fork.
-        # Otherwise, fork an instance every cycle.
+        # If first step is a plain WaitStep (queue=None), use its cond as
+        # trigger and skip it on fork.  WaitSteps with a queue must go through
+        # normal step processing so the queue is properly consumed.
         skip_first_wait = False
         trigger: Condition | None = None
-        if self._steps and isinstance(self._steps[0], WaitStep):
+        if self._steps and isinstance(self._steps[0], WaitStep) and self._steps[0].queue is None:
             trigger = self._steps[0].cond
             skip_first_wait = True
 

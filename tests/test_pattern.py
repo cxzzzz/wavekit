@@ -404,6 +404,102 @@ class TestWaitExclusive:
         np.testing.assert_array_equal(valid.captures['req_data'].value, [10, 11])
         np.testing.assert_array_equal(valid.captures['rsp_data'].value, [111, 222])
 
+    def test_wait_exclusive_as_first_step(self):
+        """wait_exclusive as first step: no trigger optimization, queue is consumed.
+
+        When wait_exclusive is the first step, the engine must not use it as a
+        trigger (which would skip queue consumption).  Instead, instances are
+        forked every cycle and the wait_exclusive step processes normally.
+        """
+        # Two rsp events at cycles 2 and 4
+        rsp = _bool_wf([0, 0, 1, 0, 1, 0])
+        rsp_data = _wf([0, 0, 111, 0, 222, 0], width=8)
+
+        result = (
+            Pattern()
+            .wait_exclusive(rsp, queue='rsp')
+            .capture('rsp_data', rsp_data)
+            .match()
+        )
+        valid = result.filter_valid()
+        # Only 2 valid matches (at cycles where rsp=1 and queue is consumed)
+        assert len(valid) == 2
+        np.testing.assert_array_equal(valid.captures['rsp_data'].value, [111, 222])
+
+    def test_guard_with_wait_exclusive(self):
+        """guard violation while waiting at wait_exclusive → REQUIRE_VIOLATED."""
+        req = _bool_wf([1, 1, 0, 0, 0, 0])
+        req_data = _wf([10, 20, 0, 0, 0, 0], width=8)
+        rsp = _bool_wf([0, 0, 0, 0, 1, 0])  # rsp arrives at cycle 4
+        enable = _bool_wf([1, 1, 1, 0, 0, 0])  # drops at cycle 3
+
+        result = (
+            Pattern()
+            .wait(req)
+            .capture('req_data', req_data)
+            .wait_exclusive(rsp, queue='Q', guard=enable)
+            .match()
+        )
+        # Both instances should fail: guard drops before rsp arrives
+        assert len(result) == 2
+        assert all(s == MatchStatus.REQUIRE_VIOLATED for s in result.status.value)
+
+    def test_timeout_with_wait_exclusive(self):
+        """Instance waiting at wait_exclusive times out → next instance can consume."""
+        # Cycle:     0  1  2  3  4  5
+        req = _bool_wf([1, 1, 0, 0, 0, 0])
+        req_data = _wf([10, 20, 0, 0, 0, 0], width=8)
+        rsp = _bool_wf([0, 0, 0, 0, 0, 1])  # rsp at cycle 5
+        rsp_data = _wf([0, 0, 0, 0, 0, 99], width=8)
+
+        result = (
+            Pattern()
+            .wait(req)
+            .capture('req_data', req_data)
+            .wait_exclusive(rsp, queue='Q')
+            .capture('rsp_data', rsp_data)
+            .timeout(5)  # Instance 0 (forked@0): elapsed=6 > 5 at cycle 5 → TIMEOUT
+            .match()     # Instance 1 (forked@1): elapsed=5 at cycle 5, 5 > 5? No → advance
+        )
+        # Instance 0 times out; Instance 1 survives and consumes the queue
+        assert len(result) == 2
+        statuses = sorted(result.status.value)
+        assert MatchStatus.TIMEOUT in statuses
+        assert MatchStatus.OK in statuses
+        valid = result.filter_valid()
+        assert len(valid) == 1
+        assert valid.captures['rsp_data'].value[0] == 99
+
+    def test_different_queues_same_cycle(self):
+        """Multiple wait_exclusive with different queue names on the same cycle
+        can all consume independently."""
+        req = _bool_wf([1, 1, 0, 0, 0, 0])
+        req_data = _wf([10, 20, 0, 0, 0, 0], width=8)
+        # Both rd_rsp and wr_rsp arrive at cycle 3
+        rd_rsp = _bool_wf([0, 0, 0, 1, 0, 0])
+        wr_rsp = _bool_wf([0, 0, 0, 1, 0, 0])
+        rd_data = _wf([0, 0, 0, 111, 0, 0], width=8)
+        wr_data = _wf([0, 0, 0, 222, 0, 0], width=8)
+
+        result = (
+            Pattern()
+            .wait(req)
+            .capture('req_data', req_data)
+            .branch(
+                lambda idx, cap: cap['req_data'] == 10,  # first request → read
+                Pattern().wait_exclusive(rd_rsp, queue='rd').capture('rsp_data', rd_data),
+                Pattern().wait_exclusive(wr_rsp, queue='wr').capture('rsp_data', wr_data),
+            )
+            .match()
+        )
+        valid = result.filter_valid()
+        assert len(valid) == 2
+        # Both instances can consume on the same cycle (different queues)
+        rd_idx = [i for i in range(len(valid)) if valid.captures['req_data'].value[i] == 10]
+        wr_idx = [i for i in range(len(valid)) if valid.captures['req_data'].value[i] == 20]
+        assert valid.captures['rsp_data'].value[rd_idx[0]] == 111
+        assert valid.captures['rsp_data'].value[wr_idx[0]] == 222
+
 
 # ---------------------------------------------------------------------------
 # 7. loop until (do-while burst)
