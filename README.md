@@ -5,15 +5,18 @@
 [![Python Versions](https://img.shields.io/pypi/pyversions/wavekit.svg)](https://pypi.org/project/wavekit/)
 [![License](https://img.shields.io/github/license/cxzzzz/wavekit.svg)](LICENSE)
 
+English | [中文](README_ZH.md)
+
 **Wavekit** is a fundamental Python library for digital waveform analysis. By seamlessly converting VCD and FSDB data into Numpy arrays, it empowers engineers to perform high-performance signal processing, protocol analysis, and automated verification with ease.
 
 > 🤖 **AI Integration**: [wavekit-mcp](https://github.com/cxzzzz/wavekit-mcp) — MCP server for AI-assisted waveform analysis. Let AI load signals and run pattern matching — no manual coding required.
 
 ## ✨ Features
 
-- **High Performance & Easy Loading**: Cython-optimized VCD/FSDB parsers with Numpy-backed storage for speed and memory efficiency, plus flexible batch signal extraction via brace expansion, integer ranges, and regular expressions.
+- **Flexible Signal Extraction**: Flexible batch signal extraction via brace expansion, integer ranges, and regular expressions — load groups of related signals in one call.
 - **Rich Analysis Tools**: Numpy-like API for arithmetic, masking, bit-field manipulation, edge detection, and time/cycle slicing — compose complex signal queries in just a few lines.
 - **Pattern Matching**: NFA-based temporal pattern engine that scans waveforms in a single pass to extract protocol transactions, measure latencies, and detect timing violations.
+- **High-Performance Parsing & Storage**: Cython-optimized VCD/FSDB parsers with Numpy-backed storage for fast loading and memory efficiency, handling large simulation files with ease.
 
 ## 📦 Installation
 
