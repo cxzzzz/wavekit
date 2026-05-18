@@ -10,6 +10,7 @@ from .result import MatchResult, MatchStatus
 from .steps import (
     BranchStep,
     CaptureStep,
+    Channel,
     Condition,
     DelayStep,
     LoopStep,
@@ -58,19 +59,26 @@ def _eval_signal(signal, index: int, captures: dict) -> Any:
     raise TypeError(f'Invalid signal type: {type(signal)}')
 
 
-def _eval_queue(queue, index: int, captures: dict) -> str | None:
-    """Evaluate queue parameter (static string or callable)."""
-    if queue is None:
+def _eval_channel(channel, index: int, captures: dict) -> Channel | None:
+    """Resolve a channel parameter to a :class:`Channel` instance (or ``None``).
+
+    Static :class:`Channel` instances are returned as-is.  Callables are
+    invoked with ``(index, captures)`` and must return a :class:`Channel`.
+    """
+    if channel is None:
         return None
-    if isinstance(queue, str):
-        return queue
-    if callable(queue):
-        return str(queue(index, captures))
-    raise TypeError(f'Invalid queue type: {type(queue)}')
+    if isinstance(channel, Channel):
+        return channel
+    if callable(channel):
+        result = channel(index, captures)
+        if not isinstance(result, Channel):
+            raise TypeError(f'channel callable must return a Channel instance, got {type(result)}')
+        return result
+    raise TypeError(f'Invalid channel type: {type(channel)}')
 
 
 # ---------------------------------------------------------------------------
-# Waveform collection & validation
+# Waveform & channel collection
 # ---------------------------------------------------------------------------
 
 
@@ -81,11 +89,11 @@ def _collect_waveforms(steps: list[Step]) -> list[Waveform]:
         if isinstance(step, WaitStep):
             if isinstance(step.cond, Waveform):
                 result.append(step.cond)
-            if isinstance(step.guard, Waveform):
-                result.append(step.guard)
+            if isinstance(step.require, Waveform):
+                result.append(step.require)
         elif isinstance(step, DelayStep):
-            if isinstance(step.guard, Waveform):
-                result.append(step.guard)
+            if isinstance(step.require, Waveform):
+                result.append(step.require)
         elif isinstance(step, CaptureStep):
             if isinstance(step.signal, Waveform):
                 result.append(step.signal)
@@ -133,10 +141,13 @@ def _validate_waveforms(waveforms: list[Waveform]) -> None:
 class PatternEngine:
     """NFA-style engine that scans a time axis and runs pattern instances."""
 
+    _next_epoch: int = 0
+
     def __init__(self, pattern) -> None:
         self._steps: list[Step] = pattern._steps
         self._timeout_cycles: int | None = pattern._timeout_cycles
-        self._consumed_queues: set[str] = set()
+        PatternEngine._next_epoch += 1
+        self._epoch: int = PatternEngine._next_epoch
 
     def run(
         self,
@@ -149,13 +160,18 @@ class PatternEngine:
         ref_wf = waveforms[0]
         n = len(ref_wf.value)
 
+        # Channel consumption is keyed on (engine epoch, cycle), so stale
+        # state from a previous run() is automatically invalidated — no
+        # explicit reset is needed for either static or dynamic channels.
+
         # ---- determine trigger mode ----
-        # If first step is a plain WaitStep (queue=None), use its cond as
-        # trigger and skip it on fork.  WaitSteps with a queue must go through
-        # normal step processing so the queue is properly consumed.
+        # If the first step is a plain WaitStep without an explicit channel,
+        # use its cond as the fork trigger and skip it on entry.  Wait steps
+        # with an explicit channel must go through normal step processing so
+        # the channel is consumed correctly.
         skip_first_wait = False
         trigger: Condition | None = None
-        if self._steps and isinstance(self._steps[0], WaitStep) and self._steps[0].queue is None:
+        if self._steps and isinstance(self._steps[0], WaitStep) and self._steps[0].channel is None:
             trigger = self._steps[0].cond
             skip_first_wait = True
 
@@ -182,9 +198,6 @@ class PatternEngine:
         completed: list[Instance] = []
 
         for t in range(start_idx, end_idx):
-            # Reset per-cycle queue consumption tracking (oldest instance wins)
-            self._consumed_queues = set()
-
             # Tick all active instances in creation order (oldest first)
             still_active: list[Instance] = []
             for inst in active:
@@ -257,8 +270,9 @@ class PatternEngine:
         """Advance the instance, consuming at most *blocking_budget* blocking steps.
 
         Instances are always processed oldest-first within a cycle, so the first
-        instance to reach a queued WaitStep wins and marks the queue consumed
-        in ``self._consumed_queues``; later instances see it as blocked.
+        instance to reach a wait step on a given channel wins; later instances
+        see the channel marked consumed for this ``(epoch, cycle)`` and remain
+        blocked for the cycle.
         """
         epsilon_count = 0
 
@@ -292,23 +306,31 @@ class PatternEngine:
             # -- blocking steps --
 
             if isinstance(step, WaitStep):
-                # Evaluate queue dynamically (static string or callable)
-                queue_name = _eval_queue(step.queue, t, inst.captures)
-                # Queue check: only the first instance to reach this queue
-                # this cycle may advance; later instances are blocked.
-                queue_free = queue_name is None or queue_name not in self._consumed_queues
-                if blocking_budget > 0 and queue_free and _eval_bool(step.cond, t, inst.captures):
-                    if queue_name is not None:
-                        self._consumed_queues.add(queue_name)
+                eff_channel = _eval_channel(step.channel, t, inst.captures) or step._auto_channel
+                channel_free = (
+                    eff_channel._consumed_epoch != self._epoch or eff_channel._consumed_at != t
+                )
+
+                # tick=True needs blocking budget and consumes a cycle on
+                # match; tick=False is gate-free and stays in the same cycle.
+                if (
+                    (not step.tick or blocking_budget > 0)
+                    and channel_free
+                    and _eval_bool(step.cond, t, inst.captures)
+                ):
+                    eff_channel._consumed_epoch = self._epoch
+                    eff_channel._consumed_at = t
                     frame.step_idx += 1
-                    blocking_budget -= 1
+                    if step.tick:
+                        blocking_budget -= 1
                     continue
-                # Still waiting — check guard
-                if step.guard is not None and not _eval_bool(step.guard, t, inst.captures):
+
+                # Still waiting — check require condition
+                if step.require is not None and not _eval_bool(step.require, t, inst.captures):
                     inst.status = MatchStatus.REQUIRE_VIOLATED
                     inst.end_cycle = int(ref_wf.clock[t])
                     return
-                return  # wait for next tick (budget exhausted or queue blocked)
+                return  # wait for next tick (budget exhausted, channel busy, or cond false)
 
             if isinstance(step, DelayStep):
                 if step.remaining is None:
@@ -320,7 +342,7 @@ class PatternEngine:
                     continue
                 if blocking_budget <= 0:
                     return
-                if step.guard is not None and not _eval_bool(step.guard, t, inst.captures):
+                if step.require is not None and not _eval_bool(step.require, t, inst.captures):
                     inst.status = MatchStatus.REQUIRE_VIOLATED
                     inst.end_cycle = int(ref_wf.clock[t])
                     return
@@ -335,13 +357,15 @@ class PatternEngine:
             # -- epsilon steps --
 
             if isinstance(step, CaptureStep):
-                name = step.name
                 val = _eval_signal(step.signal, t, inst.captures)
-                if name.endswith('[]'):
-                    key = name[:-2]
-                    inst.captures.setdefault(key, []).append(val)
+                if step.mode == 'last':
+                    inst.captures[step.name] = val
+                elif step.mode == 'first':
+                    inst.captures.setdefault(step.name, val)
+                elif step.mode == 'list':
+                    inst.captures.setdefault(step.name, []).append(val)
                 else:
-                    inst.captures[name] = val
+                    raise PatternError(f'Unknown capture mode: {step.mode!r}')
                 frame.step_idx += 1
                 continue
 

@@ -13,6 +13,7 @@ try:
 except metadata.PackageNotFoundError:
     __version__ = 'unknown'
 
+from .pattern import Channel as Channel
 from .pattern import MatchResult as MatchResult
 from .pattern import MatchStatus as MatchStatus
 from .pattern import Pattern as Pattern
@@ -34,6 +35,7 @@ __all__ = [
     'MatchResult',
     'MatchStatus',
     'PatternError',
+    'Channel',
     'has_fsdb_support',
 ]
 

@@ -138,7 +138,7 @@ with VcdReader("axi_tb.vcd") as f:
 **AXI 写突发（多拍数据）**
 
 ```python
-beat = Pattern().wait(wvalid & wready).capture("beats[]", wdata)
+beat = Pattern().wait(wvalid & wready).capture("beats", wdata, mode="list")
 
 result = (
     Pattern()
@@ -257,16 +257,42 @@ changed = wave != wave.back(3)
 
 | 方法 | 说明 |
 |------|------|
-| `.wait(cond, guard=None)` | 阻塞等待 `cond` 为真。`guard` 会在每周期检查。 |
-| `.wait_exclusive(cond, queue, guard=None)` | 带独占 FIFO 消费的等待。`queue` 可为字符串，也可为 `callable(index, captures) -> str`，用于动态路由（如按 AXI ID 分队列）。 |
-| `.delay(n, guard=None)` | 前进 n 个周期。`delay(0)` 为空操作。 |
-| `.capture(name, signal)` | 在当前周期记录信号值。`name[]` 表示追加到列表。 |
+| `.wait(cond, *, require=None, channel=None, tick=True)` | 阻塞等待 `cond` 为真。`require` 在等待期间每周期检查（违反 → `REQUIRE_VIOLATED`）。`channel` 将该 wait 绑定到一个共享 FIFO 消费组（详见下方 [Channel 通道](#channel-通道)）。`tick=False` 表示在当前周期命中后不消耗周期，下一步在同一 cycle 上继续判定（零周期 wait）。 |
+| `.delay(n, *, require=None)` | 前进 n 个周期。`delay(0)` 为空操作。`require` 在每个延迟周期都必须为真。 |
+| `.capture(name, signal, *, mode='last')` | 在当前周期记录信号值。`mode='last'`（默认）覆盖写入；`'first'` 仅记录第一次写入；`'list'` 追加到列表。 |
 | `.require(cond)` | 断言条件；为假时实例标记为 `REQUIRE_VIOLATED`。 |
 | `.loop(body, *, until=None, when=None)` | `until`：do-while（先执行 body，条件为真时退出）；`when`：while（条件为假时直接退出）。 |
 | `.repeat(body, n)` | 重复执行 body 恰好 n 次。n 可为可调用对象。 |
 | `.branch(cond, true_body, false_body)` | 条件分支。 |
 | `.timeout(max_cycles)` | 对未完成的实例标记 `TIMEOUT`。 |
 | `.match(start_cycle=None, end_cycle=None)` | 运行匹配引擎，返回 `MatchResult`。 |
+
+**Channel 通道**
+
+`Channel` 是表示共享 FIFO 消费组的身份对象：每周期至多一个在飞实例可以消费它。每个 `wait()` 步骤都自带一个隐式 channel，因此同一模板派生的多个实例会自动按一周期一个的节奏在该步骤上排队。当你需要打破这个默认的串行化时，就显式传一个 `Channel`（或 `callable(index, captures) -> Channel`）—— 典型场景是事件来自物理上并行的多条总线（多 Bank Cache、多 lane Retire 等），希望多个实例能**同周期**各自消费自己的 channel。
+
+```python
+from collections import defaultdict
+from wavekit import Channel, Pattern
+
+# 多 Bank Cache：每个 bank 有独立的响应端口，多个 bank 可以在同一周期返回数据。
+# 不分区的话，默认的串行化规则会让其中一个实例多等一拍；按 bank 分 Channel
+# 可以让每个在飞读请求各自消费对应 bank 的响应。
+banks = defaultdict(Channel)
+
+result = (
+    Pattern()
+    .wait(req_valid)
+    .capture('bank', req_addr & 1)
+    .wait(
+        lambda i, cap: bank_valid[cap['bank']].value[i],
+        channel=lambda i, cap: banks[cap['bank']],
+    )
+    .capture('rdata',
+        lambda i, cap: bank_data[cap['bank']].value[i])
+    .match()
+)
+```
 
 **`MatchResult`**
 

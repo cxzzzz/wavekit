@@ -36,7 +36,7 @@ class MatchResult:
         :class:`MatchStatus` value (uint8) for each match.
     captures : dict[str, Waveform]
         Named capture values.  Scalar captures are plain Waveforms;
-        list captures (``name[]``) are Waveforms with ``object`` dtype
+        list captures (``mode='list'``) are Waveforms with ``object`` dtype
         where each element is a Python list.
     """
 

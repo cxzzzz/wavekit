@@ -144,7 +144,7 @@ print(f"Read data: {valid.captures['rdata'].value}")
 **AXI Write Burst (multi-beat)**
 
 ```python
-beat = Pattern().wait(wvalid & wready).capture("beats[]", wdata)
+beat = Pattern().wait(wvalid & wready).capture("beats", wdata, mode="list")
 
 result = (
     Pattern()
@@ -269,16 +269,43 @@ changed = wave != wave.back(3)
 
 | Method | Description |
 |--------|-------------|
-| `.wait(cond, guard=None)` | Block until `cond` is True. `guard` is checked each waiting cycle. |
-| `.wait_exclusive(cond, queue, guard=None)` | Block until `cond` is True with exclusive FIFO consumption. `queue` can be a string or `callable(index, captures) -> str` for dynamic routing (e.g., per-ID queues for AXI). |
-| `.delay(n, guard=None)` | Advance `n` cycles. `delay(0)` is a no-op. |
-| `.capture(name, signal)` | Record signal value at current cycle. `name[]` appends to a list. |
+| `.wait(cond, *, require=None, channel=None, tick=True)` | Block until `cond` is True. `require` is checked each waiting cycle (failure → `REQUIRE_VIOLATED`). `channel` binds the wait to a shared FIFO consumer group (see [Channels](#channels) below). `tick=False` matches on the current cycle without consuming it. |
+| `.delay(n, *, require=None)` | Advance `n` cycles. `delay(0)` is a no-op. `require` must hold every cycle. |
+| `.capture(name, signal, *, mode='last')` | Record signal value at current cycle. `mode='last'` (default) overwrites; `'first'` keeps the first write; `'list'` appends to a list. |
 | `.require(cond)` | Assert condition; fail with `REQUIRE_VIOLATED` if False. |
 | `.loop(body, *, until=None, when=None)` | `until`: do-while (exit when True after body). `when`: while (exit when False before body). |
 | `.repeat(body, n)` | Execute body exactly `n` times. `n` may be a callable. |
 | `.branch(cond, true_body, false_body)` | Conditional branch. |
 | `.timeout(max_cycles)` | Terminate unfinished instances with `TIMEOUT`. |
 | `.match(start_cycle=None, end_cycle=None)` | Run the engine; return `MatchResult`. |
+
+**Channels**
+
+A `Channel` is an identity object representing a shared FIFO consumer group: at most one in-flight pattern instance may consume per cycle. Each `wait()` step has its own implicit channel, so multiple instances of the same pattern automatically serialize one-per-cycle on that step. Pass an explicit `Channel` (or `callable(index, captures) -> Channel`) when you need to override the default serialization — typically when events arrive on physically parallel buses (multi-bank memory, multi-lane retire) and several instances should consume *concurrently* by routing each to its own per-key channel.
+
+```python
+from collections import defaultdict
+from wavekit import Channel, Pattern
+
+# Multi-bank cache: each bank has its own response port, so two banks
+# can return data in the *same* cycle. Without partitioning, the default
+# serialization rule would force one instance to wait an extra cycle.
+# A per-bank Channel lets each in-flight read consume from its own bank.
+banks = defaultdict(Channel)
+
+result = (
+    Pattern()
+    .wait(req_valid)
+    .capture('bank', req_addr & 1)
+    .wait(
+        lambda i, cap: bank_valid[cap['bank']].value[i],
+        channel=lambda i, cap: banks[cap['bank']],
+    )
+    .capture('rdata',
+        lambda i, cap: bank_data[cap['bank']].value[i])
+    .match()
+)
+```
 
 **`MatchResult`**
 

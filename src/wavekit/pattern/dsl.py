@@ -3,11 +3,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .steps import (
+    _VALID_CAPTURE_MODES,
     BranchStep,
     CaptureStep,
+    ChannelValue,
     DelayStep,
     LoopStep,
-    QueueValue,
     RepeatStep,
     RequireStep,
     Step,
@@ -16,7 +17,7 @@ from .steps import (
 
 if TYPE_CHECKING:
     from .result import MatchResult
-    from .steps import Condition, IntValue, SignalValue
+    from .steps import CaptureMode, Condition, IntValue, SignalValue
 
 
 class Pattern:
@@ -44,78 +45,73 @@ class Pattern:
     def wait(
         self,
         cond: Condition,
-        guard: Condition | None = None,
+        *,
+        require: Condition | None = None,
+        channel: ChannelValue | None = None,
+        tick: bool = True,
     ) -> Pattern:
         """Block until *cond* becomes True.
 
-        Parameters
-        ----------
-        cond:
-            Waveform (static) or ``callable(index, captures) -> bool`` (dynamic).
-        guard:
-            Must remain True every cycle while waiting; violation terminates
-            the instance with ``REQUIRE_VIOLATED``.
-        """
-        self._steps.append(WaitStep(cond=cond, guard=guard, queue=None))
-        return self
-
-    def wait_exclusive(
-        self,
-        cond: Condition,
-        queue: QueueValue,
-        guard: Condition | None = None,
-    ) -> Pattern:
-        """Block until *cond* becomes True with exclusive FIFO consumption.
-
-        Unlike :meth:`wait`, this method requires a *queue* name and ensures
-        that when multiple instances are waiting on the same condition, only
-        one (the oldest) advances per occurrence. This models hardware
-        protocols where a handshake must be consumed by exactly one requester.
+        By default each ``wait()`` step has its own private FIFO consumer
+        group: when multiple in-flight instances reach this step, only one
+        (the oldest) advances per cycle.  Pass an explicit :class:`Channel`
+        via ``channel=`` to share the consumer group across multiple wait
+        steps (e.g., for AXI request/response pairing).
 
         Parameters
         ----------
         cond:
             Waveform (static) or ``callable(index, captures) -> bool`` (dynamic).
-        queue:
-            Named queue for FIFO consumption. Instances waiting on the same
-            queue are served in creation order (oldest first). Can be a static
-            string or ``callable(index, captures) -> str`` for dynamic routing
-            (e.g., based on transaction ID).
-        guard:
-            Must remain True every cycle while waiting; violation terminates
-            the instance with ``REQUIRE_VIOLATED``.
+        require:
+            Optional condition that must hold every cycle while waiting.
+            Violation terminates the instance with ``REQUIRE_VIOLATED``.
+        channel:
+            Explicit :class:`Channel` (or ``callable(index, captures) -> Channel``
+            for dynamic key-based partitioning) that binds this wait to a
+            shared FIFO consumer group.  ``None`` (default) uses an implicit
+            per-step channel.
+        tick:
+            When ``True`` (default), a successful match advances time by one
+            cycle before the next step is evaluated.  When ``False`` the next
+            step evaluates on the **same** cycle (zero-cycle wait), useful
+            for measuring intervals like ``valid → valid & ready``.
 
         Examples
         --------
-        Static queue (all requests share one FIFO):
+        Static channel shared between request and response steps::
 
-        .. code-block:: python
+            rsp_chan = Channel()
+            (Pattern()
+                .wait(req)
+                .wait(rsp, channel=rsp_chan))
 
-            Pattern()
-            .wait(req)
-            .wait_exclusive(rsp, queue='response')
-            .match()
+        Dynamic per-ID partitioning for AXI out-of-order reads::
 
-        Dynamic queue (per-ID routing for AXI):
+            from collections import defaultdict
+            chans = defaultdict(Channel)
+            (Pattern()
+                .wait(arvalid & arready)
+                .capture('arid', arid)
+                .wait(
+                    lambda i, cap: bool((rvalid & rready)[i]) and rid[i] == cap['arid'],
+                    channel=lambda i, cap: chans[cap['arid']],
+                ))
 
-        .. code-block:: python
+        Zero-cycle wait::
 
-            Pattern()
-            .wait(arvalid & arready)
-            .capture('arid', arid)
-            .wait_exclusive(
-                rvalid & rready,
-                queue=lambda idx, cap: f'read_{cap["arid"]}'
-            )
-            .capture('rdata', rdata)
-            .match()
+            (Pattern()
+                .wait(valid)
+                .wait(valid & ready, tick=False))   # measures latency in same-cycle case
         """
-        if queue is None:
-            raise ValueError("wait_exclusive requires a 'queue' parameter")
-        self._steps.append(WaitStep(cond=cond, guard=guard, queue=queue))
+        self._steps.append(WaitStep(cond=cond, require=require, channel=channel, tick=tick))
         return self
 
-    def delay(self, n: IntValue, guard: Condition | None = None) -> Pattern:
+    def delay(
+        self,
+        n: IntValue,
+        *,
+        require: Condition | None = None,
+    ) -> Pattern:
         """Block for exactly *n* cycles.
 
         Parameters
@@ -123,25 +119,43 @@ class Pattern:
         n:
             Static ``int`` (>= 0) or ``callable(index, captures) -> int``.
             ``delay(0)`` is an epsilon step (no cycle consumed).
-        guard:
-            Must remain True during the delay; violation terminates
-            the instance with ``REQUIRE_VIOLATED``.
+        require:
+            Optional condition that must hold every cycle during the delay.
+            Violation terminates the instance with ``REQUIRE_VIOLATED``.
         """
         if isinstance(n, int) and n < 0:
             raise ValueError(f'delay() requires n >= 0, got {n}')
-        self._steps.append(DelayStep(n=n, guard=guard))
+        self._steps.append(DelayStep(n=n, require=require))
         return self
 
     # ------------------------------------------------------------------
     # Epsilon steps
     # ------------------------------------------------------------------
 
-    def capture(self, name: str, signal: SignalValue) -> Pattern:
+    def capture(
+        self,
+        name: str,
+        signal: SignalValue,
+        *,
+        mode: CaptureMode = 'last',
+    ) -> Pattern:
         """Record a signal value at the current cycle.
 
-        Use ``name[]`` to append to a list (for use inside loop/repeat).
+        Parameters
+        ----------
+        name:
+            Capture key.
+        signal:
+            Waveform (static) or ``callable(index, captures) -> Any``.
+        mode:
+            * ``'last'`` (default) – ``cap[name]`` holds the most recent value
+            * ``'first'`` – ``cap[name]`` holds the first value; subsequent
+              writes are ignored
+            * ``'list'`` – ``cap[name]`` is a list, each write appends
         """
-        self._steps.append(CaptureStep(name=name, signal=signal))
+        if mode not in _VALID_CAPTURE_MODES:
+            raise ValueError(f'capture mode must be one of {_VALID_CAPTURE_MODES}, got {mode!r}')
+        self._steps.append(CaptureStep(name=name, signal=signal, mode=mode))
         return self
 
     def require(self, cond: Condition) -> Pattern:
@@ -219,10 +233,6 @@ class Pattern:
         end_cycle: int | None = None,
     ) -> MatchResult:
         """Run the pattern engine and return a :class:`MatchResult`.
-
-        If the first step is a ``wait``, its condition is used as the trigger
-        (only fork instances when the condition is True).  Otherwise, an
-        instance is forked on every cycle.
 
         Parameters
         ----------
