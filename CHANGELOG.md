@@ -7,6 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.6.1 - 2026-05-23
+
+### Fixed
+- Fix wheel packaging for Cython reader extensions so installed wheels expose `wavekit.readers.value_change` and FSDB extension modules at their runtime import paths.
+
 ## v0.6.0 - 2026-05-23
 
 ### Added
