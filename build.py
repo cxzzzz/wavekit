@@ -1,10 +1,15 @@
+from pathlib import Path
+
 import numpy as np
 from Cython.Build import cythonize
 from setuptools import Extension, setup
 
+for artifact in Path('src/wavekit').glob('**/*.so'):
+    artifact.unlink()
+
 extensions = [
     Extension(
-        'src.wavekit.readers.value_change',
+        'wavekit.readers.value_change',
         sources=['src/wavekit/readers/value_change.pyx'],
         include_dirs=[np.get_include()],
         extra_compile_args=['-fpic', '-O3', '-march=native'],
@@ -12,7 +17,7 @@ extensions = [
         language='c++',
     ),
     Extension(
-        'src.wavekit.readers.fsdb.npi_fsdb_reader',
+        'wavekit.readers.fsdb.npi_fsdb_reader',
         sources=['src/wavekit/readers/fsdb/npi_fsdb_reader.pyx'],
         include_dirs=[np.get_include()],
         libraries=['dl'],
@@ -23,8 +28,10 @@ extensions = [
 ]
 
 setup(
+    package_dir={'': 'src'},
     ext_modules=cythonize(
         extensions,
+        include_path=['src'],
         compiler_directives={
             'language_level': 3,
             'embedsignature': True,
