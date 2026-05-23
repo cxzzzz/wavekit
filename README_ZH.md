@@ -6,7 +6,7 @@
 [![Downloads](https://img.shields.io/pypi/dm/wavekit.svg)](https://pypi.org/project/wavekit/)
 [![License](https://img.shields.io/github/license/cxzzzz/wavekit.svg)](LICENSE)
 
-**wavekit** 是一个面向数字电路波形分析的 Python 基础库。它将 VCD / FSDB 仿真数据无缝转换为 Numpy 数组，让工程师能够高效地进行信号处理、协议分析和自动化验证。
+**wavekit** 是一个面向数字电路波形分析的 Python 基础库。它将 VCD / FST / FSDB 仿真数据无缝转换为 Numpy 数组，让工程师能够高效地进行信号处理、协议分析和自动化验证。
 
 > 🤖 **AI 集成**：配套的 [wavekit-mcp](https://github.com/cxzzzz/wavekit-mcp) 提供了 MCP 服务器，支持 AI 辅助波形分析——自动加载信号、运行模式匹配，无需手写脚本。
 
@@ -15,7 +15,7 @@
 - **灵活的信号提取**：支持大括号展开、整数范围、正则表达式等多种匹配模式，一次加载一批相关信号，省去逐个手写的繁琐。
 - **丰富的分析能力**：提供类 Numpy 的 API，支持算术运算、掩码过滤、位域截取、边沿检测、时间/时钟切片等操作，几行代码即可组合出复杂的信号查询逻辑。
 - **强大的时序模式匹配**：内置基于 NFA 的时序模式引擎，单次扫描即可从波形中提取协议事务、测量握手延迟、检测超时或挂死等异常。
-- **高性能波形处理**：VCD / FSDB 解析器经 Cython 优化，波形数据以 Numpy 数组为后端，加载快、内存省，轻松应对大容量仿真文件。
+- **高性能波形处理**：支持 VCD、FST 与 FSDB 波形，数据以 Numpy 数组为后端，加载快、内存省，轻松应对大容量仿真文件。
 
 ## 安装
 
@@ -31,7 +31,7 @@ pip install wavekit
 
 ## 快速上手
 
-> 以下示例中的文件名（如 `sim.vcd`）和信号路径均为占位符，请替换为你实际的 VCD / FSDB 文件及设计层级路径。
+> 以下示例中的文件名（如 `sim.vcd`）和信号路径均为占位符，请替换为你实际的 VCD / FST / FSDB 文件及设计层级路径。
 
 ### 1. 批量提取信号
 
@@ -175,7 +175,7 @@ print(f"Stall 持续时间: {stalls.duration.value} 周期")
 
 | 方法 | 说明 |
 |------|------|
-| `VcdReader(file)` / `FsdbReader(file)` | 打开波形文件。建议作为上下文管理器使用。`FsdbReader` 需要 Verdi 运行时环境（通过 `WAVEKIT_NPI_LIB`、`VERDI_HOME` 或 `LD_LIBRARY_PATH` 配置）。 |
+| `VcdReader(file)` / `FstReader(file)` / `FsdbReader(file)` | 打开波形文件。建议作为上下文管理器使用。`FsdbReader` 需要 Verdi 运行时环境（通过 `WAVEKIT_NPI_LIB`、`VERDI_HOME` 或 `LD_LIBRARY_PATH` 配置）。 |
 | `reader.load_waveform(signal, clock, ...)` | 加载单个信号，按时钟边沿采样，返回 `Waveform`。 |
 | `reader.load_matched_waveforms(pattern, clock_pattern, ...)` | 按模式批量加载信号，返回 `dict[tuple, Waveform]`。 |
 | `reader.eval(expr, clock, mode='single'\|'zip', ...)` | 对包含信号路径的算术表达式直接求值。 |

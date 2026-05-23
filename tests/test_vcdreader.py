@@ -67,6 +67,16 @@ def test_vcd_reader_load_waveform_without_range(vcd_path):
     assert j_next.width == 4
 
 
+def test_vcd_reader_subrange_load(vcd_path):
+    with VcdReader(str(vcd_path)) as reader:
+        low_bits = reader.load_waveform('tb.u0.J_state[1:0]', clock='tb.tck')
+        matched_low_bits = reader.load_matched_waveforms('tb.u0.J_state[1:0]', 'tb.tck')[()]
+
+    assert low_bits.width == 2
+    assert matched_low_bits.width == 2
+    assert np.array_equal(matched_low_bits.value, low_bits.value)
+
+
 def test_vcd_reader_load_matched_waveforms_regex(vcd_path):
     vcd_reader = VcdReader(str(vcd_path))
 
@@ -108,6 +118,12 @@ def test_vcd_reader_load_matched_waveforms_regex_key_conflict(vcd_path):
             r'tb.u0.@J_[A-Za-z0-9_]+\[3:0\]',
             'tb.tck',
         )
+
+
+def test_vcd_reader_module_name_matching_is_unsupported(vcd_path):
+    with VcdReader(str(vcd_path)) as reader:
+        with pytest.raises(NotImplementedError):
+            reader.get_matched_signals('tb.$u0.J_state[3:0]')
 
 
 def test_vcd_reader_load_matched_waveforms_uses_signal_range(vcd_path):

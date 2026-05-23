@@ -12,6 +12,7 @@ include = ["src/wavekit/**/*.so"]
 python = "^3.9"
 numpy = "^2.0.0"
 vcdvcd = "^2.3.5"
+pylibfst = "^0.2.1"
 pytest = "^8.2.2"
 
 [tool.poetry.group.dev.dependencies]

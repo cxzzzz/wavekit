@@ -119,12 +119,15 @@ class VcdReader(Reader):
 
         signal_handle = self.file_handle[lookup_path]
         width = int(signal_handle.size)
+        _, file_range_suffix = split_by_range_expr(lookup_path)
 
         # Always load the full clock to compute absolute cycle numbers and clock_offset
         all_clock_changes = np.array(
             [(v[0], int(re.sub(r'[xXzZ]', '0', v[1]), 2)) for v in self.file_handle[clock_path].tv],
             dtype=np.uint64,
         )
+        if len(all_clock_changes) == 0:
+            raise ValueError(f"clock signal '{clock_path}' has no value changes")
 
         # Determine clock edge timestamps for the sampling edge
         sample_value = 1 if sample_on_posedge else 0
@@ -151,6 +154,8 @@ class VcdReader(Reader):
             [(v[0], int(re.sub(r'[xXzZ]', str(xz_value), v[1]), 2)) for v in signal_handle.tv],
             dtype=np.object_ if width > 64 else np.uint64,
         )
+        if len(signal_value_change) == 0:
+            raise ValueError(f"signal '{lookup_path}' has no value changes")
         full_wave = self.value_change_to_waveform(
             signal_value_change,
             clock_value_change,
@@ -169,6 +174,19 @@ class VcdReader(Reader):
             if m:
                 high = int(m.group(1))
                 low = int(m.group(2)) if m.group(2) is not None else high
+                if file_range_suffix:
+                    file_range_match = re.fullmatch(r'\[(\d+)(?::(\d+))?\]', file_range_suffix)
+                    assert file_range_match is not None
+                    file_low = (
+                        int(file_range_match.group(2))
+                        if file_range_match.group(2) is not None
+                        else int(file_range_match.group(1))
+                    )
+                    if file_low != 0:
+                        raise ValueError(
+                            f"sub-range access for signal '{lookup_path}' is only supported "
+                            'when the stored signal range starts at bit 0'
+                        )
                 if high >= width:
                     raise ValueError(
                         f"bit index {high} out of range for signal '{lookup_path}' "

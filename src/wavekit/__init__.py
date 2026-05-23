@@ -18,6 +18,7 @@ from .pattern import MatchResult as MatchResult
 from .pattern import MatchStatus as MatchStatus
 from .pattern import Pattern as Pattern
 from .pattern import PatternError as PatternError
+from .readers.fst.reader import FstReader as FstReader
 from .readers.vcd.reader import VcdReader as VcdReader
 from .scope import Scope as Scope
 from .signal import Signal as Signal
@@ -28,6 +29,7 @@ __all__ = [
     'Waveform',
     'VcdReader',
     'FsdbReader',
+    'FstReader',
     'Scope',
     'Signal',
     'SignalCompositeType',

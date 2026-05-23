@@ -8,7 +8,7 @@
 
 English | [中文](README_ZH.md)
 
-**Wavekit** is a fundamental Python library for digital waveform analysis. By seamlessly converting VCD and FSDB data into Numpy arrays, it empowers engineers to perform high-performance signal processing, protocol analysis, and automated verification with ease.
+**Wavekit** is a fundamental Python library for digital waveform analysis. By seamlessly converting VCD, FST, and FSDB data into Numpy arrays, it empowers engineers to perform high-performance signal processing, protocol analysis, and automated verification with ease.
 
 > 🤖 **AI Integration**: [wavekit-mcp](https://github.com/cxzzzz/wavekit-mcp) — MCP server for AI-assisted waveform analysis. Let AI load signals and run pattern matching — no manual coding required.
 
@@ -17,7 +17,7 @@ English | [中文](README_ZH.md)
 - **Flexible Signal Extraction**: Flexible batch signal extraction via brace expansion, integer ranges, and regular expressions — load groups of related signals in one call.
 - **Rich Analysis Tools**: Numpy-like API for arithmetic, masking, bit-field manipulation, edge detection, and time/cycle slicing — compose complex signal queries in just a few lines.
 - **Pattern Matching**: NFA-based temporal pattern engine that scans waveforms in a single pass to extract protocol transactions, measure latencies, and detect timing violations.
-- **High-Performance Parsing & Storage**: Cython-optimized VCD/FSDB parsers with Numpy-backed storage for fast loading and memory efficiency, handling large simulation files with ease.
+- **High-Performance Parsing & Storage**: VCD, FST, and FSDB readers with Numpy-backed storage for fast loading and memory efficiency, handling large simulation files with ease.
 
 ## 📦 Installation
 
@@ -32,7 +32,7 @@ pip install wavekit
 
 ## 🚀 Quick Start
 
-> The examples below use placeholder filenames such as `sim.vcd`. Replace them with the path to your own VCD or FSDB file, and adjust signal paths to match your design hierarchy.
+> The examples below use placeholder filenames such as `sim.vcd`. Replace them with the path to your own VCD, FST, or FSDB file, and adjust signal paths to match your design hierarchy.
 
 ### 1. Batch Signal Extraction
 
@@ -183,7 +183,7 @@ print(f"Stall durations: {stalls.duration.value} cycles")
 
 | Method | Description |
 |--------|-------------|
-| `VcdReader(file)` / `FsdbReader(file)` | Open a waveform file. Use as a context manager. `FsdbReader` requires Verdi runtime (`WAVEKIT_NPI_LIB`, `VERDI_HOME`, or `LD_LIBRARY_PATH`). |
+| `VcdReader(file)` / `FstReader(file)` / `FsdbReader(file)` | Open a waveform file. Use as a context manager. `FsdbReader` requires Verdi runtime (`WAVEKIT_NPI_LIB`, `VERDI_HOME`, or `LD_LIBRARY_PATH`). |
 | `reader.load_waveform(signal, clock, ...)` | Load one signal sampled on every clock edge. Returns `Waveform`. |
 | `reader.load_matched_waveforms(pattern, clock_pattern, ...)` | Batch-load signals matching a brace/regex pattern. Returns `dict[tuple, Waveform]`. |
 | `reader.eval(expr, clock, mode='single'\|'zip', ...)` | Evaluate an arithmetic expression with embedded signal paths. |
