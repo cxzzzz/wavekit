@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import inspect
+import warnings
+from collections.abc import Callable, Coroutine
+from typing import TYPE_CHECKING, Any
 
 from .steps import (
     _VALID_CAPTURE_MODES,
@@ -16,8 +19,13 @@ from .steps import (
 )
 
 if TYPE_CHECKING:
+    from ..waveform import Waveform
+    from .program import ProgramContext
     from .result import MatchResult
     from .steps import CaptureMode, Condition, IntValue, SignalValue
+
+
+ProgramBody = Callable[['ProgramContext'], Coroutine[Any, Any, object]]
 
 
 class Pattern:
@@ -34,9 +42,23 @@ class Pattern:
         result = p.match()
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        program: ProgramBody | None = None,
+        *,
+        axis: Waveform | None = None,
+        timeout: int | None = None,
+        max_active: int = 32768,
+    ) -> None:
+        if program is not None and not inspect.iscoroutinefunction(program):
+            from .engine import PatternError
+
+            raise PatternError('Pattern(program) requires an async function body')
         self._steps: list[Step] = []
-        self._timeout_cycles: int | None = None
+        self._timeout_cycles: int | None = timeout
+        self._program = program
+        self._axis = axis
+        self._max_active = max_active
 
     # ------------------------------------------------------------------
     # Blocking steps
@@ -105,6 +127,21 @@ class Pattern:
         """
         self._steps.append(WaitStep(cond=cond, require=require, channel=channel, tick=tick))
         return self
+
+    def consume(
+        self,
+        cond: Condition,
+        channel: ChannelValue,
+        *,
+        require: Condition | None = None,
+        tick: bool = True,
+    ) -> Pattern:
+        """Block until *cond* is true and atomically consume *channel*.
+
+        This is the explicit spelling for a channel-consuming wait and is
+        equivalent to ``wait(cond, channel=channel, require=require, tick=tick)``.
+        """
+        return self.wait(cond, require=require, channel=channel, tick=tick)
 
     def delay(
         self,
@@ -220,6 +257,11 @@ class Pattern:
 
     def timeout(self, max_cycles: int) -> Pattern:
         """Set the maximum number of cycles for the entire pattern."""
+        warnings.warn(
+            'Pattern.timeout() is deprecated; pass timeout=... to Pattern(...) instead',
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._timeout_cycles = max_cycles
         return self
 
@@ -241,7 +283,27 @@ class Pattern:
         end_cycle:
             Limit scanning to cycles < end_cycle.
         """
+        if self._program is not None:
+            from .program import ProgramRuntime
+
+            return ProgramRuntime(self).match(start_cycle=start_cycle, end_cycle=end_cycle)
+
         from .engine import PatternEngine
 
         engine = PatternEngine(self)
         return engine.run(start_cycle=start_cycle, end_cycle=end_cycle)
+
+    def collect(
+        self,
+        start_cycle: int | None = None,
+        end_cycle: int | None = None,
+    ) -> list[Any]:
+        """Run a programmable pattern and collect non-``None`` return values."""
+        if self._program is None:
+            from .engine import PatternError
+
+            raise PatternError('Pattern.collect() is only available for programmable Pattern')
+
+        from .program import ProgramRuntime
+
+        return ProgramRuntime(self).collect(start_cycle=start_cycle, end_cycle=end_cycle)

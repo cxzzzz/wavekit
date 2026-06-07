@@ -1119,7 +1119,8 @@ class TestChannelAPI:
         d = {a: 'x', b: 'y'}
         assert d[a] == 'x' and d[b] == 'y'
 
-    def test_dynamic_channel_callable_must_return_channel(self):
-        sig = _bool_wf([1, 0])
-        with pytest.raises(TypeError, match='Channel'):
-            (Pattern().wait(sig).wait(sig, channel=lambda i, c: 'not-a-channel').match())
+    def test_dynamic_channel_callable_may_return_hashable_key(self):
+        start = _bool_wf([1, 0])
+        rsp = _bool_wf([0, 1])
+        result = Pattern().wait(start).wait(rsp, channel=lambda i, c: 'hashable-key').match()
+        assert len(result.filter_valid()) == 1

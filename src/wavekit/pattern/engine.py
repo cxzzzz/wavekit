@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Hashable
 from typing import Any
 
 import numpy as np
@@ -59,11 +60,17 @@ def _eval_signal(signal, index: int, captures: dict) -> Any:
     raise TypeError(f'Invalid signal type: {type(signal)}')
 
 
-def _eval_channel(channel, index: int, captures: dict) -> Channel | None:
+def _eval_channel(
+    channel,
+    index: int,
+    captures: dict,
+    key_channels: dict[Hashable, Channel],
+) -> Channel | None:
     """Resolve a channel parameter to a :class:`Channel` instance (or ``None``).
 
-    Static :class:`Channel` instances are returned as-is.  Callables are
-    invoked with ``(index, captures)`` and must return a :class:`Channel`.
+    Static :class:`Channel` instances are returned as-is. Hashable keys are
+    mapped to stable :class:`Channel` instances for the engine run. Callables
+    are invoked with ``(index, captures)`` and may return either form.
     """
     if channel is None:
         return None
@@ -71,9 +78,15 @@ def _eval_channel(channel, index: int, captures: dict) -> Channel | None:
         return channel
     if callable(channel):
         result = channel(index, captures)
-        if not isinstance(result, Channel):
-            raise TypeError(f'channel callable must return a Channel instance, got {type(result)}')
-        return result
+        if isinstance(result, Channel):
+            return result
+        if isinstance(result, Hashable):
+            return key_channels.setdefault(result, Channel())
+        raise TypeError(
+            f'channel callable must return a Channel or hashable key, got {type(result)}'
+        )
+    if isinstance(channel, Hashable):
+        return key_channels.setdefault(channel, Channel())
     raise TypeError(f'Invalid channel type: {type(channel)}')
 
 
@@ -146,6 +159,7 @@ class PatternEngine:
     def __init__(self, pattern) -> None:
         self._steps: list[Step] = pattern._steps
         self._timeout_cycles: int | None = pattern._timeout_cycles
+        self._key_channels: dict[Hashable, Channel] = {}
         PatternEngine._next_epoch += 1
         self._epoch: int = PatternEngine._next_epoch
 
@@ -306,7 +320,10 @@ class PatternEngine:
             # -- blocking steps --
 
             if isinstance(step, WaitStep):
-                eff_channel = _eval_channel(step.channel, t, inst.captures) or step._auto_channel
+                eff_channel = (
+                    _eval_channel(step.channel, t, inst.captures, self._key_channels)
+                    or step._auto_channel
+                )
                 channel_free = (
                     eff_channel._consumed_epoch != self._epoch or eff_channel._consumed_at != t
                 )

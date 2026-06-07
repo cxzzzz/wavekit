@@ -129,11 +129,10 @@ with VcdReader("axi_tb.vcd") as f:
     rdata   = f.load_waveform("tb.dut.rdata[31:0]", clock=clk)
 
 result = (
-    Pattern()
+    Pattern(timeout=256)
     .wait(arvalid & arready)   # AR handshake → start
     .wait(rvalid  & rready)    # R  handshake → end
     .capture("rdata", rdata)
-    .timeout(256)
     .match()
 )
 
@@ -141,6 +140,34 @@ valid = result.filter_valid()
 print(f"Read latencies (cycles): {valid.duration.value}")
 print(f"Read data: {valid.captures['rdata'].value}")
 ```
+
+For fixed-shape transactions, prefer the declarative builder above.  For
+protocols with dynamic branches, retries, per-ID routing, or row-oriented Python
+records, `Pattern` also accepts an async Python body:
+
+```python
+fire = arvalid & arready
+
+async def read_record(ctx):
+    # Positive current-cycle guards avoid accumulating many waiting candidates.
+    if ctx.value(fire):
+        start = ctx.cycle(fire)
+
+        await ctx.consume(lambda: ctx.value(rvalid) and ctx.value(rready), channel="r")
+
+        return {
+            "rdata": int(ctx.value(rdata)),
+            "latency": int(ctx.cycle(fire) - start + 1),
+        }
+    return None
+
+records = Pattern(read_record, timeout=256, max_active=10000).collect()
+```
+
+Programmable bodies are more expressive but slower and less analyzable than the
+declarative DSL. Precompute fixed waveform expressions outside the async body
+(for example `fire = valid & ready`) and use scalar `ctx.value(...)` reads in
+dynamic conditions.
 
 **AXI Write Burst (multi-beat)**
 

@@ -25,6 +25,7 @@ mypy = "^1.11.2"
 target-version = "py39"
 line-length = 100
 src = ["src", "tests"]
+exclude = ["tmp"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
@@ -36,9 +37,13 @@ select = ["E", "F", "W", "I", "UP", "B"]
 quote-style = "single"
 line-ending = "lf"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.mypy]
 python_version = "3.9"
 files = ["src", "tests"]
+exclude = ["^tmp/"]
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_unused_configs = true
