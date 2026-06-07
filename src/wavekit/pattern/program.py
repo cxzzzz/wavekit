@@ -304,9 +304,7 @@ class ProgramRuntime:
             start_index = (
                 0 if start_cycle is None else int(np.searchsorted(ref_wf.clock, start_cycle))
             )
-            end_index = (
-                n if end_cycle is None else int(np.searchsorted(ref_wf.clock, end_cycle))
-            )
+            end_index = n if end_cycle is None else int(np.searchsorted(ref_wf.clock, end_cycle))
             start_index = max(0, min(start_index, n))
             end_index = max(start_index, min(end_index, n))
         elif start_cycle is not None or end_cycle is not None:
