@@ -70,7 +70,7 @@ class Pattern:
         *,
         require: Condition | None = None,
         channel: ChannelValue | None = None,
-        tick: bool = True,
+        tick: bool = False,
     ) -> Pattern:
         """Block until *cond* becomes True.
 
@@ -93,10 +93,10 @@ class Pattern:
             shared FIFO consumer group.  ``None`` (default) uses an implicit
             per-step channel.
         tick:
-            When ``True`` (default), a successful match advances time by one
-            cycle before the next step is evaluated.  When ``False`` the next
-            step evaluates on the **same** cycle (zero-cycle wait), useful
-            for measuring intervals like ``valid → valid & ready``.
+            When ``False`` (default), the next step evaluates on the **same**
+            cycle.  When ``True``, a successful match resumes subsequent steps
+            on the next cycle as a compatibility bridge for old phase-separated
+            wait chains.
 
         Examples
         --------
@@ -123,7 +123,7 @@ class Pattern:
 
             (Pattern()
                 .wait(valid)
-                .wait(valid & ready, tick=False))   # measures latency in same-cycle case
+                .wait(valid & ready))   # measures latency in same-cycle case
         """
         self._steps.append(WaitStep(cond=cond, require=require, channel=channel, tick=tick))
         return self
@@ -134,7 +134,7 @@ class Pattern:
         channel: ChannelValue,
         *,
         require: Condition | None = None,
-        tick: bool = True,
+        tick: bool = False,
     ) -> Pattern:
         """Block until *cond* is true and atomically consume *channel*.
 
@@ -288,10 +288,22 @@ class Pattern:
 
             return ProgramRuntime(self).match(start_cycle=start_cycle, end_cycle=end_cycle)
 
-        from .engine import PatternEngine
+        from .compiler import compile_declarative_pattern
+        from .engine import _collect_waveforms, _validate_waveforms
+        from .program import ProgramRuntime
 
-        engine = PatternEngine(self)
-        return engine.run(start_cycle=start_cycle, end_cycle=end_cycle)
+        original_program = self._program
+        original_axis = self._axis
+        try:
+            waveforms = _collect_waveforms(self._steps)
+            if waveforms:
+                _validate_waveforms(waveforms)
+                self._axis = waveforms[0]
+            self._program = compile_declarative_pattern(self)
+            return ProgramRuntime(self).match(start_cycle=start_cycle, end_cycle=end_cycle)
+        finally:
+            self._program = original_program
+            self._axis = original_axis
 
     def collect(
         self,

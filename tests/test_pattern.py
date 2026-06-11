@@ -377,6 +377,26 @@ class TestWaitWithChannel:
             rsp_id_val = valid.captures['rsp_id'].value[i]
             assert req_id_val == rsp_id_val, f'ID mismatch: req={req_id_val}, rsp={rsp_id_val}'
 
+    def test_falsy_hashable_channel_key(self):
+        """Falsy channel keys such as 0 still select a stable explicit channel."""
+        req = _bool_wf([1, 1, 0, 0])
+        rsp = _bool_wf([0, 0, 1, 1])
+        req_data = _wf([10, 20, 0, 0], width=8)
+        rsp_data = _wf([0, 0, 111, 222], width=8)
+
+        result = (
+            Pattern()
+            .wait(req)
+            .capture('req_data', req_data)
+            .wait(rsp, channel=lambda _idx, _cap: 0)
+            .capture('rsp_data', rsp_data)
+            .match()
+            .filter_valid()
+        )
+
+        np.testing.assert_array_equal(result.captures['req_data'].value, [10, 20])
+        np.testing.assert_array_equal(result.captures['rsp_data'].value, [111, 222])
+
     def test_dynamic_channel_fifo_per_channel(self):
         """Each dynamic channel value maintains its own FIFO order.
 
@@ -935,9 +955,8 @@ class TestZeroCycleWait:
         # Instance@1: wait advances to cycle 2 (valid&ready) → tick=False keeps t=2,
         #   completes at cycle 2 → duration = 2 - 1 + 1 = 2
         # Instance@2: same-cycle match — fork at 2, second wait True at t=2 already
-        #   (after first wait consumes cycle 2 → t=3? No: first wait on cycle 2
-        #   matches valid → tick=True → next step on cycle 3. Hmm.)
-        # Let's just check the first instance has the expected start.
+        #   but auto-channel arbitration lets only the oldest instance consume rsp@2.
+        # Check the first instance has the expected start.
         assert len(valid_results) >= 1
         assert valid_results.start.value[0] == 1
 
@@ -979,6 +998,46 @@ class TestZeroCycleWait:
         # Two triggers; epsilon capture completes same cycle.
         assert len(valid_results) == 2
         np.testing.assert_array_equal(valid_results.captures['d'].value, [11, 33])
+
+    def test_default_waits_continue_same_cycle(self):
+        """Default wait semantics are same-cycle (tick=False)."""
+        a = _bool_wf([0, 1, 0])
+        b = _bool_wf([0, 1, 0])
+        data = _wf([0, 42, 0], width=8)
+        result = Pattern().wait(a).wait(b).capture('d', data).match().filter_valid()
+        assert len(result) == 1
+        assert result.end.value[0] == 1
+        assert result.captures['d'].value[0] == 42
+
+    def test_tick_true_resumes_next_cycle(self):
+        """tick=True is a compatibility bridge for next-cycle continuation."""
+        a = _bool_wf([1, 0, 0])
+        data = _wf([10, 20, 30], width=8)
+        result = Pattern().wait(a, tick=True).capture('d', data).match().filter_valid()
+        assert len(result) == 1
+        assert result.start.value[0] == 0
+        assert result.end.value[0] == 1
+        assert result.captures['d'].value[0] == 20
+
+    def test_wait_require_not_checked_on_match_cycle(self):
+        ready = _bool_wf([1, 0])
+        guard = _bool_wf([0, 0])
+        result = Pattern().wait(ready, require=guard).match().filter_valid()
+        assert len(result) == 1
+        assert result.start.value[0] == 0
+
+    def test_delay_require_checks_final_cycle(self):
+        trigger = _bool_wf([1, 0, 0])
+        guard = _bool_wf([1, 1, 0])
+        result = Pattern().wait(trigger).delay(2, require=guard).match()
+        assert len(result) == 1
+        assert result.status.value[0] == MatchStatus.REQUIRE_VIOLATED
+        assert result.end.value[0] == 2
+
+    def test_negative_dynamic_repeat_count_raises_pattern_error(self):
+        trigger = _bool_wf([1])
+        with pytest.raises(PatternError, match='repeat count'):
+            Pattern().wait(trigger).repeat(Pattern().delay(0), n=lambda _i, _c: -1).match()
 
 
 # ---------------------------------------------------------------------------

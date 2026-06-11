@@ -48,18 +48,29 @@ class WaitOp(ProgramOp):
     cond: ProgramCondition
     consume: bool = True
     channel: ProgramChannel | None = None
+    tick: bool = False
+    require: ProgramCondition | None = None
 
     def ready(self, ctx: ProgramContext, runtime: ProgramRuntime) -> bool:
-        if not runtime.eval_condition(self.cond, ctx):
+        cond_ready = runtime.eval_condition(self.cond, ctx)
+        if not cond_ready:
+            self._check_require(ctx, runtime)
             return False
         if not self.consume:
             return True
         channel = runtime.resolve_channel(self.channel)
-        return runtime.channel_free(channel, ctx.index)
+        if runtime.channel_free(channel, ctx.index):
+            return True
+        self._check_require(ctx, runtime)
+        return False
 
     def commit(self, ctx: ProgramContext, runtime: ProgramRuntime) -> None:
         if self.consume:
             runtime.consume_channel(runtime.resolve_channel(self.channel), ctx.index)
+
+    def _check_require(self, ctx: ProgramContext, runtime: ProgramRuntime) -> None:
+        if self.require is not None and not runtime.eval_condition(self.require, ctx):
+            raise _RequireViolation
 
 
 @dataclass
@@ -71,8 +82,15 @@ class ConsumeOp(WaitOp):
 class DelayOp(ProgramOp):
     n: int
     start_index: int
+    require: ProgramCondition | None = None
 
     def ready(self, ctx: ProgramContext, runtime: ProgramRuntime) -> bool:
+        if self.n == 0:
+            return True
+        if ctx.index <= self.start_index:
+            return False
+        if self.require is not None and not runtime.eval_condition(self.require, ctx):
+            raise _RequireViolation
         return ctx.index >= self.start_index + self.n
 
 
@@ -117,6 +135,19 @@ class ProgramContext:
             raise PatternError('ctx.wait(..., consume=True) requires an explicit channel')
         return WaitOp(cond=cond, consume=consume, channel=channel)
 
+    def _wait_internal(
+        self,
+        cond: ProgramCondition,
+        *,
+        channel: ProgramChannel,
+        tick: bool = False,
+        require: ProgramCondition | None = None,
+    ) -> WaitOp:
+        self._runtime.validate_condition(cond)
+        if require is not None:
+            self._runtime.validate_condition(require)
+        return WaitOp(cond=cond, consume=True, channel=channel, tick=tick, require=require)
+
     def consume(self, cond: ProgramCondition, channel: ProgramChannel) -> ConsumeOp:
         self._runtime.validate_condition(cond)
         return ConsumeOp(cond=cond, channel=channel)
@@ -135,6 +166,15 @@ class ProgramContext:
         if n < 0:
             raise PatternError(f'ctx.delay(n) requires n >= 0, got {n}')
         return DelayOp(n=n, start_index=self._index)
+
+    def _delay_internal(self, n: int, *, require: ProgramCondition | None = None) -> DelayOp:
+        if isinstance(n, bool) or not isinstance(n, int):
+            raise PatternError('delay() requires an integer cycle count')
+        if n < 0:
+            raise PatternError(f'delay() requires n >= 0, got {n}')
+        if require is not None:
+            self._runtime.validate_condition(require)
+        return DelayOp(n=n, start_index=self._index, require=require)
 
     def capture(self, name: str, value: Any, mode: CaptureMode = 'last') -> None:
         if isinstance(value, Waveform):
@@ -382,10 +422,18 @@ class ProgramRuntime:
                 raise PatternError('programmable Pattern exceeded same-cycle step limit')
 
             if inst.current_op is not None:
-                if not inst.current_op.ready(inst.context, self):
+                try:
+                    if not inst.current_op.ready(inst.context, self):
+                        return
+                    inst.current_op.commit(inst.context, self)
+                except _RequireViolation:
+                    inst.end_index = index
+                    inst.status = MatchStatus.REQUIRE_VIOLATED
                     return
-                inst.current_op.commit(inst.context, self)
+                resume_next_cycle = isinstance(inst.current_op, WaitOp) and inst.current_op.tick
                 inst.current_op = None
+                if resume_next_cycle:
+                    return
 
             try:
                 yielded = inst.coroutine.send(None)
