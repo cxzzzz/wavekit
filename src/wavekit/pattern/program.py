@@ -8,7 +8,7 @@ import numpy as np
 from typing_extensions import TypeAlias
 
 from ..waveform import Waveform
-from .engine import PatternError
+from .errors import PatternError
 from .result import MatchResult, MatchStatus
 from .steps import CaptureMode, Channel
 
@@ -314,6 +314,8 @@ class ProgramRuntime:
             return
         if len(waveform.clock) != len(self._axis.clock):
             raise PatternError('Waveform clock arrays have different lengths')
+        if not np.array_equal(waveform.clock, self._axis.clock):
+            raise PatternError('Waveform clock arrays are not aligned')
 
     def resolve_channel(self, key: Any) -> Channel:
         if isinstance(key, Channel):

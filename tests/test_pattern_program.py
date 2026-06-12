@@ -88,6 +88,25 @@ def test_context_value_cycle_time_and_offsets():
     assert result.captures['scalar'].value[0] == 123
 
 
+def test_program_waveform_axes_must_be_aligned():
+    fire = _bool_wf([1, 0, 1])
+    misaligned = Waveform(
+        np.array([10, 20, 30]),
+        np.array([10, 11, 12]),
+        np.array([100, 110, 120]),
+        signal=Signal('', '', 8, None, False),
+    )
+
+    async def tx(ctx):
+        if ctx.value(fire):
+            ctx.capture('data', misaligned)
+            return ctx.OK
+        return None
+
+    with pytest.raises(PatternError, match='not aligned'):
+        Pattern(tx).match()
+
+
 def test_condition_and_delay_validation():
     fire = _bool_wf([1])
 

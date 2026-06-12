@@ -4,7 +4,7 @@ from collections.abc import Callable, Coroutine, Hashable
 from typing import Any
 
 from ..waveform import Waveform
-from .engine import PatternError
+from .errors import PatternError
 from .program import _MAX_SAME_CYCLE_STEPS, ProgramContext
 from .steps import (
     BranchStep,

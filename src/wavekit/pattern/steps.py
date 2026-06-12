@@ -21,13 +21,12 @@ class Channel:
     to the same ``Channel`` instance form a single FIFO consumer group
     (oldest in-flight instance wins).
 
-    By default each ``WaitStep`` owns a private ``_auto_channel`` that is
-    shared across all clones of that step (so multiple instances of the
-    same pattern still serialize one-per-cycle on that step), but is not
-    shared across distinct steps.
+    By default each ``WaitStep`` owns a private ``_auto_channel`` so multiple
+    in-flight instances of the same pattern still serialize one-per-cycle on
+    that step, while distinct wait steps do not share consumption state.
 
     Internal state:
-        ``(_consumed_epoch, _consumed_at)`` records *which engine run* and
+        ``(_consumed_epoch, _consumed_at)`` records *which runtime run* and
         *which cycle* this channel was last consumed at.  Each ``run()``
         gets a fresh epoch, so consumption state from a previous run is
         automatically invalidated — both static and user-managed dynamic
@@ -91,18 +90,8 @@ class WaitStep:
     require: Condition | None = None
     channel: ChannelValue | None = None
     tick: bool = False
-    # mutable per-template state; clone() must preserve identity so that
-    # all in-flight instances share the same auto-channel for FIFO consumption.
+    # Per-step channel shared by all in-flight instances for FIFO consumption.
     _auto_channel: Channel = field(default_factory=Channel, repr=False)
-
-    def clone(self) -> WaitStep:
-        return WaitStep(
-            cond=self.cond,
-            require=self.require,
-            channel=self.channel,
-            tick=self.tick,
-            _auto_channel=self._auto_channel,  # SHARE
-        )
 
 
 @dataclass
@@ -111,17 +100,6 @@ class DelayStep:
 
     n: IntValue
     require: Condition | None = None
-    # mutable per-instance state
-    remaining: int | None = field(default=None, repr=False)
-
-    def clone(self) -> DelayStep:
-        return DelayStep(n=self.n, require=self.require, remaining=None)
-
-    def init_remaining(self, index: int, captures: dict) -> None:
-        if callable(self.n):
-            self.remaining = self.n(index, captures)
-        else:
-            self.remaining = self.n
 
 
 @dataclass
@@ -144,18 +122,12 @@ class CaptureStep:
                 f'CaptureStep mode must be one of {_VALID_CAPTURE_MODES}, got {self.mode!r}'
             )
 
-    def clone(self) -> CaptureStep:
-        return CaptureStep(name=self.name, signal=self.signal, mode=self.mode)
-
 
 @dataclass
 class RequireStep:
     """Epsilon: assert cond is True, else REQUIRE_VIOLATED."""
 
     cond: Condition
-
-    def clone(self) -> RequireStep:
-        return RequireStep(cond=self.cond)
 
 
 @dataclass
@@ -171,16 +143,6 @@ class LoopStep:
     body_template: list[Step]
     until: Condition | None = None
     when: Condition | None = None
-    # mutable per-instance state
-    iteration_count: int = field(default=0, repr=False)
-
-    def clone(self) -> LoopStep:
-        return LoopStep(
-            body_template=self.body_template,  # template is shared, never mutated
-            until=self.until,
-            when=self.when,
-            iteration_count=0,
-        )
 
 
 @dataclass
@@ -189,21 +151,6 @@ class RepeatStep:
 
     body_template: list[Step]
     n: IntValue
-    # mutable per-instance state
-    times_remaining: int | None = field(default=None, repr=False)
-
-    def clone(self) -> RepeatStep:
-        return RepeatStep(
-            body_template=self.body_template,
-            n=self.n,
-            times_remaining=None,
-        )
-
-    def init_remaining(self, index: int, captures: dict) -> None:
-        if callable(self.n):
-            self.times_remaining = self.n(index, captures)
-        else:
-            self.times_remaining = self.n
 
 
 @dataclass
@@ -213,15 +160,3 @@ class BranchStep:
     cond: Condition
     true_body: list[Step] | None = None
     false_body: list[Step] | None = None
-
-    def clone(self) -> BranchStep:
-        return BranchStep(
-            cond=self.cond,
-            true_body=self.true_body,
-            false_body=self.false_body,
-        )
-
-
-def clone_steps(steps: list[Step]) -> list[Step]:
-    """Create a fresh copy of a step list with reset mutable state."""
-    return [s.clone() for s in steps]

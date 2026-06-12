@@ -51,7 +51,7 @@ class Pattern:
         max_active: int = 32768,
     ) -> None:
         if program is not None and not inspect.iscoroutinefunction(program):
-            from .engine import PatternError
+            from .errors import PatternError
 
             raise PatternError('Pattern(program) requires an async function body')
         self._steps: list[Step] = []
@@ -289,8 +289,8 @@ class Pattern:
             return ProgramRuntime(self).match(start_cycle=start_cycle, end_cycle=end_cycle)
 
         from .compiler import compile_declarative_pattern
-        from .engine import _collect_waveforms, _validate_waveforms
         from .program import ProgramRuntime
+        from .validation import _collect_waveforms, _validate_waveforms
 
         original_program = self._program
         original_axis = self._axis
@@ -312,7 +312,7 @@ class Pattern:
     ) -> list[Any]:
         """Run a programmable pattern and collect non-``None`` return values."""
         if self._program is None:
-            from .engine import PatternError
+            from .errors import PatternError
 
             raise PatternError('Pattern.collect() is only available for programmable Pattern')
 
