@@ -909,8 +909,47 @@ class TestEveryCycleFork:
 class TestErrors:
     def test_no_waveform(self):
         """Pattern with only dynamic conditions and no trigger → error."""
-        with pytest.raises(PatternError):
+        with pytest.raises(PatternError, match='could not determine scan axis'):
             Pattern().wait(lambda idx, cap: True).match()
+
+    def test_unobserved_static_waveform_is_not_eagerly_validated(self):
+        """Static waveforms in an untaken branch do not define or validate the axis."""
+        ok = _wf([10, 20, 30], width=8)
+        unused_misaligned = Waveform(
+            np.array([1, 2, 3]),
+            np.array([10, 11, 12]),
+            np.array([100, 110, 120]),
+            signal=Signal('', '', 8, None, False),
+        )
+
+        result = (
+            Pattern()
+            .branch(
+                lambda idx, cap: False,
+                true_body=Pattern().capture('unused', unused_misaligned),
+                false_body=Pattern().capture('ok', ok),
+            )
+            .match()
+        )
+
+        assert len(result) == 3
+        np.testing.assert_array_equal(result.captures['ok'].value, [10, 20, 30])
+
+    def test_start_end_cycle_infers_axis_from_nested_static_waveform(self):
+        """Cycle bounds still work when the first observed waveform is nested."""
+        sig = _wf([10, 20, 30, 40], width=8)
+
+        result = (
+            Pattern()
+            .branch(
+                lambda idx, cap: False,
+                false_body=Pattern().repeat(Pattern().capture('v', sig), 1),
+            )
+            .match(start_cycle=1, end_cycle=3)
+        )
+
+        assert len(result) == 2
+        np.testing.assert_array_equal(result.captures['v'].value, [20, 30])
 
     def test_loop_missing_condition(self):
         with pytest.raises(ValueError):

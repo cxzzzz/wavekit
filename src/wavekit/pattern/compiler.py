@@ -5,7 +5,7 @@ from typing import Any
 
 from ..waveform import Waveform
 from .errors import PatternError
-from .program import _MAX_SAME_CYCLE_STEPS, ProgramContext
+from .runtime import _MAX_SAME_CYCLE_STEPS, PatternContext
 from .steps import (
     BranchStep,
     CaptureStep,
@@ -18,18 +18,65 @@ from .steps import (
     WaitStep,
 )
 
-ProgramBody = Callable[[ProgramContext], Coroutine[Any, Any, object]]
+PatternBody = Callable[[PatternContext], Coroutine[Any, Any, object]]
 
 
-def compile_declarative_pattern(pattern) -> ProgramBody:
+def prepare_declarative_pattern(pattern) -> tuple[PatternBody, Waveform | None]:
+    """Compile a declarative pattern and infer its scan axis when possible."""
+
+    def first_static_waveform(steps: list[Step]) -> Waveform | None:
+        for step in steps:
+            if isinstance(step, WaitStep):
+                if isinstance(step.cond, Waveform):
+                    return step.cond
+                if isinstance(step.require, Waveform):
+                    return step.require
+            elif isinstance(step, DelayStep):
+                if isinstance(step.require, Waveform):
+                    return step.require
+            elif isinstance(step, CaptureStep):
+                if isinstance(step.signal, Waveform):
+                    return step.signal
+            elif isinstance(step, RequireStep):
+                if isinstance(step.cond, Waveform):
+                    return step.cond
+            elif isinstance(step, LoopStep):
+                if isinstance(step.until, Waveform):
+                    return step.until
+                if isinstance(step.when, Waveform):
+                    return step.when
+                waveform = first_static_waveform(step.body_template)
+                if waveform is not None:
+                    return waveform
+            elif isinstance(step, RepeatStep):
+                waveform = first_static_waveform(step.body_template)
+                if waveform is not None:
+                    return waveform
+            elif isinstance(step, BranchStep):
+                if isinstance(step.cond, Waveform):
+                    return step.cond
+                if step.true_body:
+                    waveform = first_static_waveform(step.true_body)
+                    if waveform is not None:
+                        return waveform
+                if step.false_body:
+                    waveform = first_static_waveform(step.false_body)
+                    if waveform is not None:
+                        return waveform
+        return None
+
+    return compile_declarative_pattern(pattern), first_static_waveform(pattern._steps)
+
+
+def compile_declarative_pattern(pattern) -> PatternBody:
     """Compile declarative pattern steps into an internal async program body."""
     steps = pattern._steps
     first_step = steps[0] if steps else None
 
-    def captures(ctx: ProgramContext) -> dict[str, Any]:
+    def captures(ctx: PatternContext) -> dict[str, Any]:
         return ctx._instance.captures
 
-    def eval_condition(cond: Any, ctx: ProgramContext) -> bool:
+    def eval_condition(cond: Any, ctx: PatternContext) -> bool:
         if isinstance(cond, Waveform):
             return bool(ctx.value(cond))
         if callable(cond):
@@ -41,7 +88,7 @@ def compile_declarative_pattern(pattern) -> ProgramBody:
                 raise PatternError(f'condition callable failed: {exc}') from exc
         raise PatternError(f'condition must be a Waveform or callable, got {type(cond).__name__}')
 
-    def eval_signal(signal: Any, ctx: ProgramContext) -> Any:
+    def eval_signal(signal: Any, ctx: PatternContext) -> Any:
         if isinstance(signal, Waveform):
             return ctx.value(signal)
         if callable(signal):
@@ -53,7 +100,7 @@ def compile_declarative_pattern(pattern) -> ProgramBody:
                 raise PatternError(f'signal callable failed: {exc}') from exc
         raise PatternError(f'signal must be a Waveform or callable, got {type(signal).__name__}')
 
-    def eval_int(value: Any, ctx: ProgramContext) -> int:
+    def eval_int(value: Any, ctx: PatternContext) -> int:
         if isinstance(value, bool):
             raise PatternError('integer value must not be bool')
         if isinstance(value, int):
@@ -76,7 +123,7 @@ def compile_declarative_pattern(pattern) -> ProgramBody:
                 ) from exc
         raise PatternError(f'integer value must be an int or callable, got {type(value).__name__}')
 
-    def eval_channel(channel: Any, ctx: ProgramContext) -> Channel | Hashable | None:
+    def eval_channel(channel: Any, ctx: PatternContext) -> Channel | Hashable | None:
         if channel is None:
             return None
         if callable(channel) and not isinstance(channel, Channel):
@@ -96,7 +143,7 @@ def compile_declarative_pattern(pattern) -> ProgramBody:
         raise PatternError('Infinite loop detected: too many epsilon transitions in a single tick')
 
     async def run_steps(
-        ctx: ProgramContext,
+        ctx: PatternContext,
         step_list: list[Step],
         first_wait_ready: bool | None = None,
     ) -> None:
@@ -173,7 +220,7 @@ def compile_declarative_pattern(pattern) -> ProgramBody:
             else:
                 raise PatternError(f'Unknown step type: {type(step).__name__}')
 
-    async def body(ctx: ProgramContext) -> object:
+    async def body(ctx: PatternContext) -> object:
         first_wait_ready = None
         if isinstance(first_step, WaitStep) and first_step.require is None:
             first_wait_ready = eval_condition(first_step.cond, ctx)

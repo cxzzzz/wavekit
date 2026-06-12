@@ -20,12 +20,12 @@ from .steps import (
 
 if TYPE_CHECKING:
     from ..waveform import Waveform
-    from .program import ProgramContext
     from .result import MatchResult
+    from .runtime import PatternContext
     from .steps import CaptureMode, Condition, IntValue, SignalValue
 
 
-ProgramBody = Callable[['ProgramContext'], Coroutine[Any, Any, object]]
+PatternBody = Callable[['PatternContext'], Coroutine[Any, Any, object]]
 
 
 class Pattern:
@@ -44,7 +44,7 @@ class Pattern:
 
     def __init__(
         self,
-        program: ProgramBody | None = None,
+        program: PatternBody | None = None,
         *,
         axis: Waveform | None = None,
         timeout: int | None = None,
@@ -284,23 +284,20 @@ class Pattern:
             Limit scanning to cycles < end_cycle.
         """
         if self._program is not None:
-            from .program import ProgramRuntime
+            from .runtime import PatternRuntime
 
-            return ProgramRuntime(self).match(start_cycle=start_cycle, end_cycle=end_cycle)
+            return PatternRuntime(self).match(start_cycle=start_cycle, end_cycle=end_cycle)
 
-        from .compiler import compile_declarative_pattern
-        from .program import ProgramRuntime
-        from .validation import _collect_waveforms, _validate_waveforms
+        from .compiler import prepare_declarative_pattern
+        from .runtime import PatternRuntime
 
         original_program = self._program
         original_axis = self._axis
         try:
-            waveforms = _collect_waveforms(self._steps)
-            if waveforms:
-                _validate_waveforms(waveforms)
-                self._axis = waveforms[0]
-            self._program = compile_declarative_pattern(self)
-            return ProgramRuntime(self).match(start_cycle=start_cycle, end_cycle=end_cycle)
+            self._program, inferred_axis = prepare_declarative_pattern(self)
+            if self._axis is None and (start_cycle is not None or end_cycle is not None):
+                self._axis = inferred_axis
+            return PatternRuntime(self).match(start_cycle=start_cycle, end_cycle=end_cycle)
         finally:
             self._program = original_program
             self._axis = original_axis
@@ -316,6 +313,6 @@ class Pattern:
 
             raise PatternError('Pattern.collect() is only available for programmable Pattern')
 
-        from .program import ProgramRuntime
+        from .runtime import PatternRuntime
 
-        return ProgramRuntime(self).collect(start_cycle=start_cycle, end_cycle=end_cycle)
+        return PatternRuntime(self).collect(start_cycle=start_cycle, end_cycle=end_cycle)

@@ -15,8 +15,8 @@ from .steps import CaptureMode, Channel
 _MAX_SAME_CYCLE_STEPS = 100_000
 _UNSET = object()
 
-ProgramCondition: TypeAlias = Union[Waveform, Callable[[], bool], bool]
-ProgramChannel: TypeAlias = Union[Channel, Hashable]
+RuntimeCondition: TypeAlias = Union[Waveform, Callable[[], bool], bool]
+RuntimeChannel: TypeAlias = Union[Channel, Hashable]
 
 
 class _OkSentinel:
@@ -31,27 +31,27 @@ class _RequireViolation(PatternError):
     pass
 
 
-class ProgramOp:
-    def __await__(self) -> Iterator[ProgramOp]:
+class RuntimeOp:
+    def __await__(self) -> Iterator[RuntimeOp]:
         yield self
         return None
 
-    def ready(self, ctx: ProgramContext, runtime: ProgramRuntime) -> bool:
+    def ready(self, ctx: PatternContext, runtime: PatternRuntime) -> bool:
         raise NotImplementedError
 
-    def commit(self, ctx: ProgramContext, runtime: ProgramRuntime) -> None:
+    def commit(self, ctx: PatternContext, runtime: PatternRuntime) -> None:
         pass
 
 
 @dataclass
-class WaitOp(ProgramOp):
-    cond: ProgramCondition
+class WaitOp(RuntimeOp):
+    cond: RuntimeCondition
     consume: bool = True
-    channel: ProgramChannel | None = None
+    channel: RuntimeChannel | None = None
     tick: bool = False
-    require: ProgramCondition | None = None
+    require: RuntimeCondition | None = None
 
-    def ready(self, ctx: ProgramContext, runtime: ProgramRuntime) -> bool:
+    def ready(self, ctx: PatternContext, runtime: PatternRuntime) -> bool:
         cond_ready = runtime.eval_condition(self.cond, ctx)
         if not cond_ready:
             self._check_require(ctx, runtime)
@@ -64,11 +64,11 @@ class WaitOp(ProgramOp):
         self._check_require(ctx, runtime)
         return False
 
-    def commit(self, ctx: ProgramContext, runtime: ProgramRuntime) -> None:
+    def commit(self, ctx: PatternContext, runtime: PatternRuntime) -> None:
         if self.consume:
             runtime.consume_channel(runtime.resolve_channel(self.channel), ctx.index)
 
-    def _check_require(self, ctx: ProgramContext, runtime: ProgramRuntime) -> None:
+    def _check_require(self, ctx: PatternContext, runtime: PatternRuntime) -> None:
         if self.require is not None and not runtime.eval_condition(self.require, ctx):
             raise _RequireViolation
 
@@ -79,12 +79,12 @@ class ConsumeOp(WaitOp):
 
 
 @dataclass
-class DelayOp(ProgramOp):
+class DelayOp(RuntimeOp):
     n: int
     start_index: int
-    require: ProgramCondition | None = None
+    require: RuntimeCondition | None = None
 
-    def ready(self, ctx: ProgramContext, runtime: ProgramRuntime) -> bool:
+    def ready(self, ctx: PatternContext, runtime: PatternRuntime) -> bool:
         if self.n == 0:
             return True
         if ctx.index <= self.start_index:
@@ -95,9 +95,9 @@ class DelayOp(ProgramOp):
 
 
 @dataclass
-class ProgramContext:
-    _runtime: ProgramRuntime
-    _instance: ProgramInstance
+class PatternContext:
+    _runtime: PatternRuntime
+    _instance: PatternInstance
     _index: int
 
     OK = OK
@@ -123,10 +123,10 @@ class ProgramContext:
 
     def wait(
         self,
-        cond: ProgramCondition,
+        cond: RuntimeCondition,
         *,
         consume: bool = True,
-        channel: ProgramChannel | None = None,
+        channel: RuntimeChannel | None = None,
     ) -> WaitOp:
         self._runtime.validate_condition(cond)
         if not consume and channel is not None:
@@ -137,22 +137,22 @@ class ProgramContext:
 
     def _wait_internal(
         self,
-        cond: ProgramCondition,
+        cond: RuntimeCondition,
         *,
-        channel: ProgramChannel,
+        channel: RuntimeChannel,
         tick: bool = False,
-        require: ProgramCondition | None = None,
+        require: RuntimeCondition | None = None,
     ) -> WaitOp:
         self._runtime.validate_condition(cond)
         if require is not None:
             self._runtime.validate_condition(require)
         return WaitOp(cond=cond, consume=True, channel=channel, tick=tick, require=require)
 
-    def consume(self, cond: ProgramCondition, channel: ProgramChannel) -> ConsumeOp:
+    def consume(self, cond: RuntimeCondition, channel: RuntimeChannel) -> ConsumeOp:
         self._runtime.validate_condition(cond)
         return ConsumeOp(cond=cond, channel=channel)
 
-    def try_consume(self, cond: ProgramCondition, channel: ProgramChannel) -> bool:
+    def try_consume(self, cond: RuntimeCondition, channel: RuntimeChannel) -> bool:
         self._runtime.validate_condition(cond)
         op = ConsumeOp(cond=cond, channel=channel)
         if not op.ready(self, self._runtime):
@@ -167,7 +167,7 @@ class ProgramContext:
             raise PatternError(f'ctx.delay(n) requires n >= 0, got {n}')
         return DelayOp(n=n, start_index=self._index)
 
-    def _delay_internal(self, n: int, *, require: ProgramCondition | None = None) -> DelayOp:
+    def _delay_internal(self, n: int, *, require: RuntimeCondition | None = None) -> DelayOp:
         if isinstance(n, bool) or not isinstance(n, int):
             raise PatternError('delay() requires an integer cycle count')
         if n < 0:
@@ -188,27 +188,27 @@ class ProgramContext:
         else:
             raise PatternError("ctx.capture() mode must be 'last', 'first', or 'list'")
 
-    def require(self, cond: ProgramCondition) -> None:
+    def require(self, cond: RuntimeCondition) -> None:
         self._runtime.validate_condition(cond)
         if not self._runtime.eval_condition(cond, self):
             raise _RequireViolation
 
 
 @dataclass
-class ProgramInstance:
+class PatternInstance:
     coroutine: Any
-    context: ProgramContext | None
+    context: PatternContext | None
     start_index: int
     order: int
     captures: dict[str, Any] = field(default_factory=dict)
-    current_op: ProgramOp | None = None
+    current_op: RuntimeOp | None = None
     status: MatchStatus | None = None
     end_index: int = 0
     return_value: Any = None
     discarded: bool = False
 
 
-class ProgramRuntime:
+class PatternRuntime:
     """Cycle-major runtime for programmable ``Pattern(async_body, ...)``."""
 
     _next_epoch = 0
@@ -217,8 +217,8 @@ class ProgramRuntime:
         self._program = pattern._program
         self._timeout_cycles = pattern._timeout_cycles
         self._max_active = pattern._max_active
-        ProgramRuntime._next_epoch += 1
-        self._epoch = ProgramRuntime._next_epoch
+        PatternRuntime._next_epoch += 1
+        self._epoch = PatternRuntime._next_epoch
         self._key_channels: dict[Hashable, Channel] = {}
         self._axis: Waveform | None = pattern._axis
         self._order = 0
@@ -231,7 +231,7 @@ class ProgramRuntime:
         completed = [inst for inst in completed if not inst.discarded]
         if self._axis is None:
             raise PatternError(
-                'Pattern(program) could not determine scan axis; pass axis=<waveform>'
+                'Pattern runtime could not determine scan axis; pass axis=<waveform>'
             )
         axis = self._axis
         completed.sort(key=lambda i: (int(axis.clock[i.start_index]), i.order))
@@ -271,7 +271,7 @@ class ProgramRuntime:
         axis = self._axis
         if axis is None:
             raise PatternError(
-                'Pattern(program) could not determine scan axis; pass axis=<waveform>'
+                'Pattern runtime could not determine scan axis; pass axis=<waveform>'
             )
         for inst in completed:
             if inst.status is None or inst.status == MatchStatus.OK:
@@ -300,7 +300,7 @@ class ProgramRuntime:
             f'got {type(cond).__name__}'
         )
 
-    def eval_condition(self, cond: Any, ctx: ProgramContext) -> bool:
+    def eval_condition(self, cond: Any, ctx: PatternContext) -> bool:
         self.validate_condition(cond)
         if isinstance(cond, Waveform):
             return bool(cond.value[ctx.index])
@@ -337,7 +337,7 @@ class ProgramRuntime:
         self,
         start_cycle: int | None,
         end_cycle: int | None,
-    ) -> list[ProgramInstance]:
+    ) -> list[PatternInstance]:
         ref_wf = self._axis
         start_index = 0
         end_index: int | None = None
@@ -351,29 +351,29 @@ class ProgramRuntime:
             end_index = max(start_index, min(end_index, n))
         elif start_cycle is not None or end_cycle is not None:
             raise PatternError(
-                'Pattern(program) requires axis=<waveform> when start/end cycle is used'
+                'Pattern runtime requires axis=<waveform> when start/end cycle is used'
             )
 
-        active: list[ProgramInstance] = []
-        completed: list[ProgramInstance] = []
+        active: list[PatternInstance] = []
+        completed: list[PatternInstance] = []
 
         t = start_index
         while end_index is None or t < end_index:
             # Start one candidate at every scanned cycle.
             assert self._program is not None
-            inst = ProgramInstance(
+            inst = PatternInstance(
                 coroutine=None,
                 context=None,
                 start_index=t,
                 order=self._order,
             )
             self._order += 1
-            ctx = ProgramContext(self, inst, t)
+            ctx = PatternContext(self, inst, t)
             inst.context = ctx
             inst.coroutine = self._program(ctx)
             active.append(inst)
 
-            still_active: list[ProgramInstance] = []
+            still_active: list[PatternInstance] = []
             for inst in active:
                 self._tick(inst, t)
                 if inst.status is None and not inst.discarded:
@@ -396,7 +396,7 @@ class ProgramRuntime:
                 end_index = len(ref_wf.value)
             elif ref_wf is None:
                 raise PatternError(
-                    'Pattern(program) could not determine scan axis; pass axis=<waveform>'
+                    'Pattern runtime could not determine scan axis; pass axis=<waveform>'
                 )
             t += 1
 
@@ -410,7 +410,7 @@ class ProgramRuntime:
 
         return completed
 
-    def _tick(self, inst: ProgramInstance, index: int) -> None:
+    def _tick(self, inst: PatternInstance, index: int) -> None:
         if self._timeout_cycles is not None and index - inst.start_index + 1 > self._timeout_cycles:
             inst.end_index = index
             inst.status = MatchStatus.TIMEOUT
@@ -453,7 +453,7 @@ class ProgramRuntime:
                 inst.status = MatchStatus.REQUIRE_VIOLATED
                 return
 
-            if not isinstance(yielded, ProgramOp):
+            if not isinstance(yielded, RuntimeOp):
                 raise PatternError(
                     f'programmable Pattern yielded unsupported awaitable {type(yielded)}'
                 )

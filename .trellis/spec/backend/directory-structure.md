@@ -85,14 +85,13 @@ tests/
 - **`dsl.py`** — Fluent builder API (`Pattern().wait().capture()`) and public execution entry points
 - **`steps.py`** — Read-only declarative pattern AST nodes; do not store per-instance runtime state here
 - **`compiler.py`** — Internal declarative `Step` AST to async program compiler
-- **`program.py`** — Unified cycle-major runtime for programmable patterns and compiled declarative patterns
-- **`validation.py`** — Waveform collection and clock-axis alignment checks
+- **`runtime.py`** — Unified cycle-major runtime for programmable patterns and compiled declarative patterns
 - **`errors.py`** — Pattern-specific exception type
 - **`result.py`** — Struct-of-arrays output with filter/iteration
 
-Declarative and programmable patterns must share `ProgramRuntime` as the only
+Declarative and programmable patterns must share `PatternRuntime` as the only
 production execution backend. Do not add a second matching engine; translate new
-declarative constructs through `compiler.py` and execute them through `program.py`.
+declarative constructs through `compiler.py` and execute them through `runtime.py`.
 
 ---
 
@@ -131,4 +130,4 @@ Reference: `src/wavekit/readers/vcd/reader.py:VcdReader`
 1. Add step class to `src/wavekit/pattern/steps.py`
 2. Add builder method to `src/wavekit/pattern/dsl.py`
 3. Add declarative compilation handling to `src/wavekit/pattern/compiler.py`
-4. Add runtime support to `src/wavekit/pattern/program.py` only if the existing ops cannot express it
+4. Add runtime support to `src/wavekit/pattern/runtime.py` only if the existing ops cannot express it
