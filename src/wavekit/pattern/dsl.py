@@ -70,7 +70,6 @@ class Pattern:
         *,
         require: Condition | None = None,
         channel: ChannelValue | None = None,
-        tick: bool = False,
     ) -> Pattern:
         """Block until *cond* becomes True.
 
@@ -92,12 +91,6 @@ class Pattern:
             for dynamic key-based partitioning) that binds this wait to a
             shared FIFO consumer group.  ``None`` (default) uses an implicit
             per-step channel.
-        tick:
-            When ``False`` (default), the next step evaluates on the **same**
-            cycle.  When ``True``, a successful match resumes subsequent steps
-            on the next cycle as a compatibility bridge for old phase-separated
-            wait chains.
-
         Examples
         --------
         Static channel shared between request and response steps::
@@ -125,7 +118,7 @@ class Pattern:
                 .wait(valid)
                 .wait(valid & ready))   # measures latency in same-cycle case
         """
-        self._steps.append(WaitStep(cond=cond, require=require, channel=channel, tick=tick))
+        self._steps.append(WaitStep(cond=cond, require=require, channel=channel))
         return self
 
     def consume(
@@ -134,14 +127,13 @@ class Pattern:
         channel: ChannelValue,
         *,
         require: Condition | None = None,
-        tick: bool = False,
     ) -> Pattern:
         """Block until *cond* is true and atomically consume *channel*.
 
         This is the explicit spelling for a channel-consuming wait and is
-        equivalent to ``wait(cond, channel=channel, require=require, tick=tick)``.
+        equivalent to ``wait(cond, channel=channel, require=require)``.
         """
-        return self.wait(cond, require=require, channel=channel, tick=tick)
+        return self.wait(cond, require=require, channel=channel)
 
     def delay(
         self,

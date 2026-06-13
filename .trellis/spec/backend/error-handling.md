@@ -91,10 +91,12 @@ class _FsdbReaderStub:
 | `Must specify either 'until' or 'when'` | Missing loop condition | Add `until=` or `when=` to loop() |
 | `Waveform clock arrays are not aligned` | Pattern uses waveforms sampled on different clock axes | Load/construct all pattern waveforms from the same clock axis |
 
-Declarative patterns validate waveform alignment before compiling; programmable
-patterns validate alignment lazily as `ctx.value()` / `ctx.cycle()` /
-`ctx.time()` observes waveforms. Both paths must reject different clock arrays,
-not just different lengths.
+Declarative and programmable patterns validate waveform alignment lazily through
+the shared `PatternRuntime` as `ctx.value()` / `ctx.cycle()` / `ctx.time()` or
+compiled declarative steps observe waveforms. Both paths must reject different
+clock arrays, not just different lengths. Do not add declarative-only eager
+waveform collection back; branches that never execute should not validate their
+unobserved waveforms.
 
 ### File Loading
 

@@ -80,16 +80,11 @@ class WaitStep:
         Optional explicit ``Channel`` (or ``callable`` returning one) that
         binds this wait step to a shared FIFO consumer group.  When
         ``None``, the step's private ``_auto_channel`` is used.
-    tick:
-        When ``False`` (default), the next step is evaluated on the same
-        cycle.  When ``True``, subsequent steps resume on the next cycle as
-        a compatibility bridge for old phase-separated wait chains.
     """
 
     cond: Condition
     require: Condition | None = None
     channel: ChannelValue | None = None
-    tick: bool = False
     # Per-step channel shared by all in-flight instances for FIFO consumption.
     _auto_channel: Channel = field(default_factory=Channel, repr=False)
 

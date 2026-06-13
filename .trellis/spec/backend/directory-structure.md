@@ -36,9 +36,10 @@ src/wavekit/
     pattern/
     ├── __init__.py          # Pattern, MatchResult, MatchStatus exports
     ├── dsl.py               # Pattern builder DSL (wait, capture, etc.)
-    ├── steps.py             # Step type definitions
-    ├── instance.py          # Pattern matching instance state
-    ├── engine.py            # NFA-based matching engine
+    ├── steps.py             # Read-only declarative AST node definitions
+    ├── compiler.py          # Declarative AST to async PatternRuntime program compiler
+    ├── runtime.py           # Unified runtime for declarative and programmable patterns
+    ├── errors.py            # PatternError
     └── result.py            # MatchResult struct-of-arrays output
 tests/
 ├── test_waveform.py         # Waveform arithmetic, bit ops, filtering
@@ -92,6 +93,12 @@ tests/
 Declarative and programmable patterns must share `PatternRuntime` as the only
 production execution backend. Do not add a second matching engine; translate new
 declarative constructs through `compiler.py` and execute them through `runtime.py`.
+
+Pattern time movement is explicit. Do not add `tick` compatibility back to
+declarative steps or runtime ops; use `.delay(1)` for next-cycle continuation.
+Blocking guards belong on public wait/consume/delay APIs in both modes:
+`Pattern().wait(..., require=...)`, `Pattern().delay(..., require=...)`,
+`await ctx.wait(..., require=...)`, and `await ctx.delay(..., require=...)`.
 
 ---
 

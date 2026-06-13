@@ -140,7 +140,7 @@ def compile_declarative_pattern(pattern) -> PatternBody:
         )
 
     def raise_infinite_loop() -> None:
-        raise PatternError('Infinite loop detected: too many epsilon transitions in a single tick')
+        raise PatternError('Infinite loop detected: too many same-cycle transitions')
 
     async def run_steps(
         ctx: PatternContext,
@@ -167,17 +167,17 @@ def compile_declarative_pattern(pattern) -> PatternBody:
                         return ready
                     return eval_condition(step.cond, ctx)
 
-                await ctx._wait_internal(
+                await ctx.wait(
                     condition,
+                    consume=True,
                     channel=channel,
-                    tick=step.tick,
                     require=None
                     if step.require is None
                     else lambda step=step: eval_condition(step.require, ctx),
                 )
                 first_wait_ready = None
             elif isinstance(step, DelayStep):
-                await ctx._delay_internal(
+                await ctx.delay(
                     eval_int(step.n, ctx),
                     require=None
                     if step.require is None

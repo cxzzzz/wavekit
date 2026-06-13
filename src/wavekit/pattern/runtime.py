@@ -46,9 +46,8 @@ class RuntimeOp:
 @dataclass
 class WaitOp(RuntimeOp):
     cond: RuntimeCondition
-    consume: bool = True
+    consume: bool = False
     channel: RuntimeChannel | None = None
-    tick: bool = False
     require: RuntimeCondition | None = None
 
     def ready(self, ctx: PatternContext, runtime: PatternRuntime) -> bool:
@@ -87,11 +86,11 @@ class DelayOp(RuntimeOp):
     def ready(self, ctx: PatternContext, runtime: PatternRuntime) -> bool:
         if self.n == 0:
             return True
-        if ctx.index <= self.start_index:
-            return False
+        if ctx.index >= self.start_index + self.n:
+            return True
         if self.require is not None and not runtime.eval_condition(self.require, ctx):
             raise _RequireViolation
-        return ctx.index >= self.start_index + self.n
+        return False
 
 
 @dataclass
@@ -125,32 +124,42 @@ class PatternContext:
         self,
         cond: RuntimeCondition,
         *,
-        consume: bool = True,
+        consume: bool = False,
         channel: RuntimeChannel | None = None,
+        require: RuntimeCondition | None = None,
     ) -> WaitOp:
+        """Block until *cond* is true.
+
+        ``require`` is a blocking guard: it is checked only on cycles where the
+        wait remains blocked.  If *cond* is true (and the channel can be
+        consumed, when ``consume=True``), the wait succeeds without checking the
+        guard on that success cycle.
+        """
         self._runtime.validate_condition(cond)
+        if require is not None:
+            self._runtime.validate_condition(require)
         if not consume and channel is not None:
             raise PatternError('ctx.wait(..., consume=False) cannot specify channel')
         if consume and channel is None:
             raise PatternError('ctx.wait(..., consume=True) requires an explicit channel')
-        return WaitOp(cond=cond, consume=consume, channel=channel)
+        return WaitOp(cond=cond, consume=consume, channel=channel, require=require)
 
-    def _wait_internal(
+    def consume(
         self,
         cond: RuntimeCondition,
-        *,
         channel: RuntimeChannel,
-        tick: bool = False,
+        *,
         require: RuntimeCondition | None = None,
-    ) -> WaitOp:
+    ) -> ConsumeOp:
+        """Block until *cond* is true and atomically consume *channel*.
+
+        ``require`` follows ``wait(..., require=...)`` blocking-guard
+        semantics, including cycles blocked by channel arbitration.
+        """
         self._runtime.validate_condition(cond)
         if require is not None:
             self._runtime.validate_condition(require)
-        return WaitOp(cond=cond, consume=True, channel=channel, tick=tick, require=require)
-
-    def consume(self, cond: RuntimeCondition, channel: RuntimeChannel) -> ConsumeOp:
-        self._runtime.validate_condition(cond)
-        return ConsumeOp(cond=cond, channel=channel)
+        return ConsumeOp(cond=cond, channel=channel, require=require)
 
     def try_consume(self, cond: RuntimeCondition, channel: RuntimeChannel) -> bool:
         self._runtime.validate_condition(cond)
@@ -160,18 +169,17 @@ class PatternContext:
         op.commit(self, self._runtime)
         return True
 
-    def delay(self, n: int) -> DelayOp:
+    def delay(self, n: int, *, require: RuntimeCondition | None = None) -> DelayOp:
+        """Block for *n* cycles.
+
+        ``delay(0)`` is a no-op and checks no guard.  For ``n > 0``, ``require``
+        is checked on blocked cycles from the starting cycle through the cycle
+        before resume; the resume cycle itself is not checked by this delay.
+        """
         if isinstance(n, bool) or not isinstance(n, int):
             raise PatternError('ctx.delay(n) requires an integer cycle count')
         if n < 0:
             raise PatternError(f'ctx.delay(n) requires n >= 0, got {n}')
-        return DelayOp(n=n, start_index=self._index)
-
-    def _delay_internal(self, n: int, *, require: RuntimeCondition | None = None) -> DelayOp:
-        if isinstance(n, bool) or not isinstance(n, int):
-            raise PatternError('delay() requires an integer cycle count')
-        if n < 0:
-            raise PatternError(f'delay() requires n >= 0, got {n}')
         if require is not None:
             self._runtime.validate_condition(require)
         return DelayOp(n=n, start_index=self._index, require=require)
@@ -375,7 +383,7 @@ class PatternRuntime:
 
             still_active: list[PatternInstance] = []
             for inst in active:
-                self._tick(inst, t)
+                self._advance_instance(inst, t)
                 if inst.status is None and not inst.discarded:
                     still_active.append(inst)
                 else:
@@ -410,7 +418,7 @@ class PatternRuntime:
 
         return completed
 
-    def _tick(self, inst: PatternInstance, index: int) -> None:
+    def _advance_instance(self, inst: PatternInstance, index: int) -> None:
         if self._timeout_cycles is not None and index - inst.start_index + 1 > self._timeout_cycles:
             inst.end_index = index
             inst.status = MatchStatus.TIMEOUT
@@ -432,10 +440,7 @@ class PatternRuntime:
                     inst.end_index = index
                     inst.status = MatchStatus.REQUIRE_VIOLATED
                     return
-                resume_next_cycle = isinstance(inst.current_op, WaitOp) and inst.current_op.tick
                 inst.current_op = None
-                if resume_next_cycle:
-                    return
 
             try:
                 yielded = inst.coroutine.send(None)

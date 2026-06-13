@@ -45,18 +45,40 @@ Keep only one Pattern execution engine while preserving declarative and programm
 * Do not update README/README_ZH unless implementation unexpectedly changes public behavior.
 * Record architecture notes in task docs/PRD rather than user-facing docs for this task.
 * Keep internal boundaries clear: DSL/building, declarative compilation, runtime scheduling, result construction, and shared errors/helpers.
+* Remove declarative `tick` compatibility now that same-cycle continuation is the established default.
+* Users should express next-cycle continuation explicitly with `.delay(1)` instead of `tick=True`.
+* Remove private compiler/runtime bridge methods `_wait_internal(...)` and `_delay_internal(...)`; they were temporary compatibility seams for passing `tick` and declarative blocking `require` into runtime ops.
+* Public programmable and declarative APIs should both support blocking `require` on wait/consume/delay:
+  * `await ctx.wait(cond, *, consume=False, channel=None, require=None)`
+  * `await ctx.consume(cond, channel, *, require=None)`
+  * `await ctx.delay(n, *, require=None)`
+  * `Pattern().wait(cond, *, require=None, channel=None)`
+  * `Pattern().consume(cond, channel, *, require=None)`
+  * `Pattern().delay(n, *, require=None)`
+* Declarative compilation should pass `require` through the public `PatternContext` methods above instead of using private bridge methods.
+* Keep declarative blocking `require` semantics while removing the bridge methods:
+  * `wait(require=...)`: check the wait condition first; if the wait succeeds, do not check `require` on the match cycle; only check `require` on blocked waiting cycles.
+  * `delay(0, require=...)`: no-op and do not check `require`.
+  * `delay(n > 0, require=...)`: check `require` on each blocked cycle before completion. If delay starts at cycle `t`, check cycles `t..t+n-1`, then resume on cycle `t+n` without checking `require` for that delay.
 
 ## Acceptance Criteria (evolving)
 
-* [ ] No public code path uses the old declarative `PatternEngine`.
-* [ ] `engine.py` is either removed or no longer contains an alternate runtime.
+* [x] No public code path uses the old declarative `PatternEngine`.
+* [x] `engine.py` is either removed or no longer contains an alternate runtime.
 * [x] No `validation.py` module remains unless it owns generic behavior not already handled by runtime.
 * [x] `PatternRuntime` and `PatternContext` live in `runtime.py`; internal imports refer to `runtime.py`.
 * [x] No internal `ProgramRuntime` / `ProgramContext` / `ProgramInstance` / `ProgramOp` names remain.
-* [ ] Old-engine-only `clone_steps`, `clone()` methods, and mutable step runtime state are removed.
-* [ ] Existing declarative and programmable Pattern tests pass.
-* [ ] Lint, format, and type checks pass for affected files.
-* [ ] README/README_ZH remain unchanged unless public behavior changes.
+* [x] Old-engine-only `clone_steps`, `clone()` methods, and mutable step runtime state are removed.
+* [x] Existing declarative and programmable Pattern tests pass.
+* [x] Lint, format, and type checks pass for affected files.
+* [x] README/README_ZH remain unchanged unless public behavior changes.
+* [x] No public `tick` parameter remains on declarative `wait()` or `consume()`.
+* [x] No `tick` field remains in declarative step AST or runtime wait/consume ops.
+* [x] No `_wait_internal(...)` or `_delay_internal(...)` methods remain.
+* [x] Programmable `ctx.wait`, `ctx.consume`, and `ctx.delay` support `require` with the same blocking semantics as declarative steps.
+* [x] Declarative compiler passes `require` through public `PatternContext` wait/consume/delay methods.
+* [x] Existing `tick=True` tests are removed or rewritten to use explicit `.delay(1)`.
+* [x] Same-cycle wait/capture behavior and explicit next-cycle `.delay(1)` behavior are both covered by focused tests.
 
 ## Definition of Done
 
@@ -68,12 +90,12 @@ Keep only one Pattern execution engine while preserving declarative and programm
 ## Out of Scope (explicit)
 
 * Replacing the async compiler with a bytecode/state-machine IR, unless we decide otherwise during design.
-* Removing public `tick` compatibility, unless explicitly chosen.
 * README/README_ZH updates, unless necessary for changed public behavior.
 
 ## Follow-up TODOs
 
-* None currently.
+* Consider README/README_ZH updates after the Pattern API stabilizes around explicit `.delay(1)`.
+* Consider declarative `Waveform` support for integer parameters such as `delay(n)` and `repeat(..., n=...)` in a separate task.
 
 ## Technical Notes
 
@@ -148,3 +170,11 @@ Keep only one Pattern execution engine while preserving declarative and programm
 **Decision**: Do not update README/README_ZH for this task. If notes are needed, keep them in PRD/task records or existing internal specs.
 
 **Consequences**: Scope stays focused. User-facing docs avoid churn unrelated to public behavior.
+
+### Remove tick compatibility and private bridge methods
+
+**Context**: `tick=True` was kept only as a temporary declarative compatibility path after same-cycle `wait` / `consume` became the default. The long-term API model is explicit time movement with `.delay(1)`. The compiler currently relies on private `_wait_internal(...)` and `_delay_internal(...)` methods to pass compatibility-only fields such as `tick` plus declarative blocking `require` into runtime ops. That private bridge also made programmable and declarative `require` support unnecessarily asymmetric.
+
+**Decision**: Remove the public declarative `tick` parameter, remove `WaitStep.tick` and `WaitOp.tick`, and delete `_wait_internal(...)` / `_delay_internal(...)`. Add public programmable `require` support to `ctx.wait`, `ctx.consume`, and `ctx.delay`, matching existing declarative blocking semantics. Declarative compilation should pass `require` through those public context methods rather than using private bridge methods. Next-cycle behavior must be represented by an explicit `DelayStep` / `.delay(1)` in user code or tests.
+
+**Consequences**: Code using `Pattern().wait(..., tick=True)` or `Pattern().consume(..., tick=True)` will break and should migrate to `.wait(...).delay(1)` or `.consume(...).delay(1)`. Runtime scheduling becomes simpler because wait/consume success always resumes in the same cycle. Programmable users can express guarded blocking directly with `await ctx.wait(..., require=...)`, `await ctx.consume(..., require=...)`, and `await ctx.delay(..., require=...)`. Blocking `require` behavior must remain covered by tests while the bridge methods are removed.

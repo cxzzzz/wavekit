@@ -152,7 +152,7 @@ def test_consuming_wait_requires_explicit_channel():
 
     async def tx(ctx):
         if ctx.value(fire):
-            await ctx.wait(ready, channel='ready')
+            await ctx.wait(ready, consume=True, channel='ready')
             return ctx.OK
         return None
 
@@ -263,3 +263,62 @@ def test_channel_object_works_programmable():
         return None
 
     assert len(Pattern(tx).match()) == 1
+
+
+def test_program_wait_require_checks_only_blocked_cycles():
+    fire = _bool_wf([1, 0, 0])
+    ready = _bool_wf([1, 0, 0])
+    guard = _bool_wf([0, 0, 0])
+
+    async def tx(ctx):
+        if ctx.value(fire):
+            await ctx.wait(ready, consume=False, require=guard)
+            return ctx.OK
+        return None
+
+    result = Pattern(tx).match().filter_valid()
+    assert len(result) == 1
+    assert result.start.value[0] == 0
+
+
+def test_program_consume_require_checks_blocked_arbitration_cycles():
+    fire = _bool_wf([1, 1, 0])
+    ready = _bool_wf([1, 0, 0])
+    guard = _bool_wf([1, 0, 1])
+
+    async def tx(ctx):
+        if ctx.value(fire):
+            await ctx.consume(ready, channel='ready', require=guard)
+            return ctx.OK
+        return None
+
+    result = Pattern(tx).match()
+    assert result.status.value[0] == MatchStatus.OK
+    assert result.status.value[1] == MatchStatus.REQUIRE_VIOLATED
+    assert result.end.value[1] == 1
+
+
+def test_program_delay_require_checks_blocked_cycles_not_resume_cycle():
+    fire = _bool_wf([1, 0, 0])
+    pass_on_resume = _bool_wf([1, 1, 0])
+    fail_while_blocked = _bool_wf([1, 0, 1])
+
+    async def pass_tx(ctx):
+        if ctx.value(fire):
+            await ctx.delay(2, require=pass_on_resume)
+            return ctx.OK
+        return None
+
+    result = Pattern(pass_tx).match().filter_valid()
+    assert len(result) == 1
+    assert result.end.value[0] == 2
+
+    async def fail_tx(ctx):
+        if ctx.value(fire):
+            await ctx.delay(2, require=fail_while_blocked)
+            return ctx.OK
+        return None
+
+    result = Pattern(fail_tx).match()
+    assert result.status.value[0] == MatchStatus.REQUIRE_VIOLATED
+    assert result.end.value[0] == 1

@@ -16,7 +16,7 @@ Test progression (by complexity):
 13. timeout
 14. branch
 15. capture mode='list'
-16. zero-cycle wait (tick=False)
+16. same-cycle wait
 17. capture modes (first / list)
 """
 
@@ -156,7 +156,7 @@ class TestDelay:
         data = _wf([10, 20, 30, 40, 50], width=8)
         result = Pattern().wait(trigger).delay(2).capture('val', data).match()
         assert len(result) == 1
-        # Trigger at 0, delay 2 ticks → capture at cycle 2
+        # Trigger at 0, delay 2 cycles → capture at cycle 2
         assert result.captures['val'].value[0] == 30
 
     def test_delay_with_require(self):
@@ -736,7 +736,7 @@ class TestTimeout:
         assert valid.captures['val'].value[0] == 42
 
     def test_timeout_2_needs_blocking(self):
-        """timeout=2: has 1 tick after fork to complete a blocking step."""
+        """timeout=2: has 1 cycle after fork to complete a blocking step."""
         trigger = _bool_wf([1, 0, 0, 0])
         cond = _bool_wf([0, 1, 0, 0])
         data = _wf([0, 99, 0, 0], width=8)
@@ -978,20 +978,20 @@ class TestErrors:
 
 
 # ---------------------------------------------------------------------------
-# 17. zero-cycle wait (tick=False)
+# 17. same-cycle wait
 # ---------------------------------------------------------------------------
 
 
 class TestZeroCycleWait:
     def test_zero_cycle_same_cycle_match(self):
-        """wait(valid).wait(valid & ready, tick=False) → both fire same cycle."""
+        """wait(valid).wait(valid & ready) can complete on the same cycle."""
         # cycle:        0  1  2  3  4
         valid = _bool_wf([0, 1, 1, 1, 0])
         ready = _bool_wf([0, 0, 1, 1, 0])
         # valid & ready first true at cycle 2; trigger forks every valid cycle.
-        result = Pattern().wait(valid).wait(valid & ready, tick=False).match()
+        result = Pattern().wait(valid).wait(valid & ready).match()
         valid_results = result.filter_valid()
-        # Instance@1: wait advances to cycle 2 (valid&ready) → tick=False keeps t=2,
+        # Instance@1: wait advances to cycle 2 (valid&ready) and stays at t=2,
         #   completes at cycle 2 → duration = 2 - 1 + 1 = 2
         # Instance@2: same-cycle match — fork at 2, second wait True at t=2 already
         #   but auto-channel arbitration lets only the oldest instance consume rsp@2.
@@ -1000,26 +1000,26 @@ class TestZeroCycleWait:
         assert valid_results.start.value[0] == 1
 
     def test_zero_cycle_blocked_continues(self):
-        """tick=False with cond False on current cycle → wait next cycle."""
+        """Same-cycle wait with cond False on current cycle waits until a later cycle."""
         # cycle:        0  1  2  3
         trigger = _bool_wf([1, 0, 0, 0])
         cond = _bool_wf([0, 0, 1, 0])  # only true at cycle 2
-        result = Pattern().wait(trigger).wait(cond, tick=False).match()
+        result = Pattern().wait(trigger).wait(cond).match()
         valid_results = result.filter_valid()
         # Instance@0: first wait consumed by trigger → step_idx=1 at t=0,
-        # second wait (tick=False): cond False at 0,1 → next cycle.
+        # second wait: cond False at 0,1 → next cycle.
         # cond True at 2 → match without consuming a cycle → end_cycle=2.
         assert len(valid_results) == 1
         assert valid_results.start.value[0] == 0
         assert valid_results.end.value[0] == 2
 
     def test_zero_cycle_chained(self):
-        """Multiple tick=False steps in a row collapse to same cycle."""
+        """Multiple waits in a row can collapse to the same cycle."""
         # cycle:        0  1  2
         a = _bool_wf([0, 1, 0])
         b = _bool_wf([0, 1, 0])
         c = _bool_wf([0, 1, 0])
-        result = Pattern().wait(a).wait(b, tick=False).wait(c, tick=False).match()
+        result = Pattern().wait(a).wait(b).wait(c).match()
         valid_results = result.filter_valid()
         assert len(valid_results) == 1
         # All three fire on cycle 1
@@ -1027,19 +1027,17 @@ class TestZeroCycleWait:
         assert valid_results.end.value[0] == 1
 
     def test_zero_cycle_at_first_step(self):
-        """First step with tick=False: trigger optimization still applies (channel is None)."""
-        # The first wait still serves as trigger; tick=False has no effect on
-        # the trigger path because the trigger step is skipped by the engine.
+        """First wait trigger optimization still completes captures on the same cycle."""
         sig = _bool_wf([0, 1, 0, 1, 0])
         data = _wf([0, 11, 0, 33, 0], width=8)
-        result = Pattern().wait(sig, tick=False).capture('d', data).match()
+        result = Pattern().wait(sig).capture('d', data).match()
         valid_results = result.filter_valid()
         # Two triggers; epsilon capture completes same cycle.
         assert len(valid_results) == 2
         np.testing.assert_array_equal(valid_results.captures['d'].value, [11, 33])
 
     def test_default_waits_continue_same_cycle(self):
-        """Default wait semantics are same-cycle (tick=False)."""
+        """Default wait semantics are same-cycle."""
         a = _bool_wf([0, 1, 0])
         b = _bool_wf([0, 1, 0])
         data = _wf([0, 42, 0], width=8)
@@ -1048,11 +1046,11 @@ class TestZeroCycleWait:
         assert result.end.value[0] == 1
         assert result.captures['d'].value[0] == 42
 
-    def test_tick_true_resumes_next_cycle(self):
-        """tick=True is a compatibility bridge for next-cycle continuation."""
+    def test_delay_one_resumes_next_cycle(self):
+        """Use explicit delay(1) for next-cycle continuation."""
         a = _bool_wf([1, 0, 0])
         data = _wf([10, 20, 30], width=8)
-        result = Pattern().wait(a, tick=True).capture('d', data).match().filter_valid()
+        result = Pattern().wait(a).delay(1).capture('d', data).match().filter_valid()
         assert len(result) == 1
         assert result.start.value[0] == 0
         assert result.end.value[0] == 1
@@ -1065,13 +1063,20 @@ class TestZeroCycleWait:
         assert len(result) == 1
         assert result.start.value[0] == 0
 
-    def test_delay_require_checks_final_cycle(self):
+    def test_delay_require_does_not_check_resume_cycle(self):
         trigger = _bool_wf([1, 0, 0])
         guard = _bool_wf([1, 1, 0])
+        result = Pattern().wait(trigger).delay(2, require=guard).match().filter_valid()
+        assert len(result) == 1
+        assert result.end.value[0] == 2
+
+    def test_delay_require_checks_blocked_cycles(self):
+        trigger = _bool_wf([1, 0, 0])
+        guard = _bool_wf([1, 0, 1])
         result = Pattern().wait(trigger).delay(2, require=guard).match()
         assert len(result) == 1
         assert result.status.value[0] == MatchStatus.REQUIRE_VIOLATED
-        assert result.end.value[0] == 2
+        assert result.end.value[0] == 1
 
     def test_negative_dynamic_repeat_count_raises_pattern_error(self):
         trigger = _bool_wf([1])
