@@ -1,19 +1,10 @@
 import numpy as np
 import pytest
+from helpers import bool_wf as _bool_wf
+from helpers import wf as _wf
 
 from wavekit import Channel, Signal, Waveform
 from wavekit.pattern import MatchStatus, Pattern, PatternError
-
-
-def _wf(values, width=1, signed=False):
-    value = np.array(values)
-    clock = np.arange(len(value))
-    time = clock * 10
-    return Waveform(value, clock, time, signal=Signal('', '', width, None, signed))
-
-
-def _bool_wf(values):
-    return _wf(values, width=1, signed=False)
 
 
 def test_non_async_program_body_raises():
@@ -241,17 +232,6 @@ def test_max_active_guard_guidance():
         Pattern(tx, max_active=1).match()
 
 
-def test_declarative_consume_and_timeout_deprecation():
-    req = _bool_wf([1, 1, 0, 0, 0])
-    rsp = _bool_wf([0, 0, 1, 0, 1])
-    data = _wf([10, 20, 111, 0, 222], width=8)
-    result = Pattern().wait(req).consume(rsp, channel='rsp').capture('rsp', data).match()
-    np.testing.assert_array_equal(result.filter_ok().captures['rsp'].value, [111, 222])
-
-    with pytest.warns(DeprecationWarning, match='timeout'):
-        Pattern().wait(req).timeout(3)
-
-
 def test_channel_object_works_programmable():
     fire = _bool_wf([1, 0])
     channel = Channel()
@@ -286,6 +266,125 @@ def test_program_dynamic_consume_channel_resolves_once_on_commit():
     result = Pattern(tx).match().filter_ok()
     assert len(result) == 1
     assert calls == [(1, 7)]
+
+
+def test_program_dynamic_consume_channel_exception_propagates():
+    class CustomChannelError(Exception):
+        pass
+
+    fire = _bool_wf([1])
+    ready = _bool_wf([1])
+
+    async def tx(ctx):
+        if ctx.value(fire):
+
+            def bad_channel(_index, _captures):
+                raise CustomChannelError('program channel boom')
+
+            await ctx.consume(ready, channel=bad_channel)
+            return ctx.OK
+        return None
+
+    with pytest.raises(CustomChannelError, match='program channel boom'):
+        Pattern(tx).match()
+
+
+def test_program_dynamic_consume_channel_invalid_unhashable_raises_pattern_error():
+    fire = _bool_wf([1])
+    ready = _bool_wf([1])
+
+    async def tx(ctx):
+        if ctx.value(fire):
+            await ctx.consume(ready, channel=lambda _index, _captures: [])
+            return ctx.OK
+        return None
+
+    with pytest.raises(PatternError, match='channel must be a Channel or hashable key'):
+        Pattern(tx).match()
+
+
+def test_program_wait_condition_exception_propagates():
+    class CustomConditionError(Exception):
+        pass
+
+    fire = _bool_wf([1])
+
+    async def tx(ctx):
+        if ctx.value(fire):
+            await ctx.wait(lambda: (_ for _ in ()).throw(CustomConditionError('wait boom')))
+            return ctx.OK
+        return None
+
+    with pytest.raises(CustomConditionError, match='wait boom'):
+        Pattern(tx).match()
+
+
+def test_program_consume_condition_exception_propagates():
+    class CustomConditionError(Exception):
+        pass
+
+    fire = _bool_wf([1])
+
+    async def tx(ctx):
+        if ctx.value(fire):
+            await ctx.consume(
+                lambda: (_ for _ in ()).throw(CustomConditionError('consume boom')),
+                channel='rsp',
+            )
+            return ctx.OK
+        return None
+
+    with pytest.raises(CustomConditionError, match='consume boom'):
+        Pattern(tx).match()
+
+
+def test_program_delay_zero_does_not_check_require():
+    fire = _bool_wf([1, 0])
+    guard = _bool_wf([0, 0])
+
+    async def tx(ctx):
+        if ctx.value(fire):
+            await ctx.delay(0, require=guard)
+            return ctx.OK
+        return None
+
+    result = Pattern(tx).match().filter_ok()
+    assert len(result) == 1
+    assert result.start.value[0] == 0
+    assert result.end.value[0] == 0
+
+
+def test_program_consume_require_not_checked_on_success_cycle():
+    fire = _bool_wf([1, 0, 0])
+    ready = _bool_wf([0, 1, 0])
+    guard = _bool_wf([1, 0, 0])
+
+    async def tx(ctx):
+        if ctx.value(fire):
+            await ctx.consume(ready, channel='ready', require=guard)
+            return ctx.OK
+        return None
+
+    result = Pattern(tx).match().filter_ok()
+    assert len(result) == 1
+    assert result.start.value[0] == 0
+    assert result.end.value[0] == 1
+
+
+def test_program_context_captures_accessor_reflects_prior_captures():
+    fire = _bool_wf([1, 0])
+    data = _wf([42, 0], width=8)
+
+    async def tx(ctx):
+        if ctx.value(fire):
+            ctx.capture('data', data)
+            ctx.capture('copy', ctx.captures['data'])
+            return ctx.OK
+        return None
+
+    result = Pattern(tx).match().filter_ok()
+    assert result.captures['data'].value[0] == 42
+    assert result.captures['copy'].value[0] == 42
 
 
 def test_program_wait_require_checks_only_blocked_cycles():

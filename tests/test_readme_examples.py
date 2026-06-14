@@ -9,15 +9,8 @@ from collections import defaultdict
 import numpy as np
 import pytest
 
-from wavekit import Channel, Pattern, Signal, Waveform
-
-
-def _wf(values, width=1, signed=False):
-    value = np.asarray(values, dtype=np.int64)
-    clock = np.arange(len(value), dtype=np.int64)
-    time = clock * 10
-    return Waveform(value, clock, time, signal=Signal('', '', width, None, signed))
-
+from helpers import wf as _wf
+from wavekit import Channel, Pattern
 
 # ---------------------------------------------------------------------------
 # Example 1: AXI-lite Read Latency
@@ -44,10 +37,10 @@ def test_axi_read_latency():
         .match()
     )
 
-    valid = result.filter_ok()
-    assert len(valid) == 2
-    np.testing.assert_array_equal(valid.duration.value, [4, 3])
-    np.testing.assert_array_equal(valid.captures['rdata'].value, [0xDEAD, 0xBEEF])
+    ok = result.filter_ok()
+    assert len(ok) == 2
+    np.testing.assert_array_equal(ok.duration.value, [4, 3])
+    np.testing.assert_array_equal(ok.captures['rdata'].value, [0xDEAD, 0xBEEF])
 
 
 # ---------------------------------------------------------------------------
@@ -69,9 +62,9 @@ def test_axi_write_burst():
 
     result = Pattern().wait(awvalid & awready).loop(beat, until=wlast).timeout(512).match()
 
-    valid = result.filter_ok()
-    assert len(valid) == 1
-    assert list(valid.captures['beats'].value[0]) == [0xA0, 0xA1, 0xA2]
+    ok = result.filter_ok()
+    assert len(ok) == 1
+    assert list(ok.captures['beats'].value[0]) == [0xA0, 0xA1, 0xA2]
 
 
 # ---------------------------------------------------------------------------
@@ -145,11 +138,11 @@ def test_axi_read_burst_ooo():
         .match()
     )
 
-    valid = result.filter_ok()
-    assert len(valid) == 2
+    ok = result.filter_ok()
+    assert len(ok) == 2
     by_id = {
         int(arid_val): list(beats)
-        for arid_val, beats in zip(valid.captures['arid'].value, valid.captures['beats'].value)
+        for arid_val, beats in zip(ok.captures['arid'].value, ok.captures['beats'].value)
     }
     assert by_id == {0: [0xA0, 0xA1, 0xA2], 1: [0xB0, 0xB1]}
 
@@ -193,13 +186,13 @@ def test_multi_bank_concurrent_responses():
         .match()
     )
 
-    valid = result.filter_ok()
+    ok = result.filter_ok()
     # Both reqs complete at cycle 4 because their banks are independent.
-    assert len(valid) == 2
-    pairs = sorted(zip(valid.captures['bank'].value, valid.captures['rdata'].value))
+    assert len(ok) == 2
+    pairs = sorted(zip(ok.captures['bank'].value, ok.captures['rdata'].value))
     assert [(int(b), int(d)) for b, d in pairs] == [(0, 0xAA), (1, 0xBB)]
     # End cycle for both is 4 (concurrent).
-    np.testing.assert_array_equal(valid.end.value, [4, 4])
+    np.testing.assert_array_equal(ok.end.value, [4, 4])
 
 
 def test_multi_bank_plain_wait_observes_concurrent_responses():
@@ -223,9 +216,9 @@ def test_multi_bank_plain_wait_observes_concurrent_responses():
         .match()
     )
 
-    valid = result.filter_ok()
-    assert len(valid) == 2
-    np.testing.assert_array_equal(valid.end.value, [4, 4])
+    ok = result.filter_ok()
+    assert len(ok) == 2
+    np.testing.assert_array_equal(ok.end.value, [4, 4])
 
 
 if __name__ == '__main__':

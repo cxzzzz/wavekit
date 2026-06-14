@@ -1,101 +1,15 @@
-"""Tests for the pattern matching engine.
-
-Test progression (by complexity):
-1. Single wait → find trigger positions
-2. wait + capture → handshake extraction
-3. wait + require (throughout, on wait)
-4. wait + require (at-fire, via .require())
-5. delay + require
-6. Channel (ordered FIFO pairing)
-7. loop until (do-while burst)
-8. loop while (while semantics)
-9. loop + stall detection
-10. repeat static n
-11. repeat dynamic n
-12. capture dynamic signal
-13. timeout
-14. branch
-15. capture mode='list'
-16. same-cycle wait
-17. capture modes (first / list)
-"""
+"""Core Pattern runtime semantics shared by declarative and programmable APIs."""
 
 from collections import defaultdict
 
 import numpy as np
 import pytest
+from helpers import bool_wf as _bool_wf
+from helpers import wf as _wf
 
 from wavekit import Channel, Signal, Waveform
 from wavekit.pattern import MatchStatus, Pattern, PatternError
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _wf(values, width=1, signed=False):
-    """Build a test Waveform from a list of values."""
-    value = np.array(values)
-    clock = np.arange(len(value))
-    time = clock * 10
-    return Waveform(value, clock, time, signal=Signal('', '', width, None, signed))
-
-
-def _bool_wf(values):
-    """Build a 1-bit unsigned Waveform (boolean-like)."""
-    return _wf(values, width=1, signed=False)
-
-
-# ---------------------------------------------------------------------------
-# 1. Single wait — find all trigger positions
-# ---------------------------------------------------------------------------
-
-
-class TestSingleWait:
-    def test_basic_trigger(self):
-        sig = _bool_wf([0, 1, 0, 1, 1, 0])
-        result = Pattern().wait(sig).match()
-        assert len(result) == 3
-        np.testing.assert_array_equal(result.start.value, [1, 3, 4])
-        np.testing.assert_array_equal(result.status.value, [0, 0, 0])  # all OK
-
-    def test_no_matches(self):
-        sig = _bool_wf([0, 0, 0])
-        result = Pattern().wait(sig).match()
-        assert len(result) == 0
-
-    def test_all_ones(self):
-        sig = _bool_wf([1, 1, 1])
-        result = Pattern().wait(sig).match()
-        assert len(result) == 3
-
-
-# ---------------------------------------------------------------------------
-# 2. wait + capture — handshake extraction
-# ---------------------------------------------------------------------------
-
-
-class TestWaitCapture:
-    def test_capture_value(self):
-        valid = _bool_wf([0, 1, 0, 1, 0])
-        data = _wf([10, 20, 30, 40, 50], width=8)
-        result = Pattern().wait(valid).capture('data', data).match()
-        assert len(result) == 2
-        np.testing.assert_array_equal(result.captures['data'].value, [20, 40])
-
-    def test_two_phase_handshake(self):
-        req = _bool_wf([0, 1, 0, 0, 0, 1, 0, 0])
-        ack = _bool_wf([0, 0, 0, 1, 0, 0, 1, 0])
-        data = _wf([0, 0, 0, 99, 0, 0, 77, 0], width=8)
-        result = Pattern().wait(req).wait(ack).capture('data', data).match()
-        assert len(result) == 2
-        np.testing.assert_array_equal(result.captures['data'].value, [99, 77])
-        np.testing.assert_array_equal(result.start.value, [1, 5])
-        np.testing.assert_array_equal(result.end.value, [3, 6])
-
-
-# ---------------------------------------------------------------------------
-# 3. wait + require (throughout, via wait require=)
 # ---------------------------------------------------------------------------
 
 
@@ -108,11 +22,11 @@ class TestWaitRequire:
         result = Pattern().wait(valid).wait(ready, require=valid).match()
         # Triggers at cycle 1,2,3 (valid=1). Inst@1: require OK, ready@3 → OK.
         # Inst@2: require OK, ready@3 → OK. Inst@3: ready@3 immediately → OK.
-        valid_results = result.filter_ok()
-        assert len(valid_results) >= 1
+        ok = result.filter_ok()
+        assert len(ok) >= 1
         # The first instance (trigger@1) completes at cycle 3
-        assert valid_results.start.value[0] == 1
-        assert valid_results.end.value[0] == 3
+        assert ok.start.value[0] == 1
+        assert ok.end.value[0] == 3
 
     def test_require_violated(self):
         """valid drops before ready → REQUIRE_VIOLATED."""
@@ -122,11 +36,6 @@ class TestWaitRequire:
         # Instance forked at cycle 1, require fails at cycle 2 (valid=0)
         assert len(result) == 1
         assert result.status.value[0] == MatchStatus.REQUIRE_VIOLATED
-
-
-# ---------------------------------------------------------------------------
-# 4. wait + require (at-fire)
-# ---------------------------------------------------------------------------
 
 
 class TestRequire:
@@ -143,11 +52,6 @@ class TestRequire:
         result = Pattern().wait(trigger).require(check).match()
         assert len(result) == 1
         assert result.status.value[0] == MatchStatus.REQUIRE_VIOLATED
-
-
-# ---------------------------------------------------------------------------
-# 5. delay + require
-# ---------------------------------------------------------------------------
 
 
 class TestDelay:
@@ -182,10 +86,15 @@ class TestDelay:
         # n=3 captured at cycle 0, delay 3 → capture at cycle 3
         assert result.captures['val'].value[0] == 30
 
+    def test_delay_zero_does_not_check_require(self):
+        trigger = _bool_wf([1, 0])
+        guard = _bool_wf([0, 0])
 
-# ---------------------------------------------------------------------------
-# 6. consume + Channel (ordered FIFO pairing)
-# ---------------------------------------------------------------------------
+        result = Pattern().wait(trigger).delay(0, require=guard).match().filter_ok()
+
+        assert len(result) == 1
+        assert result.start.value[0] == 0
+        assert result.end.value[0] == 0
 
 
 class TestConsumeWithChannel:
@@ -206,10 +115,10 @@ class TestConsumeWithChannel:
             .capture('rsp', rsp_data)
             .match()
         )
-        valid = result.filter_ok()
-        assert len(valid) == 3
-        np.testing.assert_array_equal(valid.captures['req'].value, [10, 20, 30])
-        np.testing.assert_array_equal(valid.captures['rsp'].value, [55, 66, 77])
+        ok = result.filter_ok()
+        assert len(ok) == 3
+        np.testing.assert_array_equal(ok.captures['req'].value, [10, 20, 30])
+        np.testing.assert_array_equal(ok.captures['rsp'].value, [55, 66, 77])
 
     def test_multiple_channels(self):
         """Different Channels within the SAME Pattern via branching.
@@ -243,19 +152,19 @@ class TestConsumeWithChannel:
             )
             .match()
         )
-        valid = result.filter_ok()
-        assert len(valid) == 4
+        ok = result.filter_ok()
+        assert len(ok) == 4
 
         # Check FIFO per channel:
         # rd channel: req_data [10, 30] → rsp_data [111, 333]
         # wr channel: req_data [20, 40] → rsp_data [222, 444]
-        rd_matches = [i for i in range(len(valid)) if valid.captures['req_type'].value[i] == 0]
-        wr_matches = [i for i in range(len(valid)) if valid.captures['req_type'].value[i] == 1]
+        rd_matches = [i for i in range(len(ok)) if ok.captures['req_type'].value[i] == 0]
+        wr_matches = [i for i in range(len(ok)) if ok.captures['req_type'].value[i] == 1]
 
-        rd_req = [valid.captures['req_data'].value[i] for i in rd_matches]
-        rd_rsp_val = [valid.captures['rsp_data'].value[i] for i in rd_matches]
-        wr_req = [valid.captures['req_data'].value[i] for i in wr_matches]
-        wr_rsp_val = [valid.captures['rsp_data'].value[i] for i in wr_matches]
+        rd_req = [ok.captures['req_data'].value[i] for i in rd_matches]
+        rd_rsp_val = [ok.captures['rsp_data'].value[i] for i in rd_matches]
+        wr_req = [ok.captures['req_data'].value[i] for i in wr_matches]
+        wr_rsp_val = [ok.captures['rsp_data'].value[i] for i in wr_matches]
 
         assert rd_req == [10, 30], f'rd channel FIFO: {rd_req}'
         assert rd_rsp_val == [111, 333], f'rd rsp FIFO: {rd_rsp_val}'
@@ -304,27 +213,27 @@ class TestConsumeWithChannel:
             .capture('rsp_data', rsp_data)
             .match()
         )
-        valid = result.filter_ok()
-        assert len(valid) == 4
+        ok = result.filter_ok()
+        assert len(ok) == 4
 
         # Verify FIFO order per ID:
         # ID 0 channel: req_data [10, 30] matched with rsp_data [222, 444] (responses at 7, 10)
         # ID 1 channel: req_data [20, 40] matched with rsp_data [111, 333] (responses at 5, 9)
-        id_0_matches = [i for i in range(len(valid)) if valid.captures['req_id'].value[i] == 0]
-        id_1_matches = [i for i in range(len(valid)) if valid.captures['req_id'].value[i] == 1]
+        id_0_matches = [i for i in range(len(ok)) if ok.captures['req_id'].value[i] == 0]
+        id_1_matches = [i for i in range(len(ok)) if ok.captures['req_id'].value[i] == 1]
 
         assert len(id_0_matches) == 2
         assert len(id_1_matches) == 2
 
         # Check ID 0: FIFO order should be [10, 30] → [222, 444]
-        id_0_req_data = [valid.captures['req_data'].value[i] for i in id_0_matches]
-        id_0_rsp_data = [valid.captures['rsp_data'].value[i] for i in id_0_matches]
+        id_0_req_data = [ok.captures['req_data'].value[i] for i in id_0_matches]
+        id_0_rsp_data = [ok.captures['rsp_data'].value[i] for i in id_0_matches]
         assert id_0_req_data == [10, 30], f'ID 0 req_data should be FIFO: {id_0_req_data}'
         assert id_0_rsp_data == [222, 444], f'ID 0 rsp_data should be FIFO: {id_0_rsp_data}'
 
         # Check ID 1: FIFO order should be [20, 40] → [111, 333]
-        id_1_req_data = [valid.captures['req_data'].value[i] for i in id_1_matches]
-        id_1_rsp_data = [valid.captures['rsp_data'].value[i] for i in id_1_matches]
+        id_1_req_data = [ok.captures['req_data'].value[i] for i in id_1_matches]
+        id_1_rsp_data = [ok.captures['rsp_data'].value[i] for i in id_1_matches]
         assert id_1_req_data == [20, 40], f'ID 1 req_data should be FIFO: {id_1_req_data}'
         assert id_1_rsp_data == [111, 333], f'ID 1 rsp_data should be FIFO: {id_1_rsp_data}'
 
@@ -368,13 +277,13 @@ class TestConsumeWithChannel:
             .capture('rsp_data', rsp_data)
             .match()
         )
-        valid = result.filter_ok()
-        assert len(valid) == 2
+        ok = result.filter_ok()
+        assert len(ok) == 2
 
         # Check that request ID matches response ID (routing worked)
-        for i in range(len(valid)):
-            req_id_val = valid.captures['req_id'].value[i]
-            rsp_id_val = valid.captures['rsp_id'].value[i]
+        for i in range(len(ok)):
+            req_id_val = ok.captures['req_id'].value[i]
+            rsp_id_val = ok.captures['rsp_id'].value[i]
             assert req_id_val == rsp_id_val, f'ID mismatch: req={req_id_val}, rsp={rsp_id_val}'
 
     def test_falsy_hashable_channel_key(self):
@@ -421,11 +330,11 @@ class TestConsumeWithChannel:
             .capture('rsp_data', rsp_data)
             .match()
         )
-        valid = result.filter_ok()
-        assert len(valid) == 2
+        ok = result.filter_ok()
+        assert len(ok) == 2
         # FIFO order preserved within same channel
-        np.testing.assert_array_equal(valid.captures['req_data'].value, [10, 11])
-        np.testing.assert_array_equal(valid.captures['rsp_data'].value, [111, 222])
+        np.testing.assert_array_equal(ok.captures['req_data'].value, [10, 11])
+        np.testing.assert_array_equal(ok.captures['rsp_data'].value, [111, 222])
 
     def test_consume_as_first_step(self):
         """consume as first step: no trigger optimization,
@@ -441,10 +350,10 @@ class TestConsumeWithChannel:
 
         rsp_chan = Channel()
         result = Pattern().consume(rsp, channel=rsp_chan).capture('rsp_data', rsp_data).match()
-        valid = result.filter_ok()
-        # Only 2 valid matches (at cycles where rsp=1 and channel is consumed)
-        assert len(valid) == 2
-        np.testing.assert_array_equal(valid.captures['rsp_data'].value, [111, 222])
+        ok = result.filter_ok()
+        # Only 2 OK matches (at cycles where rsp=1 and channel is consumed)
+        assert len(ok) == 2
+        np.testing.assert_array_equal(ok.captures['rsp_data'].value, [111, 222])
 
     def test_require_with_channel(self):
         """require violation while consuming with channel → REQUIRE_VIOLATED."""
@@ -464,6 +373,17 @@ class TestConsumeWithChannel:
         # Both instances should fail: require drops before rsp arrives
         assert len(result) == 2
         assert all(s == MatchStatus.REQUIRE_VIOLATED for s in result.status.value)
+
+    def test_require_with_channel_not_checked_on_success_cycle(self):
+        req = _bool_wf([1, 0, 0])
+        rsp = _bool_wf([0, 1, 0])
+        guard = _bool_wf([1, 0, 0])
+
+        result = Pattern().wait(req).consume(rsp, channel='rsp', require=guard).match().filter_ok()
+
+        assert len(result) == 1
+        assert result.start.value[0] == 0
+        assert result.end.value[0] == 1
 
     def test_timeout_with_channel(self):
         """Instance consuming with channel times out → next instance can consume."""
@@ -488,9 +408,9 @@ class TestConsumeWithChannel:
         statuses = sorted(result.status.value)
         assert MatchStatus.TIMEOUT in statuses
         assert MatchStatus.OK in statuses
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        assert valid.captures['rsp_data'].value[0] == 99
+        ok = result.filter_ok()
+        assert len(ok) == 1
+        assert ok.captures['rsp_data'].value[0] == 99
 
     def test_different_channels_same_cycle(self):
         """Multiple consume steps with different Channels on the same cycle
@@ -516,208 +436,13 @@ class TestConsumeWithChannel:
             )
             .match()
         )
-        valid = result.filter_ok()
-        assert len(valid) == 2
+        ok = result.filter_ok()
+        assert len(ok) == 2
         # Both instances can consume on the same cycle (different channels)
-        rd_idx = [i for i in range(len(valid)) if valid.captures['req_data'].value[i] == 10]
-        wr_idx = [i for i in range(len(valid)) if valid.captures['req_data'].value[i] == 20]
-        assert valid.captures['rsp_data'].value[rd_idx[0]] == 111
-        assert valid.captures['rsp_data'].value[wr_idx[0]] == 222
-
-
-# ---------------------------------------------------------------------------
-# 7. loop until (do-while burst)
-# ---------------------------------------------------------------------------
-
-
-class TestLoopUntil:
-    def test_simple_burst(self):
-        """Collect data beats until last=1."""
-        start = _bool_wf([1, 0, 0, 0, 0, 0])
-        beat = _bool_wf([0, 1, 0, 1, 0, 1])
-        last = _bool_wf([0, 0, 0, 0, 0, 1])
-        data = _wf([0, 10, 0, 20, 0, 30], width=8)
-        result = (
-            Pattern()
-            .wait(start)
-            .loop(
-                Pattern()
-                .wait(beat)
-                .capture('d', data, mode='list')
-                .branch(last == 0, true_body=Pattern().delay(1)),
-                until=last,
-            )
-            .match()
-        )
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        assert list(valid.captures['d'].value[0]) == [10, 20, 30]
-
-    def test_single_beat(self):
-        """Burst with one beat (last=1 on first beat)."""
-        start = _bool_wf([1, 0, 0])
-        beat = _bool_wf([0, 1, 0])
-        last = _bool_wf([0, 1, 0])
-        data = _wf([0, 99, 0], width=8)
-        result = (
-            Pattern()
-            .wait(start)
-            .loop(
-                Pattern().wait(beat).capture('d', data, mode='list'),
-                until=last,
-            )
-            .match()
-        )
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        assert list(valid.captures['d'].value[0]) == [99]
-
-
-# ---------------------------------------------------------------------------
-# 8. loop while (pre-condition check)
-# ---------------------------------------------------------------------------
-
-
-class TestLoopWhile:
-    def test_capture_while_high(self):
-        """Capture data each cycle while enable is high."""
-        # Use a single trigger point, then loop while high
-        trigger = _bool_wf([0, 1, 0, 0, 0, 0])
-        enable = _bool_wf([0, 1, 1, 1, 0, 0])
-        data = _wf([0, 10, 20, 30, 40, 50], width=8)
-        result = (
-            Pattern()
-            .wait(trigger)
-            .loop(
-                Pattern().capture('d', data, mode='list').delay(1),
-                when=enable,
-            )
-            .match()
-        )
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        assert list(valid.captures['d'].value[0]) == [10, 20, 30]
-
-    def test_while_false_immediately(self):
-        """When condition is False at entry, loop is skipped (0 iterations)."""
-        trigger = _bool_wf([1, 0, 0])
-        cond = _bool_wf([0, 0, 0])
-        data = _wf([10, 20, 30], width=8)
-        result = (
-            Pattern()
-            .wait(trigger)
-            .loop(
-                Pattern().delay(1).capture('d', data, mode='list'),
-                when=cond,
-            )
-            .capture('after', data)
-            .match()
-        )
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        # Loop skipped, capture happens at trigger cycle
-        assert valid.captures['after'].value[0] == 10
-        # No loop captures
-        assert 'd' not in valid.captures or list(valid.captures['d'].value[0]) == []
-
-
-# ---------------------------------------------------------------------------
-# 9. loop + stall detection
-# ---------------------------------------------------------------------------
-
-
-class TestStallDetection:
-    def test_stall_interval(self):
-        """Find stall intervals using loop-until."""
-        #                      0  1  2  3  4  5  6  7  8  9
-        stall = _bool_wf([0, 1, 1, 1, 1, 0, 0, 1, 1, 0])
-        trigger = stall.rising_edge()  # rising edge at cycles 1 and 7
-        result = Pattern().wait(trigger).loop(Pattern().delay(1), until=stall == 0).match()
-        valid = result.filter_ok()
-        assert len(valid) == 2
-        np.testing.assert_array_equal(valid.start.value, [1, 7])
-        np.testing.assert_array_equal(valid.end.value, [5, 9])
-        np.testing.assert_array_equal(valid.duration.value, [5, 3])
-
-
-# ---------------------------------------------------------------------------
-# 10. repeat static n
-# ---------------------------------------------------------------------------
-
-
-class TestRepeat:
-    def test_repeat_static(self):
-        trigger = _bool_wf([1, 0, 0, 0, 0, 0])
-        beat = _bool_wf([0, 1, 1, 1, 0, 0])
-        data = _wf([0, 10, 20, 30, 0, 0], width=8)
-        result = (
-            Pattern()
-            .wait(trigger)
-            .repeat(
-                Pattern().wait(beat).capture('d', data, mode='list').delay(1),
-                n=3,
-            )
-            .match()
-        )
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        assert list(valid.captures['d'].value[0]) == [10, 20, 30]
-
-
-# ---------------------------------------------------------------------------
-# 11. repeat dynamic n
-# ---------------------------------------------------------------------------
-
-
-class TestRepeatDynamic:
-    def test_dynamic_n_from_capture(self):
-        trigger = _bool_wf([1, 0, 0, 0, 0])
-        len_sig = _wf([2, 0, 0, 0, 0], width=4)
-        beat = _bool_wf([0, 1, 1, 0, 0])
-        data = _wf([0, 10, 20, 0, 0], width=8)
-        result = (
-            Pattern()
-            .wait(trigger)
-            .capture('len', len_sig)
-            .repeat(
-                Pattern().wait(beat).capture('d', data, mode='list').delay(1),
-                n=lambda idx, cap: cap['len'],
-            )
-            .match()
-        )
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        assert list(valid.captures['d'].value[0]) == [10, 20]
-
-
-# ---------------------------------------------------------------------------
-# 12. capture dynamic signal
-# ---------------------------------------------------------------------------
-
-
-class TestCaptureDynamic:
-    def test_capture_lambda(self):
-        trigger = _bool_wf([0, 1, 0])
-        sig_a = _wf([0, 100, 0], width=8)
-        sig_b = _wf([0, 200, 0], width=8)
-        mode = _wf([0, 1, 0], width=1)
-        result = (
-            Pattern()
-            .wait(trigger)
-            .capture('mode', mode)
-            .capture(
-                'val', lambda idx, cap: sig_a.value[idx] if cap['mode'] == 0 else sig_b.value[idx]
-            )
-            .match()
-        )
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        assert valid.captures['val'].value[0] == 200  # mode=1 → sig_b
-
-
-# ---------------------------------------------------------------------------
-# 13. timeout
-# ---------------------------------------------------------------------------
+        rd_idx = [i for i in range(len(ok)) if ok.captures['req_data'].value[i] == 10]
+        wr_idx = [i for i in range(len(ok)) if ok.captures['req_data'].value[i] == 20]
+        assert ok.captures['rsp_data'].value[rd_idx[0]] == 111
+        assert ok.captures['rsp_data'].value[wr_idx[0]] == 222
 
 
 class TestTimeout:
@@ -734,9 +459,9 @@ class TestTimeout:
         data = _wf([42, 0, 0], width=8)
         # Pattern with only epsilon after trigger → completes in 1 cycle
         result = Pattern().wait(trigger).capture('val', data).timeout(1).match()
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        assert valid.captures['val'].value[0] == 42
+        ok = result.filter_ok()
+        assert len(ok) == 1
+        assert ok.captures['val'].value[0] == 42
 
     def test_timeout_2_needs_blocking(self):
         """timeout=2: has 1 cycle after fork to complete a blocking step."""
@@ -744,177 +469,9 @@ class TestTimeout:
         cond = _bool_wf([0, 1, 0, 0])
         data = _wf([0, 99, 0, 0], width=8)
         result = Pattern().wait(trigger).wait(cond).capture('val', data).timeout(2).match()
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        assert valid.captures['val'].value[0] == 99
-
-
-# ---------------------------------------------------------------------------
-# 14. branch
-# ---------------------------------------------------------------------------
-
-
-class TestBranch:
-    def test_branch_true(self):
-        trigger = _bool_wf([0, 1, 0])
-        cond = _bool_wf([0, 1, 0])
-        data_a = _wf([0, 10, 0], width=8)
-        data_b = _wf([0, 20, 0], width=8)
-        result = (
-            Pattern()
-            .wait(trigger)
-            .branch(
-                cond,
-                true_body=Pattern().capture('val', data_a),
-                false_body=Pattern().capture('val', data_b),
-            )
-            .match()
-        )
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        assert valid.captures['val'].value[0] == 10
-
-    def test_branch_false(self):
-        trigger = _bool_wf([0, 1, 0])
-        cond = _bool_wf([0, 0, 0])
-        data_a = _wf([0, 10, 0], width=8)
-        data_b = _wf([0, 20, 0], width=8)
-        result = (
-            Pattern()
-            .wait(trigger)
-            .branch(
-                cond,
-                true_body=Pattern().capture('val', data_a),
-                false_body=Pattern().capture('val', data_b),
-            )
-            .match()
-        )
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        assert valid.captures['val'].value[0] == 20
-
-    def test_branch_none_body(self):
-        """Branch with no false_body → skip."""
-        trigger = _bool_wf([0, 1, 0])
-        cond = _bool_wf([0, 0, 0])
-        data = _wf([0, 42, 0], width=8)
-        result = (
-            Pattern()
-            .wait(trigger)
-            .branch(cond, true_body=Pattern().capture('optional', data))
-            .capture('always', data)
-            .match()
-        )
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        assert valid.captures['always'].value[0] == 42
-        assert 'optional' not in valid.captures
-
-
-# ---------------------------------------------------------------------------
-# 15. capture mode='list' (append)
-# ---------------------------------------------------------------------------
-
-
-class TestCaptureList:
-    def test_list_capture_in_repeat(self):
-        trigger = _bool_wf([1, 0, 0, 0, 0])
-        beat = _bool_wf([0, 1, 1, 1, 0])
-        data = _wf([0, 10, 20, 30, 0], width=8)
-        result = (
-            Pattern()
-            .wait(trigger)
-            .repeat(Pattern().wait(beat).capture('d', data, mode='list').delay(1), n=3)
-            .match()
-        )
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        assert list(valid.captures['d'].value[0]) == [10, 20, 30]
-
-
-# ---------------------------------------------------------------------------
-# MatchResult helpers
-# ---------------------------------------------------------------------------
-
-
-class TestMatchResult:
-    def test_filter_ok(self):
-        trigger = _bool_wf([1, 0, 0, 0, 0])  # noqa: F841
-        never = _bool_wf([0, 0, 0, 0, 0])  # noqa: F841
-        sometimes = _bool_wf([0, 0, 1, 0, 0])
-        data = _wf([0, 0, 42, 0, 0], width=8)
-        # Two triggers at same cycle? No — use two separate triggers.
-        # Instead, test with one OK and one TIMEOUT
-        trig2 = _bool_wf([1, 0, 1, 0, 0])
-        result = Pattern().wait(trig2).wait(sometimes).capture('val', data).timeout(3).match()
-        # Instance 1: trigger at 0, wait for sometimes, finds at 2 → OK
-        # Instance 2: trigger at 2, sometimes is True right now → observed by trigger,
-        #   but then wait(sometimes) is the SECOND wait... let me reconsider.
-        # Actually first wait is trig2, second wait is sometimes.
-        # Instance 1: fork at 0, wait sometimes → cycle 2 → OK, capture val=42
-        # Instance 2: fork at 2, wait sometimes → needs next True... cycle 2 already past
-        #   for this instance, it starts at step_idx=1 (skip first wait), wait sometimes
-        #   at cycle 3,4 → never True → TIMEOUT
-        assert len(result) >= 1
-        valid = result.filter_ok()
-        assert all(s == MatchStatus.OK for s in valid.status.value)
-
-    def test_ok_replaces_valid_aliases(self):
-        trigger = _bool_wf([1, 0])
-        result = Pattern().wait(trigger).match()
-
-        np.testing.assert_array_equal(result.ok.value, [True])
-        assert not hasattr(result, 'valid')
-        assert not hasattr(result, 'filter_valid')
-
-    def test_repr(self):
-        trigger = _bool_wf([1, 0])
-        result = Pattern().wait(trigger).match()
-        assert 'MatchResult' in repr(result)
-
-    def test_len(self):
-        trigger = _bool_wf([1, 1, 1])
-        result = Pattern().wait(trigger).match()
-        assert len(result) == 3
-
-
-# ---------------------------------------------------------------------------
-# 16. Pure epsilon (no wait → every-cycle fork)
-# ---------------------------------------------------------------------------
-
-
-class TestEveryCycleFork:
-    def test_capture_delay_capture(self):
-        """Pattern without wait → fork every cycle, delay creates pairing."""
-        a = _wf([10, 20, 30, 40, 50], width=8)
-        b = _wf([100, 200, 300, 400, 500], width=8)
-        result = Pattern().capture('a', a).delay(2).capture('b', b).match()
-        # Forks at cycles 0,1,2,3,4. Only 0,1,2 complete (need 2 more cycles).
-        # Cycles 3,4 are incomplete → TIMEOUT.
-        assert len(result) == 5
-        valid = result.filter_ok()
-        assert len(valid) == 3
-        np.testing.assert_array_equal(valid.captures['a'].value, [10, 20, 30])
-        np.testing.assert_array_equal(valid.captures['b'].value, [300, 400, 500])
-
-    def test_pure_capture(self):
-        """Pure epsilon pattern → every cycle completes immediately."""
-        sig = _wf([1, 2, 3], width=8)
-        result = Pattern().capture('v', sig).match()
-        assert len(result) == 3
-        np.testing.assert_array_equal(result.captures['v'].value, [1, 2, 3])
-
-    def test_with_start_end_cycle(self):
-        """start_cycle/end_cycle limits fork range."""
-        sig = _wf([10, 20, 30, 40, 50], width=8)
-        result = Pattern().capture('v', sig).match(start_cycle=1, end_cycle=4)
-        assert len(result) == 3
-        np.testing.assert_array_equal(result.captures['v'].value, [20, 30, 40])
-
-
-# ---------------------------------------------------------------------------
-# Error cases
-# ---------------------------------------------------------------------------
+        ok = result.filter_ok()
+        assert len(ok) == 1
+        assert ok.captures['val'].value[0] == 99
 
 
 class TestErrors:
@@ -971,10 +528,49 @@ class TestErrors:
         with pytest.raises(ValueError):
             Pattern().loop(Pattern().delay(1), until=cond, when=cond)
 
+    def test_dynamic_wait_condition_exception_propagates(self):
+        class CustomConditionError(Exception):
+            pass
 
-# ---------------------------------------------------------------------------
-# 17. same-cycle wait
-# ---------------------------------------------------------------------------
+        axis = _bool_wf([1])
+
+        def bad_condition(_idx, _cap):
+            raise CustomConditionError('condition boom')
+
+        with pytest.raises(CustomConditionError, match='condition boom'):
+            Pattern().wait(axis).wait(bad_condition).match()
+
+    def test_dynamic_consume_condition_exception_propagates(self):
+        class CustomConditionError(Exception):
+            pass
+
+        axis = _bool_wf([1])
+
+        def bad_condition(_idx, _cap):
+            raise CustomConditionError('consume condition boom')
+
+        with pytest.raises(CustomConditionError, match='consume condition boom'):
+            Pattern().wait(axis).consume(bad_condition, channel='rsp').match()
+
+    def test_dynamic_consume_channel_exception_propagates(self):
+        class CustomChannelError(Exception):
+            pass
+
+        req = _bool_wf([1])
+        rsp = _bool_wf([1])
+
+        def bad_channel(_idx, _cap):
+            raise CustomChannelError('channel boom')
+
+        with pytest.raises(CustomChannelError, match='channel boom'):
+            Pattern().wait(req).consume(rsp, channel=bad_channel).match()
+
+    def test_dynamic_consume_channel_invalid_unhashable_raises_pattern_error(self):
+        req = _bool_wf([1])
+        rsp = _bool_wf([1])
+
+        with pytest.raises(PatternError, match='channel must be a Channel or hashable key'):
+            Pattern().wait(req).consume(rsp, channel=lambda _idx, _cap: []).match()
 
 
 class TestZeroCycleWait:
@@ -985,13 +581,13 @@ class TestZeroCycleWait:
         ready = _bool_wf([0, 0, 1, 1, 0])
         # valid & ready first true at cycle 2; trigger forks every valid cycle.
         result = Pattern().wait(valid).wait(valid & ready).match()
-        valid_results = result.filter_ok()
+        ok = result.filter_ok()
         # Instance@1: wait advances to cycle 2 (valid&ready) and stays at t=2,
         #   completes at cycle 2 → duration = 2 - 1 + 1 = 2
         # Instance@1 advances at cycle 2; instance@2 also observes the same true
         # condition and completes in the same cycle because wait is non-consuming.
-        np.testing.assert_array_equal(valid_results.start.value[:2], [1, 2])
-        np.testing.assert_array_equal(valid_results.end.value[:2], [2, 2])
+        np.testing.assert_array_equal(ok.start.value[:2], [1, 2])
+        np.testing.assert_array_equal(ok.end.value[:2], [2, 2])
 
     def test_zero_cycle_blocked_continues(self):
         """Same-cycle wait with cond False on current cycle waits until a later cycle."""
@@ -999,13 +595,13 @@ class TestZeroCycleWait:
         trigger = _bool_wf([1, 0, 0, 0])
         cond = _bool_wf([0, 0, 1, 0])  # only true at cycle 2
         result = Pattern().wait(trigger).wait(cond).match()
-        valid_results = result.filter_ok()
+        ok = result.filter_ok()
         # Instance@0: first wait observed by trigger → step_idx=1 at t=0,
         # second wait: cond False at 0,1 → next cycle.
         # cond True at 2 → match without consuming a cycle → end_cycle=2.
-        assert len(valid_results) == 1
-        assert valid_results.start.value[0] == 0
-        assert valid_results.end.value[0] == 2
+        assert len(ok) == 1
+        assert ok.start.value[0] == 0
+        assert ok.end.value[0] == 2
 
     def test_zero_cycle_chained(self):
         """Multiple waits in a row can collapse to the same cycle."""
@@ -1014,21 +610,21 @@ class TestZeroCycleWait:
         b = _bool_wf([0, 1, 0])
         c = _bool_wf([0, 1, 0])
         result = Pattern().wait(a).wait(b).wait(c).match()
-        valid_results = result.filter_ok()
-        assert len(valid_results) == 1
+        ok = result.filter_ok()
+        assert len(ok) == 1
         # All three fire on cycle 1
-        assert valid_results.start.value[0] == 1
-        assert valid_results.end.value[0] == 1
+        assert ok.start.value[0] == 1
+        assert ok.end.value[0] == 1
 
     def test_zero_cycle_at_first_step(self):
         """First wait trigger optimization still completes captures on the same cycle."""
         sig = _bool_wf([0, 1, 0, 1, 0])
         data = _wf([0, 11, 0, 33, 0], width=8)
         result = Pattern().wait(sig).capture('d', data).match()
-        valid_results = result.filter_ok()
+        ok = result.filter_ok()
         # Two triggers; epsilon capture completes same cycle.
-        assert len(valid_results) == 2
-        np.testing.assert_array_equal(valid_results.captures['d'].value, [11, 33])
+        assert len(ok) == 2
+        np.testing.assert_array_equal(ok.captures['d'].value, [11, 33])
 
     def test_default_waits_continue_same_cycle(self):
         """Default wait semantics are same-cycle."""
@@ -1077,80 +673,13 @@ class TestZeroCycleWait:
         with pytest.raises(PatternError, match='repeat count'):
             Pattern().wait(trigger).repeat(Pattern().delay(0), n=lambda _i, _c: -1).match()
 
+    def test_first_wait_trigger_respects_start_end_cycle_bounds(self):
+        trigger = _bool_wf([1, 1, 1, 1])
 
-# ---------------------------------------------------------------------------
-# 18. capture modes (first / list / last)
-# ---------------------------------------------------------------------------
+        result = Pattern().wait(trigger).match(start_cycle=1, end_cycle=3)
 
-
-class TestCaptureModes:
-    def test_mode_first_in_loop(self):
-        """mode='first' keeps only the first write inside a loop body."""
-        trigger = _bool_wf([1, 0, 0, 0, 0])
-        beat = _bool_wf([0, 1, 1, 1, 0])
-        last = _bool_wf([0, 0, 0, 0, 1])
-        data = _wf([0, 10, 20, 30, 0], width=8)
-        result = (
-            Pattern()
-            .wait(trigger)
-            .loop(
-                Pattern()
-                .wait(beat)
-                .capture('first_d', data, mode='first')
-                .branch(last == 0, true_body=Pattern().delay(1)),
-                until=last,
-            )
-            .match()
-        )
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        assert valid.captures['first_d'].value[0] == 10
-
-    def test_mode_last_default(self):
-        """mode='last' (default) overwrites — last write wins."""
-        trigger = _bool_wf([1, 0, 0, 0, 0])
-        beat = _bool_wf([0, 1, 1, 1, 0])
-        last = _bool_wf([0, 0, 0, 1, 0])
-        data = _wf([0, 10, 20, 30, 0], width=8)
-        result = (
-            Pattern()
-            .wait(trigger)
-            .loop(
-                Pattern()
-                .wait(beat)
-                .capture('last_d', data)
-                .branch(last == 0, true_body=Pattern().delay(1)),
-                until=last,
-            )
-            .match()
-        )
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        assert valid.captures['last_d'].value[0] == 20
-
-    def test_mode_list_explicit(self):
-        """mode='list' captures each write into a list."""
-        trigger = _bool_wf([1, 0, 0, 0, 0])
-        beat = _bool_wf([0, 1, 1, 1, 0])
-        data = _wf([0, 10, 20, 30, 0], width=8)
-        result = (
-            Pattern()
-            .wait(trigger)
-            .repeat(Pattern().wait(beat).capture('d', data, mode='list').delay(1), n=3)
-            .match()
-        )
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        assert list(valid.captures['d'].value[0]) == [10, 20, 30]
-
-    def test_mode_invalid_raises(self):
-        with pytest.raises(ValueError, match='mode'):
-            Pattern().capture('x', _wf([1]), mode='whatever')
-
-
-# ---------------------------------------------------------------------------
-# 19. Channel state reset between match() calls
-# ---------------------------------------------------------------------------
+        np.testing.assert_array_equal(result.start.value, [1, 2])
+        np.testing.assert_array_equal(result.end.value, [1, 2])
 
 
 class TestChannelReset:
@@ -1162,7 +691,7 @@ class TestChannelReset:
         p = Pattern().wait(req).consume(rsp, channel=rsp_chan)
         r1 = p.match()
         r2 = p.match()
-        # Both runs must produce the same valid result.
+        # Both runs must produce the same OK result.
         v1 = r1.filter_ok()
         v2 = r2.filter_ok()
         assert len(v1) == 1
@@ -1197,10 +726,10 @@ class TestChannelReset:
         # Each trigger forks an instance; the second wait observes rsp@3 without
         # consuming it, so all in-flight instances complete at cycle 3.
         result = Pattern().wait(req).wait(rsp).match()
-        valid = result.filter_ok()
-        assert len(valid) == 3
-        np.testing.assert_array_equal(valid.start.value, [0, 1, 2])
-        np.testing.assert_array_equal(valid.end.value, [3, 3, 3])
+        ok = result.filter_ok()
+        assert len(ok) == 3
+        np.testing.assert_array_equal(ok.start.value, [0, 1, 2])
+        np.testing.assert_array_equal(ok.end.value, [3, 3, 3])
 
     def test_consume_serializes_instances_fifo(self):
         """Explicit consume preserves one-owner FIFO event matching."""
@@ -1208,15 +737,10 @@ class TestChannelReset:
         rsp = _bool_wf([0, 0, 0, 1, 0, 0])
 
         result = Pattern().wait(req).consume(rsp, channel='rsp').match()
-        valid = result.filter_ok()
-        assert len(valid) == 1
-        assert valid.start.value[0] == 0
-        assert valid.end.value[0] == 3
-
-
-# ---------------------------------------------------------------------------
-# 20. Channel public API smoke
-# ---------------------------------------------------------------------------
+        ok = result.filter_ok()
+        assert len(ok) == 1
+        assert ok.start.value[0] == 0
+        assert ok.end.value[0] == 3
 
 
 class TestChannelAPI:
@@ -1249,3 +773,19 @@ class TestChannelAPI:
 
         assert len(result.filter_ok()) == 1
         assert calls == [(1, {})]
+
+
+# ---------------------------------------------------------------------------
+# Declarative compatibility/runtime smoke
+# ---------------------------------------------------------------------------
+
+
+def test_declarative_consume_and_timeout_deprecation():
+    req = _bool_wf([1, 1, 0, 0, 0])
+    rsp = _bool_wf([0, 0, 1, 0, 1])
+    data = _wf([10, 20, 111, 0, 222], width=8)
+    result = Pattern().wait(req).consume(rsp, channel='rsp').capture('rsp', data).match()
+    np.testing.assert_array_equal(result.filter_ok().captures['rsp'].value, [111, 222])
+
+    with pytest.warns(DeprecationWarning, match='timeout'):
+        Pattern().wait(req).timeout(3)
