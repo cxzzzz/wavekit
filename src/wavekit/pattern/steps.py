@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Literal, Protocol, Union, runtime_checkable
 
 from typing_extensions import TypeAlias
@@ -14,16 +14,13 @@ class HashableKey(Protocol):
 
 
 class Channel:
-    """Identity object for shared FIFO consumption across wait steps.
+    """Identity object for explicit FIFO consumption.
 
     A ``Channel`` represents a logical event stream from which at most one
-    pattern instance may consume per cycle.  Multiple wait steps that bind
-    to the same ``Channel`` instance form a single FIFO consumer group
-    (oldest in-flight instance wins).
-
-    By default each ``WaitStep`` owns a private ``_auto_channel`` so multiple
-    in-flight instances of the same pattern still serialize one-per-cycle on
-    that step, while distinct wait steps do not share consumption state.
+    pattern instance may consume per cycle.  Multiple consume steps that bind to
+    the same ``Channel`` instance form a single FIFO consumer group (oldest
+    in-flight instance wins).  Plain ``wait`` steps are observational and do not
+    consume channels.
 
     Internal state:
         ``(_consumed_epoch, _consumed_at)`` records *which runtime run* and
@@ -56,6 +53,7 @@ _VALID_CAPTURE_MODES = ('last', 'first', 'list')
 
 Step = Union[
     'WaitStep',
+    'ConsumeStep',
     'DelayStep',
     'CaptureStep',
     'RequireStep',
@@ -67,7 +65,7 @@ Step = Union[
 
 @dataclass
 class WaitStep:
-    """Blocking: advance when *cond* is True.
+    """Blocking: observe cycles until *cond* is True.
 
     Attributes
     ----------
@@ -76,17 +74,32 @@ class WaitStep:
     require:
         Optional condition that must hold every cycle while waiting;
         violation terminates the instance with ``REQUIRE_VIOLATED``.
-    channel:
-        Optional explicit ``Channel`` (or ``callable`` returning one) that
-        binds this wait step to a shared FIFO consumer group.  When
-        ``None``, the step's private ``_auto_channel`` is used.
     """
 
     cond: Condition
     require: Condition | None = None
-    channel: ChannelValue | None = None
-    # Per-step channel shared by all in-flight instances for FIFO consumption.
-    _auto_channel: Channel = field(default_factory=Channel, repr=False)
+
+
+@dataclass
+class ConsumeStep:
+    """Blocking: wait for *cond* and consume an explicit FIFO channel.
+
+    Attributes
+    ----------
+    cond:
+        Waveform or ``callable(index, captures) -> bool``.
+    channel:
+        Explicit ``Channel`` / hashable key (or ``callable`` returning one) for
+        FIFO consumption.
+    require:
+        Optional condition that must hold every cycle while waiting or blocked
+        by channel arbitration; violation terminates the instance with
+        ``REQUIRE_VIOLATED``.
+    """
+
+    cond: Condition
+    channel: ChannelValue
+    require: Condition | None = None
 
 
 @dataclass

@@ -136,7 +136,7 @@ result = (
     .match()
 )
 
-valid = result.filter_valid()
+valid = result.filter_ok()
 print(f"Read latencies (cycles): {valid.duration.value}")
 print(f"Read data: {valid.captures['rdata'].value}")
 ```
@@ -172,7 +172,7 @@ dynamic conditions.
 **AXI Write Burst (multi-beat)**
 
 ```python
-beat = Pattern().wait(wvalid & wready).capture("beats", wdata, mode="list")
+beat = Pattern().consume(wvalid & wready, channel="w").capture("beats", wdata, mode="list")
 
 result = (
     Pattern()
@@ -182,7 +182,7 @@ result = (
     .match()
 )
 
-for i, inst in enumerate(result.filter_valid()):
+for i, inst in enumerate(result.filter_ok()):
     print(f"Burst {i}: {len(inst.captures['beats'])} beats")
 ```
 
@@ -198,7 +198,7 @@ result = (
     .match()
 )
 
-stalls = result.filter_valid()
+stalls = result.filter_ok()
 print(f"Stall durations: {stalls.duration.value} cycles")
 ```
 
@@ -297,7 +297,8 @@ changed = wave != wave.back(3)
 
 | Method | Description |
 |--------|-------------|
-| `.wait(cond, *, require=None, channel=None, tick=True)` | Block until `cond` is True. `require` is checked each waiting cycle (failure → `REQUIRE_VIOLATED`). `channel` binds the wait to a shared FIFO consumer group (see [Channels](#channels) below). `tick=False` matches on the current cycle without consuming it. |
+| `.wait(cond, *, require=None)` | Block until `cond` is True without consuming the event. `require` is checked each waiting cycle (failure → `REQUIRE_VIOLATED`). |
+| `.consume(cond, channel, *, require=None)` | Block until `cond` is True and this instance can exclusively consume from `channel`. Use this for FIFO request/response pairing and per-key routing. |
 | `.delay(n, *, require=None)` | Advance `n` cycles. `delay(0)` is a no-op. `require` must hold every cycle. |
 | `.capture(name, signal, *, mode='last')` | Record signal value at current cycle. `mode='last'` (default) overwrites; `'first'` keeps the first write; `'list'` appends to a list. |
 | `.require(cond)` | Assert condition; fail with `REQUIRE_VIOLATED` if False. |
@@ -309,23 +310,22 @@ changed = wave != wave.back(3)
 
 **Channels**
 
-A `Channel` is an identity object representing a shared FIFO consumer group: at most one in-flight pattern instance may consume per cycle. Each `wait()` step has its own implicit channel, so multiple instances of the same pattern automatically serialize one-per-cycle on that step. Pass an explicit `Channel` (or `callable(index, captures) -> Channel`) when you need to override the default serialization — typically when events arrive on physically parallel buses (multi-bank memory, multi-lane retire) and several instances should consume *concurrently* by routing each to its own per-key channel.
+A `Channel` is an identity object representing a shared FIFO consumer group: at most one in-flight pattern instance may consume per cycle. Plain `wait()` is observational and does not consume events. Use `consume()` with an explicit `Channel` (or `callable(index, captures) -> Channel`) when events must be owned by one instance, typically for ordered request/response pairing or per-key routing.
 
 ```python
 from collections import defaultdict
 from wavekit import Channel, Pattern
 
 # Multi-bank cache: each bank has its own response port, so two banks
-# can return data in the *same* cycle. Without partitioning, the default
-# serialization rule would force one instance to wait an extra cycle.
-# A per-bank Channel lets each in-flight read consume from its own bank.
+# can return data in the *same* cycle. A per-bank Channel lets each in-flight
+# read consume from its own bank while preserving FIFO order within that bank.
 banks = defaultdict(Channel)
 
 result = (
     Pattern()
     .wait(req_valid)
     .capture('bank', req_addr & 1)
-    .wait(
+    .consume(
         lambda i, cap: bank_valid[cap['bank']].value[i],
         channel=lambda i, cap: banks[cap['bank']],
     )
@@ -343,7 +343,7 @@ result = (
 | `.duration` | `end - start + 1` cycles. |
 | `.status` | `MatchStatus.OK`, `TIMEOUT`, or `REQUIRE_VIOLATED`. |
 | `.captures` | `dict[str, Waveform]` of captured values. |
-| `.filter_valid()` | Return only `OK` matches. |
+| `.filter_ok()` | Return only `OK` matches. |
 
 ---
 

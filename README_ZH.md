@@ -131,7 +131,7 @@ with VcdReader("axi_tb.vcd") as f:
         .match()
     )
 
-    valid = result.filter_valid()
+    valid = result.filter_ok()
     print(f"读延迟（周期）: {valid.duration.value}")
     print(f"读数据: {valid.captures['rdata'].value}")
 ```
@@ -139,7 +139,7 @@ with VcdReader("axi_tb.vcd") as f:
 **AXI 写突发（多拍数据）**
 
 ```python
-beat = Pattern().wait(wvalid & wready).capture("beats", wdata, mode="list")
+beat = Pattern().consume(wvalid & wready, channel="w").capture("beats", wdata, mode="list")
 
 result = (
     Pattern()
@@ -149,7 +149,7 @@ result = (
     .match()
 )
 
-for i, inst in enumerate(result.filter_valid()):
+for i, inst in enumerate(result.filter_ok()):
     print(f"突发 {i}: {len(inst.captures['beats'])} 拍")
 ```
 
@@ -165,7 +165,7 @@ result = (
     .match()
 )
 
-stalls = result.filter_valid()
+stalls = result.filter_ok()
 print(f"Stall 持续时间: {stalls.duration.value} 周期")
 ```
 
@@ -258,7 +258,8 @@ changed = wave != wave.back(3)
 
 | 方法 | 说明 |
 |------|------|
-| `.wait(cond, *, require=None, channel=None, tick=True)` | 阻塞等待 `cond` 为真。`require` 在等待期间每周期检查（违反 → `REQUIRE_VIOLATED`）。`channel` 将该 wait 绑定到一个共享 FIFO 消费组（详见下方 [Channel 通道](#channel-通道)）。`tick=False` 表示在当前周期命中后不消耗周期，下一步在同一 cycle 上继续判定（零周期 wait）。 |
+| `.wait(cond, *, require=None)` | 阻塞等待 `cond` 为真，但不消费事件。`require` 在等待期间每周期检查（违反 → `REQUIRE_VIOLATED`）。 |
+| `.consume(cond, channel, *, require=None)` | 阻塞等待 `cond` 为真，并从 `channel` 独占消费该事件。用于 FIFO 请求/响应配对和按 key 路由。 |
 | `.delay(n, *, require=None)` | 前进 n 个周期。`delay(0)` 为空操作。`require` 在每个延迟周期都必须为真。 |
 | `.capture(name, signal, *, mode='last')` | 在当前周期记录信号值。`mode='last'`（默认）覆盖写入；`'first'` 仅记录第一次写入；`'list'` 追加到列表。 |
 | `.require(cond)` | 断言条件；为假时实例标记为 `REQUIRE_VIOLATED`。 |
@@ -270,22 +271,22 @@ changed = wave != wave.back(3)
 
 **Channel 通道**
 
-`Channel` 是表示共享 FIFO 消费组的身份对象：每周期至多一个在飞实例可以消费它。每个 `wait()` 步骤都自带一个隐式 channel，因此同一模板派生的多个实例会自动按一周期一个的节奏在该步骤上排队。当你需要打破这个默认的串行化时，就显式传一个 `Channel`（或 `callable(index, captures) -> Channel`）—— 典型场景是事件来自物理上并行的多条总线（多 Bank Cache、多 lane Retire 等），希望多个实例能**同周期**各自消费自己的 channel。
+`Channel` 是表示共享 FIFO 消费组的身份对象：每周期至多一个在飞实例可以消费它。普通 `wait()` 只观察条件，不消费事件。当某个事件必须由一个实例独占拥有时，使用显式的 `consume()`，并传入 `Channel`（或 `callable(index, captures) -> Channel`）。典型场景是请求/响应按顺序配对，或按 ID、bank、lane 等 key 路由。
 
 ```python
 from collections import defaultdict
 from wavekit import Channel, Pattern
 
 # 多 Bank Cache：每个 bank 有独立的响应端口，多个 bank 可以在同一周期返回数据。
-# 不分区的话，默认的串行化规则会让其中一个实例多等一拍；按 bank 分 Channel
-# 可以让每个在飞读请求各自消费对应 bank 的响应。
+# 按 bank 分 Channel 可以让每个在飞读请求各自消费对应 bank 的响应，
+# 同时保留同一 bank 内的 FIFO 顺序。
 banks = defaultdict(Channel)
 
 result = (
     Pattern()
     .wait(req_valid)
     .capture('bank', req_addr & 1)
-    .wait(
+    .consume(
         lambda i, cap: bank_valid[cap['bank']].value[i],
         channel=lambda i, cap: banks[cap['bank']],
     )
@@ -303,7 +304,7 @@ result = (
 | `.duration` | 持续时间，即 `end - start + 1` 周期。 |
 | `.status` | `MatchStatus.OK`、`TIMEOUT` 或 `REQUIRE_VIOLATED`。 |
 | `.captures` | 捕获的字典，`dict[str, Waveform]`。 |
-| `.filter_valid()` | 仅返回状态为 `OK` 的匹配实例。 |
+| `.filter_ok()` | 仅返回状态为 `OK` 的匹配实例。 |
 
 ## 开发
 

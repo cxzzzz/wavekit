@@ -44,7 +44,7 @@ def test_axi_read_latency():
         .match()
     )
 
-    valid = result.filter_valid()
+    valid = result.filter_ok()
     assert len(valid) == 2
     np.testing.assert_array_equal(valid.duration.value, [4, 3])
     np.testing.assert_array_equal(valid.captures['rdata'].value, [0xDEAD, 0xBEEF])
@@ -65,11 +65,11 @@ def test_axi_write_burst():
     wdata = _wf([0, 0xA0, 0xA1, 0xA2, 0], width=8)
     wlast = _wf([0, 0, 0, 1, 0])
 
-    beat = Pattern().wait(wvalid & wready).capture('beats', wdata, mode='list')
+    beat = Pattern().consume(wvalid & wready, channel='w').capture('beats', wdata, mode='list')
 
     result = Pattern().wait(awvalid & awready).loop(beat, until=wlast).timeout(512).match()
 
-    valid = result.filter_valid()
+    valid = result.filter_ok()
     assert len(valid) == 1
     assert list(valid.captures['beats'].value[0]) == [0xA0, 0xA1, 0xA2]
 
@@ -89,7 +89,7 @@ def test_stall_detection():
 
     result = Pattern().wait(stall.rising_edge()).loop(Pattern().delay(1), when=stall).match()
 
-    stalls = result.filter_valid()
+    stalls = result.filter_ok()
     assert len(stalls) == 2
     # First stall: rising edge at 1, stall stays high through 4 → ends when stall falls at 5
     # Second stall: rising at 7, stays through 8 → ends when stall falls at 9
@@ -125,12 +125,14 @@ def test_axi_read_burst_ooo():
 
     rfire = rvalid & rready
 
-    # No explicit Channel needed: R channel is single-issue, so auto-channel +
-    # rid==arid filter naturally serializes one beat per cycle and routes each
-    # beat to its own instance.
+    # No explicit Channel needed here: rid==arid filters each beat to the
+    # matching burst instance in this single-issue example.
     beat = (
         Pattern()
-        .wait(lambda i, cap: rfire.value[i] and rid.value[i] == cap['arid'])
+        .consume(
+            lambda i, cap: rfire.value[i] and rid.value[i] == cap['arid'],
+            channel=lambda i, cap: ('r', int(cap['arid'])),
+        )
         .capture('beats', rdata, mode='list')
     )
 
@@ -143,7 +145,7 @@ def test_axi_read_burst_ooo():
         .match()
     )
 
-    valid = result.filter_valid()
+    valid = result.filter_ok()
     assert len(valid) == 2
     by_id = {
         int(arid_val): list(beats)
@@ -186,12 +188,12 @@ def test_multi_bank_concurrent_responses():
         Pattern()
         .wait(req_valid)
         .capture('bank', req_addr & 1)
-        .wait(bank_resp_fire, channel=lambda i, cap: banks[cap['bank']])
+        .consume(bank_resp_fire, channel=lambda i, cap: banks[cap['bank']])
         .capture('rdata', bank_resp_data)
         .match()
     )
 
-    valid = result.filter_valid()
+    valid = result.filter_ok()
     # Both reqs complete at cycle 4 because their banks are independent.
     assert len(valid) == 2
     pairs = sorted(zip(valid.captures['bank'].value, valid.captures['rdata'].value))
@@ -200,10 +202,8 @@ def test_multi_bank_concurrent_responses():
     np.testing.assert_array_equal(valid.end.value, [4, 4])
 
 
-def test_multi_bank_without_partitioning_fails():
-    """Same data as above but using auto-channel (no partitioning).
-    The oldest-first rule serializes the two responses → second one delays
-    by 1 cycle (or falls off entirely if no further bank fire occurs)."""
+def test_multi_bank_plain_wait_observes_concurrent_responses():
+    """Same data as above but using observational wait (no consumption)."""
     req_valid = _wf([1, 1, 0, 0, 0, 0, 0])
     req_addr = _wf([0, 1, 0, 0, 0, 0, 0], width=8)
     bank0_valid = _wf([0, 0, 0, 0, 1, 0, 0])
@@ -213,7 +213,7 @@ def test_multi_bank_without_partitioning_fails():
         bank = cap['bank']
         return (bank0_valid if bank == 0 else bank1_valid).value[i]
 
-    # Same pattern, no channel= → auto-channel shared by both instances.
+    # Same pattern, plain wait → both instances observe the same response cycle.
     result = (
         Pattern()
         .wait(req_valid)
@@ -223,12 +223,9 @@ def test_multi_bank_without_partitioning_fails():
         .match()
     )
 
-    valid = result.filter_valid()
-    # The OLDER instance (bank 0) consumes the auto-channel at cycle 4.
-    # The younger (bank 1) is blocked at 4, then would need another bank1_valid
-    # at cycle 5+ — there isn't one → TIMEOUT.
-    assert len(valid) == 1
-    assert int(valid.captures['bank'].value[0]) == 0
+    valid = result.filter_ok()
+    assert len(valid) == 2
+    np.testing.assert_array_equal(valid.end.value, [4, 4])
 
 
 if __name__ == '__main__':

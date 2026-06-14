@@ -1,181 +1,124 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Coroutine, Hashable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from ..waveform import Waveform
 from .errors import PatternError
-from .runtime import _MAX_SAME_CYCLE_STEPS, PatternContext
+from .runtime import PatternContext
 from .steps import (
     BranchStep,
     CaptureStep,
-    Channel,
+    Condition,
+    ConsumeStep,
     DelayStep,
+    IntValue,
     LoopStep,
     RepeatStep,
     RequireStep,
+    SignalValue,
     Step,
     WaitStep,
 )
 
-PatternBody = Callable[[PatternContext], Coroutine[Any, Any, object]]
+PatternBody = Callable[[PatternContext], Awaitable[object]]
 
 
-def prepare_declarative_pattern(pattern) -> tuple[PatternBody, Waveform | None]:
-    """Compile a declarative pattern and infer its scan axis when possible."""
-
-    def first_static_waveform(steps: list[Step]) -> Waveform | None:
-        for step in steps:
-            if isinstance(step, WaitStep):
-                if isinstance(step.cond, Waveform):
-                    return step.cond
-                if isinstance(step.require, Waveform):
-                    return step.require
-            elif isinstance(step, DelayStep):
-                if isinstance(step.require, Waveform):
-                    return step.require
-            elif isinstance(step, CaptureStep):
-                if isinstance(step.signal, Waveform):
-                    return step.signal
-            elif isinstance(step, RequireStep):
-                if isinstance(step.cond, Waveform):
-                    return step.cond
-            elif isinstance(step, LoopStep):
-                if isinstance(step.until, Waveform):
-                    return step.until
-                if isinstance(step.when, Waveform):
-                    return step.when
-                waveform = first_static_waveform(step.body_template)
+def infer_declarative_axis(steps: list[Step]) -> Waveform | None:
+    """Infer a minimal first-static-waveform scan axis hint from steps."""
+    # Axis inference is intentionally minimal.  It only finds a static waveform
+    # so start/end_cycle can be translated to indices; full clock alignment
+    # validation remains lazy in PatternRuntime.note_waveform().
+    for step in steps:
+        if isinstance(step, (WaitStep, ConsumeStep)):
+            if isinstance(step.cond, Waveform):
+                return step.cond
+            if isinstance(step.require, Waveform):
+                return step.require
+        elif isinstance(step, DelayStep):
+            if isinstance(step.require, Waveform):
+                return step.require
+        elif isinstance(step, CaptureStep):
+            if isinstance(step.signal, Waveform):
+                return step.signal
+        elif isinstance(step, RequireStep):
+            if isinstance(step.cond, Waveform):
+                return step.cond
+        elif isinstance(step, LoopStep):
+            if isinstance(step.until, Waveform):
+                return step.until
+            if isinstance(step.when, Waveform):
+                return step.when
+            waveform = infer_declarative_axis(step.body_template)
+            if waveform is not None:
+                return waveform
+        elif isinstance(step, RepeatStep):
+            waveform = infer_declarative_axis(step.body_template)
+            if waveform is not None:
+                return waveform
+        elif isinstance(step, BranchStep):
+            if isinstance(step.cond, Waveform):
+                return step.cond
+            if step.true_body:
+                waveform = infer_declarative_axis(step.true_body)
                 if waveform is not None:
                     return waveform
-            elif isinstance(step, RepeatStep):
-                waveform = first_static_waveform(step.body_template)
+            if step.false_body:
+                waveform = infer_declarative_axis(step.false_body)
                 if waveform is not None:
                     return waveform
-            elif isinstance(step, BranchStep):
-                if isinstance(step.cond, Waveform):
-                    return step.cond
-                if step.true_body:
-                    waveform = first_static_waveform(step.true_body)
-                    if waveform is not None:
-                        return waveform
-                if step.false_body:
-                    waveform = first_static_waveform(step.false_body)
-                    if waveform is not None:
-                        return waveform
-        return None
-
-    return compile_declarative_pattern(pattern), first_static_waveform(pattern._steps)
+    return None
 
 
-def compile_declarative_pattern(pattern) -> PatternBody:
-    """Compile declarative pattern steps into an internal async program body."""
-    steps = pattern._steps
+def compile_declarative_pattern(steps: list[Step]) -> PatternBody:
+    """Compile declarative pattern steps into an internal async program body.
+
+    Step objects stay read-only AST nodes.  The generated coroutine uses the
+    public PatternContext methods (wait, delay, capture, require), so compiled
+    declarative patterns and handwritten programmable patterns share runtime
+    scheduling, channel arbitration, guard timing, and waveform validation.
+    """
     first_step = steps[0] if steps else None
 
-    def captures(ctx: PatternContext) -> dict[str, Any]:
-        return ctx._instance.captures
-
-    def eval_condition(cond: Any, ctx: PatternContext) -> bool:
+    def eval_condition(cond: Condition, ctx: PatternContext) -> bool:
         if isinstance(cond, Waveform):
             return bool(ctx.value(cond))
         if callable(cond):
-            try:
-                return bool(cond(ctx.index, captures(ctx)))
-            except PatternError:
-                raise
-            except Exception as exc:
-                raise PatternError(f'condition callable failed: {exc}') from exc
+            return bool(cond(ctx.index, ctx.captures))
         raise PatternError(f'condition must be a Waveform or callable, got {type(cond).__name__}')
 
-    def eval_signal(signal: Any, ctx: PatternContext) -> Any:
+    def eval_signal(signal: SignalValue, ctx: PatternContext) -> Any:
         if isinstance(signal, Waveform):
             return ctx.value(signal)
         if callable(signal):
-            try:
-                return signal(ctx.index, captures(ctx))
-            except PatternError:
-                raise
-            except Exception as exc:
-                raise PatternError(f'signal callable failed: {exc}') from exc
+            return signal(ctx.index, ctx.captures)
         raise PatternError(f'signal must be a Waveform or callable, got {type(signal).__name__}')
 
-    def eval_int(value: Any, ctx: PatternContext) -> int:
-        if isinstance(value, bool):
-            raise PatternError('integer value must not be bool')
+    def eval_int(value: IntValue, ctx: PatternContext) -> int:
         if isinstance(value, int):
             return value
         if callable(value):
-            try:
-                result = value(ctx.index, captures(ctx))
-            except PatternError:
-                raise
-            except Exception as exc:
-                raise PatternError(f'integer callable failed: {exc}') from exc
-            if isinstance(result, bool):
-                raise PatternError('integer callable must not return bool')
-            try:
-                return int(result)
-            except (TypeError, ValueError) as exc:
-                raise PatternError(
-                    'integer callable must return an int-compatible value, '
-                    f'got {type(result).__name__}'
-                ) from exc
+            result = value(ctx.index, ctx.captures)
+            return int(result)
         raise PatternError(f'integer value must be an int or callable, got {type(value).__name__}')
 
-    def eval_channel(channel: Any, ctx: PatternContext) -> Channel | Hashable | None:
-        if channel is None:
-            return None
-        if callable(channel) and not isinstance(channel, Channel):
-            try:
-                channel = channel(ctx.index, captures(ctx))
-            except PatternError:
-                raise
-            except Exception as exc:
-                raise PatternError(f'channel callable failed: {exc}') from exc
-        if channel is None or isinstance(channel, Channel) or isinstance(channel, Hashable):
-            return channel
-        raise PatternError(
-            f'channel must be a Channel or hashable key, got {type(channel).__name__}'
-        )
-
-    def raise_infinite_loop() -> None:
-        raise PatternError('Infinite loop detected: too many same-cycle transitions')
-
-    async def run_steps(
-        ctx: PatternContext,
-        step_list: list[Step],
-        first_wait_ready: bool | None = None,
-    ) -> None:
+    async def run_steps(ctx: PatternContext, step_list: list[Step]) -> None:
         for step in step_list:
             if isinstance(step, WaitStep):
-                wait_step = step
-                channel = eval_channel(step.channel, ctx)
-                if channel is None:
-                    channel = step._auto_channel
-                cached_index = ctx.index
-                cached_ready = first_wait_ready
-
-                def condition(
-                    step: WaitStep = wait_step,
-                    cached_index: int = cached_index,
-                ) -> bool:
-                    nonlocal cached_ready
-                    if cached_ready is not None and ctx.index == cached_index:
-                        ready = cached_ready
-                        cached_ready = None
-                        return ready
-                    return eval_condition(step.cond, ctx)
-
                 await ctx.wait(
-                    condition,
-                    consume=True,
-                    channel=channel,
+                    lambda step=step: eval_condition(step.cond, ctx),
                     require=None
                     if step.require is None
                     else lambda step=step: eval_condition(step.require, ctx),
                 )
-                first_wait_ready = None
+            elif isinstance(step, ConsumeStep):
+                await ctx.consume(
+                    lambda step=step: eval_condition(step.cond, ctx),
+                    channel=step.channel,
+                    require=None
+                    if step.require is None
+                    else lambda step=step: eval_condition(step.require, ctx),
+                )
             elif isinstance(step, DelayStep):
                 await ctx.delay(
                     eval_int(step.n, ctx),
@@ -200,18 +143,11 @@ def compile_declarative_pattern(pattern) -> PatternBody:
                 for _ in range(count):
                     await run_steps(ctx, step.body_template)
             elif isinstance(step, LoopStep):
-                iterations = 0
                 if step.when is not None:
                     while eval_condition(step.when, ctx):
-                        iterations += 1
-                        if iterations > _MAX_SAME_CYCLE_STEPS:
-                            raise_infinite_loop()
                         await run_steps(ctx, step.body_template)
                 elif step.until is not None:
                     while True:
-                        iterations += 1
-                        if iterations > _MAX_SAME_CYCLE_STEPS:
-                            raise_infinite_loop()
                         await run_steps(ctx, step.body_template)
                         if eval_condition(step.until, ctx):
                             break
@@ -221,12 +157,16 @@ def compile_declarative_pattern(pattern) -> PatternBody:
                 raise PatternError(f'Unknown step type: {type(step).__name__}')
 
     async def body(ctx: PatternContext) -> object:
-        first_wait_ready = None
         if isinstance(first_step, WaitStep) and first_step.require is None:
-            first_wait_ready = eval_condition(first_step.cond, ctx)
-            if not first_wait_ready:
+            # Treat the first unguarded wait as the trigger: candidates whose
+            # first condition is false are discarded immediately instead of
+            # accumulating as blocked instances.  Guarded first waits cannot use
+            # this shortcut because require must be evaluated while blocked.
+            # Consume steps are not trigger-shortcut candidates because they
+            # need FIFO/ownership arbitration through the runtime.
+            if not eval_condition(first_step.cond, ctx):
                 return None
-        await run_steps(ctx, steps, first_wait_ready=first_wait_ready)
+        await run_steps(ctx, steps)
         return ctx.OK
 
     return body

@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import inspect
 import warnings
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
+from .compiler import compile_declarative_pattern, infer_declarative_axis
+from .errors import PatternError
+from .runtime import PatternRuntime
 from .steps import (
     _VALID_CAPTURE_MODES,
     BranchStep,
     CaptureStep,
     ChannelValue,
+    ConsumeStep,
     DelayStep,
     LoopStep,
     RepeatStep,
@@ -25,7 +29,7 @@ if TYPE_CHECKING:
     from .steps import CaptureMode, Condition, IntValue, SignalValue
 
 
-PatternBody = Callable[['PatternContext'], Coroutine[Any, Any, object]]
+PatternBody = Callable[['PatternContext'], Awaitable[object]]
 
 
 class Pattern:
@@ -50,13 +54,15 @@ class Pattern:
         timeout: int | None = None,
         max_active: int = 32768,
     ) -> None:
+        # ``program is None`` is declarative builder mode: methods append Step
+        # AST nodes and match() compiles them later.  Supplying an async program
+        # enters programmable mode immediately and the body is executed directly
+        # by PatternRuntime; the fluent step list is intentionally unused there.
         if program is not None and not inspect.iscoroutinefunction(program):
-            from .errors import PatternError
-
             raise PatternError('Pattern(program) requires an async function body')
         self._steps: list[Step] = []
         self._timeout_cycles: int | None = timeout
-        self._program = program
+        self._program: PatternBody | None = program
         self._axis = axis
         self._max_active = max_active
 
@@ -69,15 +75,12 @@ class Pattern:
         cond: Condition,
         *,
         require: Condition | None = None,
-        channel: ChannelValue | None = None,
     ) -> Pattern:
-        """Block until *cond* becomes True.
+        """Observe cycles until *cond* becomes True.
 
-        By default each ``wait()`` step has its own private FIFO consumer
-        group: when multiple in-flight instances reach this step, only one
-        (the oldest) advances per cycle.  Pass an explicit :class:`Channel`
-        via ``channel=`` to share the consumer group across multiple wait
-        steps (e.g., for AXI request/response pairing).
+        ``wait`` is non-consuming: every in-flight instance that observes a true
+        condition in the same cycle may advance.  Use :meth:`consume` when an
+        event must be owned by only one instance through FIFO arbitration.
 
         Parameters
         ----------
@@ -86,39 +89,15 @@ class Pattern:
         require:
             Optional condition that must hold every cycle while waiting.
             Violation terminates the instance with ``REQUIRE_VIOLATED``.
-        channel:
-            Explicit :class:`Channel` (or ``callable(index, captures) -> Channel``
-            for dynamic key-based partitioning) that binds this wait to a
-            shared FIFO consumer group.  ``None`` (default) uses an implicit
-            per-step channel.
         Examples
         --------
-        Static channel shared between request and response steps::
-
-            rsp_chan = Channel()
-            (Pattern()
-                .wait(req)
-                .wait(rsp, channel=rsp_chan))
-
-        Dynamic per-ID partitioning for AXI out-of-order reads::
-
-            from collections import defaultdict
-            chans = defaultdict(Channel)
-            (Pattern()
-                .wait(arvalid & arready)
-                .capture('arid', arid)
-                .wait(
-                    lambda i, cap: bool((rvalid & rready)[i]) and rid[i] == cap['arid'],
-                    channel=lambda i, cap: chans[cap['arid']],
-                ))
-
         Zero-cycle wait::
 
             (Pattern()
                 .wait(valid)
                 .wait(valid & ready))   # measures latency in same-cycle case
         """
-        self._steps.append(WaitStep(cond=cond, require=require, channel=channel))
+        self._steps.append(WaitStep(cond=cond, require=require))
         return self
 
     def consume(
@@ -130,10 +109,14 @@ class Pattern:
     ) -> Pattern:
         """Block until *cond* is true and atomically consume *channel*.
 
-        This is the explicit spelling for a channel-consuming wait and is
-        equivalent to ``wait(cond, channel=channel, require=require)``.
+        This is the explicit FIFO/exclusive form: when multiple in-flight
+        instances reach the same channel in the same cycle, only the oldest
+        instance advances.  ``channel`` may be a :class:`Channel`, any hashable
+        key, or ``callable(index, captures) -> Channel | Hashable`` for dynamic
+        routing such as per-ID response matching.
         """
-        return self.wait(cond, require=require, channel=channel)
+        self._steps.append(ConsumeStep(cond=cond, channel=channel, require=require))
+        return self
 
     def delay(
         self,
@@ -146,14 +129,12 @@ class Pattern:
         Parameters
         ----------
         n:
-            Static ``int`` (>= 0) or ``callable(index, captures) -> int``.
+            Static ``int`` or ``callable(index, captures) -> int``.
             ``delay(0)`` is an epsilon step (no cycle consumed).
         require:
             Optional condition that must hold every cycle during the delay.
             Violation terminates the instance with ``REQUIRE_VIOLATED``.
         """
-        if isinstance(n, int) and n < 0:
-            raise ValueError(f'delay() requires n >= 0, got {n}')
         self._steps.append(DelayStep(n=n, require=require))
         return self
 
@@ -276,23 +257,27 @@ class Pattern:
             Limit scanning to cycles < end_cycle.
         """
         if self._program is not None:
-            from .runtime import PatternRuntime
+            return PatternRuntime(
+                self._program,
+                axis=self._axis,
+                timeout_cycles=self._timeout_cycles,
+                max_active=self._max_active,
+            ).match(start_cycle=start_cycle, end_cycle=end_cycle)
 
-            return PatternRuntime(self).match(start_cycle=start_cycle, end_cycle=end_cycle)
-
-        from .compiler import prepare_declarative_pattern
-        from .runtime import PatternRuntime
-
-        original_program = self._program
-        original_axis = self._axis
-        try:
-            self._program, inferred_axis = prepare_declarative_pattern(self)
-            if self._axis is None and (start_cycle is not None or end_cycle is not None):
-                self._axis = inferred_axis
-            return PatternRuntime(self).match(start_cycle=start_cycle, end_cycle=end_cycle)
-        finally:
-            self._program = original_program
-            self._axis = original_axis
+        program = compile_declarative_pattern(self._steps)
+        runtime_axis = self._axis
+        if runtime_axis is None and (start_cycle is not None or end_cycle is not None):
+            # Only pass the compiler's first-static-waveform hint when the
+            # runtime needs an axis before scanning.  Otherwise runtime
+            # observation remains the authority for lazy axis discovery and
+            # alignment validation.
+            runtime_axis = infer_declarative_axis(self._steps)
+        return PatternRuntime(
+            program,
+            axis=runtime_axis,
+            timeout_cycles=self._timeout_cycles,
+            max_active=self._max_active,
+        ).match(start_cycle=start_cycle, end_cycle=end_cycle)
 
     def collect(
         self,
@@ -301,10 +286,11 @@ class Pattern:
     ) -> list[Any]:
         """Run a programmable pattern and collect non-``None`` return values."""
         if self._program is None:
-            from .errors import PatternError
-
             raise PatternError('Pattern.collect() is only available for programmable Pattern')
 
-        from .runtime import PatternRuntime
-
-        return PatternRuntime(self).collect(start_cycle=start_cycle, end_cycle=end_cycle)
+        return PatternRuntime(
+            self._program,
+            axis=self._axis,
+            timeout_cycles=self._timeout_cycles,
+            max_active=self._max_active,
+        ).collect(start_cycle=start_cycle, end_cycle=end_cycle)

@@ -96,7 +96,16 @@ the shared `PatternRuntime` as `ctx.value()` / `ctx.cycle()` / `ctx.time()` or
 compiled declarative steps observe waveforms. Both paths must reject different
 clock arrays, not just different lengths. Do not add declarative-only eager
 waveform collection back; branches that never execute should not validate their
-unobserved waveforms.
+unobserved waveforms. To avoid per-cycle full-array comparison overhead,
+`PatternRuntime.note_waveform()` should cache validated waveform object identities
+per runtime: each newly observed waveform is aligned once, then subsequent
+observations of the same object return immediately.
+
+Pattern condition validation is also lazy. Do not add separate eager validation
+calls when constructing runtime ops from `PatternContext.wait()` / `consume()` /
+`delay(require=...)` / `require()`. Keep condition type handling centralized in
+`PatternRuntime.eval_condition()`, which validates exactly when the condition is
+evaluated by the runtime.
 
 ### File Loading
 

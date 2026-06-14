@@ -135,7 +135,7 @@ def test_wait_delay_and_capture_list_modes():
             ctx.capture('samples', data, mode='list')
             await ctx.delay(0)
             ctx.capture('samples', data, mode='list')
-            await ctx.wait(ready, consume=False)
+            await ctx.wait(ready)
             ctx.capture('last', data)
             return ctx.OK
         return None
@@ -146,17 +146,17 @@ def test_wait_delay_and_capture_list_modes():
     assert result.end.value[0] == 2
 
 
-def test_consuming_wait_requires_explicit_channel():
+def test_consume_requires_explicit_channel():
     fire = _bool_wf([1, 1, 0, 0])
     ready = _bool_wf([0, 0, 1, 0])
 
     async def tx(ctx):
         if ctx.value(fire):
-            await ctx.wait(ready, consume=True, channel='ready')
+            await ctx.consume(ready, channel='ready')
             return ctx.OK
         return None
 
-    result = Pattern(tx).match().filter_valid()
+    result = Pattern(tx).match().filter_ok()
     assert len(result) == 1
     assert result.start.value[0] == 0
     assert result.end.value[0] == 2
@@ -177,7 +177,7 @@ def test_channel_fifo_and_tuple_keys():
             return ctx.OK
         return None
 
-    result = Pattern(tx).match().filter_valid()
+    result = Pattern(tx).match().filter_ok()
     np.testing.assert_array_equal(result.captures['req'].value, [10, 20])
     np.testing.assert_array_equal(result.captures['rsp'].value, [111, 222])
 
@@ -199,7 +199,7 @@ def test_try_consume_polling_arbitration():
                 await ctx.delay(1)
         return None
 
-    result = Pattern(tx).match().filter_valid()
+    result = Pattern(tx).match().filter_ok()
     assert result.captures['kind'].value[0] == 1
     assert result.end.value[0] == 2
 
@@ -210,7 +210,7 @@ def test_require_and_timeout_match_statuses_and_collect_raises():
 
     async def timeout_tx(ctx):
         if ctx.value(fire):
-            await ctx.wait(never, consume=False)
+            await ctx.wait(never)
             return ctx.OK
         return None
 
@@ -235,7 +235,7 @@ def test_max_active_guard_guidance():
     never = _bool_wf([0, 0, 0, 0])
 
     async def tx(ctx):
-        await ctx.wait(never, consume=False)
+        await ctx.wait(never)
 
     with pytest.raises(PatternError, match=r'if ctx.value\(fire\)'):
         Pattern(tx, max_active=1).match()
@@ -246,7 +246,7 @@ def test_declarative_consume_and_timeout_deprecation():
     rsp = _bool_wf([0, 0, 1, 0, 1])
     data = _wf([10, 20, 111, 0, 222], width=8)
     result = Pattern().wait(req).consume(rsp, channel='rsp').capture('rsp', data).match()
-    np.testing.assert_array_equal(result.filter_valid().captures['rsp'].value, [111, 222])
+    np.testing.assert_array_equal(result.filter_ok().captures['rsp'].value, [111, 222])
 
     with pytest.warns(DeprecationWarning, match='timeout'):
         Pattern().wait(req).timeout(3)
@@ -265,6 +265,29 @@ def test_channel_object_works_programmable():
     assert len(Pattern(tx).match()) == 1
 
 
+def test_program_dynamic_consume_channel_resolves_once_on_commit():
+    fire = _bool_wf([1, 0, 0])
+    ready = _bool_wf([0, 1, 0])
+    channel = Channel()
+    calls = []
+
+    async def tx(ctx):
+        if ctx.value(fire):
+            ctx.capture('key', 7)
+
+            def dynamic_channel(index, captures):
+                calls.append((index, captures['key']))
+                return channel
+
+            await ctx.consume(ready, channel=dynamic_channel)
+            return ctx.OK
+        return None
+
+    result = Pattern(tx).match().filter_ok()
+    assert len(result) == 1
+    assert calls == [(1, 7)]
+
+
 def test_program_wait_require_checks_only_blocked_cycles():
     fire = _bool_wf([1, 0, 0])
     ready = _bool_wf([1, 0, 0])
@@ -272,13 +295,29 @@ def test_program_wait_require_checks_only_blocked_cycles():
 
     async def tx(ctx):
         if ctx.value(fire):
-            await ctx.wait(ready, consume=False, require=guard)
+            await ctx.wait(ready, require=guard)
             return ctx.OK
         return None
 
-    result = Pattern(tx).match().filter_valid()
+    result = Pattern(tx).match().filter_ok()
     assert len(result) == 1
     assert result.start.value[0] == 0
+
+
+def test_program_wait_is_observational_for_multiple_instances():
+    fire = _bool_wf([1, 1, 0, 0])
+    ready = _bool_wf([0, 0, 1, 0])
+
+    async def tx(ctx):
+        if ctx.value(fire):
+            await ctx.wait(ready)
+            return ctx.OK
+        return None
+
+    result = Pattern(tx).match().filter_ok()
+    assert len(result) == 2
+    np.testing.assert_array_equal(result.start.value, [0, 1])
+    np.testing.assert_array_equal(result.end.value, [2, 2])
 
 
 def test_program_consume_require_checks_blocked_arbitration_cycles():
@@ -309,7 +348,7 @@ def test_program_delay_require_checks_blocked_cycles_not_resume_cycle():
             return ctx.OK
         return None
 
-    result = Pattern(pass_tx).match().filter_valid()
+    result = Pattern(pass_tx).match().filter_ok()
     assert len(result) == 1
     assert result.end.value[0] == 2
 

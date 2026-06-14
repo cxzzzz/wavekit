@@ -97,8 +97,13 @@ declarative constructs through `compiler.py` and execute them through `runtime.p
 Pattern time movement is explicit. Do not add `tick` compatibility back to
 declarative steps or runtime ops; use `.delay(1)` for next-cycle continuation.
 Blocking guards belong on public wait/consume/delay APIs in both modes:
-`Pattern().wait(..., require=...)`, `Pattern().delay(..., require=...)`,
-`await ctx.wait(..., require=...)`, and `await ctx.delay(..., require=...)`.
+`Pattern().wait(..., require=...)`, `Pattern().consume(..., channel=..., require=...)`,
+`Pattern().delay(..., require=...)`, `await ctx.wait(..., require=...)`,
+`await ctx.consume(..., channel=..., require=...)`, and `await ctx.delay(..., require=...)`.
+Plain `wait` is observational and non-consuming in both declarative and
+programmable APIs; exclusive/FIFO event ownership must be spelled explicitly
+with `consume(cond, channel)`, where `channel` can be a `Channel`, a hashable key,
+or a dynamic callable returning either.
 
 ---
 

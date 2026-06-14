@@ -55,13 +55,13 @@ class MatchResult:
         self.captures = captures
 
     @property
-    def valid(self) -> Waveform:
+    def ok(self) -> Waveform:
         """Boolean mask: ``status == OK``."""
         return self.status == MatchStatus.OK
 
-    def filter_valid(self) -> MatchResult:
+    def filter_ok(self) -> MatchResult:
         """Return a new MatchResult keeping only ``status == OK`` matches."""
-        mask = self.valid
+        mask = self.ok
         return MatchResult(
             start=self.start.mask(mask),
             end=self.end.mask(mask),
