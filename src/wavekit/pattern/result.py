@@ -59,9 +59,29 @@ class MatchResult:
         """Boolean mask: ``status == OK``."""
         return self.status == MatchStatus.OK
 
+    @property
+    def failed(self) -> Waveform:
+        """Boolean mask: ``status != OK``."""
+        return self.status != MatchStatus.OK
+
     def filter_ok(self) -> MatchResult:
         """Return a new MatchResult keeping only ``status == OK`` matches."""
-        mask = self.ok
+        return self.filter_status(MatchStatus.OK)
+
+    def filter_status(self, status: MatchStatus | int) -> MatchResult:
+        """Return a new MatchResult keeping only matches with *status*."""
+        mask = self.status == int(status)
+        return MatchResult(
+            start=self.start.mask(mask),
+            end=self.end.mask(mask),
+            duration=self.duration.mask(mask),
+            status=self.status.mask(mask),
+            captures={name: val.mask(mask) for name, val in self.captures.items()},
+        )
+
+    def filter_failed(self) -> MatchResult:
+        """Return a new MatchResult keeping only non-OK matches."""
+        mask = self.failed
         return MatchResult(
             start=self.start.mask(mask),
             end=self.end.mask(mask),

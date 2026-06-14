@@ -86,6 +86,8 @@ class Pattern:
         ----------
         cond:
             Waveform (static) or ``callable(index, captures) -> bool`` (dynamic).
+            ``index`` is the absolute waveform sample index, not relative to
+            ``match(start_cycle=...)``.
         require:
             Optional condition that must hold every cycle while waiting.
             Violation terminates the instance with ``REQUIRE_VIOLATED``.
@@ -113,7 +115,8 @@ class Pattern:
         instances reach the same channel in the same cycle, only the oldest
         instance advances.  ``channel`` may be a :class:`Channel`, any hashable
         key, or ``callable(index, captures) -> Channel | Hashable`` for dynamic
-        routing such as per-ID response matching.
+        routing such as per-ID response matching.  ``index`` is the absolute
+        waveform sample index, not relative to ``match(start_cycle=...)``.
         """
         self._steps.append(ConsumeStep(cond=cond, channel=channel, require=require))
         return self
@@ -130,6 +133,8 @@ class Pattern:
         ----------
         n:
             Static ``int`` or ``callable(index, captures) -> int``.
+            ``index`` is the absolute waveform sample index, not relative to
+            ``match(start_cycle=...)``.
             ``delay(0)`` is an epsilon step (no cycle consumed).
         require:
             Optional condition that must hold every cycle during the delay.
@@ -157,6 +162,8 @@ class Pattern:
             Capture key.
         signal:
             Waveform (static) or ``callable(index, captures) -> Any``.
+            ``index`` is the absolute waveform sample index, not relative to
+            ``match(start_cycle=...)``.
         mode:
             * ``'last'`` (default) – ``cap[name]`` holds the most recent value
             * ``'first'`` – ``cap[name]`` holds the first value; subsequent
@@ -204,6 +211,8 @@ class Pattern:
         """Execute *body* exactly *n* times.
 
         *n* can be a static ``int`` or ``callable(index, captures) -> int``.
+        ``index`` is the absolute waveform sample index, not relative to
+        ``match(start_cycle=...)``.
         """
         self._steps.append(RepeatStep(body_template=body._steps, n=n))
         return self

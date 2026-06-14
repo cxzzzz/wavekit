@@ -107,6 +107,13 @@ calls when constructing runtime ops from `PatternContext.wait()` / `consume()` /
 `PatternRuntime.eval_condition()`, which validates exactly when the condition is
 evaluated by the runtime.
 
+Pattern result status filtering is intentionally mask-based and does not raise
+for unknown integer status values. `MatchResult.filter_status(status)` accepts a
+`MatchStatus` or `int`, builds `self.status == int(status)`, and returns a
+possibly empty `MatchResult` with all result fields and captures masked on the
+same axis. `filter_ok()` and `filter_failed()` should delegate to these status
+masks rather than special-case result reconstruction.
+
 ### File Loading
 
 | Error | Cause | Fix |

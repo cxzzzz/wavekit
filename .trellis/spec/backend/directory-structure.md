@@ -88,7 +88,7 @@ tests/
 - **`compiler.py`** — Internal declarative `Step` AST to async program compiler
 - **`runtime.py`** — Unified cycle-major runtime for programmable patterns and compiled declarative patterns
 - **`errors.py`** — Pattern-specific exception type
-- **`result.py`** — Struct-of-arrays output with filter/iteration
+- **`result.py`** — Struct-of-arrays output with status masks and filters
 
 Declarative and programmable patterns must share `PatternRuntime` as the only
 production execution backend. Do not add a second matching engine; translate new
@@ -104,6 +104,15 @@ Plain `wait` is observational and non-consuming in both declarative and
 programmable APIs; exclusive/FIFO event ownership must be spelled explicitly
 with `consume(cond, channel)`, where `channel` can be a `Channel`, a hashable key,
 or a dynamic callable returning either.
+Any public `callable(index, captures)` pattern callback receives the absolute
+waveform sample index used to index `waveform.value[index]`, not an index rebased
+to the `match(start_cycle=...)` scan window.
+
+Pattern result status helpers use the same `OK` vocabulary as `MatchStatus.OK`:
+`MatchResult.ok`, `MatchResult.failed`, `filter_ok()`, `filter_status(status)`,
+and `filter_failed()`. Do not reintroduce `valid` / `filter_valid()` aliases;
+`valid` is reserved for hardware signal naming and causes ambiguity in protocol
+captures.
 
 ---
 
@@ -118,7 +127,7 @@ or a dynamic callable returning either.
 - Abstract bases: `Reader`, `Scope`
 
 ### Functions/Methods
-- snake_case: `load_waveform()`, `rising_edge()`, `filter_valid()`
+- snake_case: `load_waveform()`, `rising_edge()`, `filter_ok()`
 - Private helpers prefixed with `_`: `_eval_bool()`, `_collect_waveforms()`
 
 ### Variables

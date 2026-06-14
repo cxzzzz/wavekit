@@ -143,6 +143,10 @@ class PatternContext:
 
     @property
     def index(self) -> int:
+        """Absolute waveform sample index for the current cycle.
+
+        This is not rebased to zero when ``match(start_cycle=...)`` is used.
+        """
         return self._index
 
     @property
@@ -288,11 +292,11 @@ class PatternRuntime:
             if inst.status == MatchStatus.OK and inst.return_value is not OK:
                 raise PatternError('programmable Pattern .match() body must return ctx.OK or None')
         completed = [inst for inst in completed if not inst.discarded]
-        if self._axis is None:
+        axis = self._axis
+        if axis is None:
             raise PatternError(
                 'Pattern runtime could not determine scan axis; pass axis=<waveform>'
             )
-        axis = self._axis
         completed.sort(key=lambda i: (int(axis.clock[i.start_index]), i.order))
         start_arr = np.array([int(axis.clock[i.start_index]) for i in completed], dtype=np.int64)
         end_arr = np.array([int(axis.clock[i.end_index]) for i in completed], dtype=np.int64)

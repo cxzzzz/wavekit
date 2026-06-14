@@ -2,10 +2,11 @@
 
 import numpy as np
 import pytest
+
 from helpers import bool_wf as _bool_wf
 from helpers import wf as _wf
-
-from wavekit.pattern import MatchStatus, Pattern
+from wavekit import Signal, Waveform
+from wavekit.pattern import MatchResult, MatchStatus, Pattern
 
 # ---------------------------------------------------------------------------
 
@@ -259,6 +260,27 @@ class TestBranch:
 
 
 class TestMatchResult:
+    def _mixed_status_result(self):
+        start = _wf([10, 20, 30], width=64)
+        end = _wf([10, 23, 31], width=64)
+        duration = _wf([1, 4, 2], width=64)
+        status = _wf(
+            [MatchStatus.OK, MatchStatus.TIMEOUT, MatchStatus.REQUIRE_VIOLATED],
+            width=8,
+        )
+        samples = np.empty(3, dtype=object)
+        samples[:] = [[1], [2, 3], [4, 5, 6]]
+        captures = {
+            'data': _wf([100, 200, 300], width=16),
+            'samples': Waveform(
+                samples,
+                start.clock.copy(),
+                start.time.copy(),
+                signal=Signal('', '', None, None, False),
+            ),
+        }
+        return MatchResult(start, end, duration, status, captures)
+
     def test_filter_ok(self):
         sometimes = _bool_wf([0, 0, 1, 0, 0])
         data = _wf([0, 0, 42, 0, 0], width=8)
@@ -279,6 +301,44 @@ class TestMatchResult:
         np.testing.assert_array_equal(result.ok.value, [True])
         assert not hasattr(result, 'valid')
         assert not hasattr(result, 'filter_valid')
+
+    def test_failed_preserves_status_axis(self):
+        result = self._mixed_status_result()
+
+        np.testing.assert_array_equal(result.failed.value, [False, True, True])
+        np.testing.assert_array_equal(result.failed.clock, result.status.clock)
+        np.testing.assert_array_equal(result.failed.time, result.status.time)
+        assert result.failed.width == 1
+        assert result.failed.signed is False
+
+    @pytest.mark.parametrize('status', [MatchStatus.TIMEOUT, int(MatchStatus.TIMEOUT)])
+    def test_filter_status_keeps_exact_status_and_capture_alignment(self, status):
+        result = self._mixed_status_result()
+
+        timeout = result.filter_status(status)
+
+        np.testing.assert_array_equal(timeout.status.value, [MatchStatus.TIMEOUT])
+        np.testing.assert_array_equal(timeout.start.value, [20])
+        np.testing.assert_array_equal(timeout.end.value, [23])
+        np.testing.assert_array_equal(timeout.duration.value, [4])
+        np.testing.assert_array_equal(timeout.captures['data'].value, [200])
+        np.testing.assert_array_equal(timeout.captures['data'].clock, timeout.start.clock)
+        assert list(timeout.captures['samples'].value[0]) == [2, 3]
+        np.testing.assert_array_equal(timeout.captures['samples'].clock, timeout.start.clock)
+
+    def test_filter_failed_keeps_non_ok_statuses(self):
+        result = self._mixed_status_result()
+
+        failed = result.filter_failed()
+
+        np.testing.assert_array_equal(
+            failed.status.value,
+            [MatchStatus.TIMEOUT, MatchStatus.REQUIRE_VIOLATED],
+        )
+        np.testing.assert_array_equal(failed.start.value, [20, 30])
+        np.testing.assert_array_equal(failed.captures['data'].value, [200, 300])
+        assert [list(value) for value in failed.captures['samples'].value] == [[2, 3], [4, 5, 6]]
+        np.testing.assert_array_equal(failed.captures['samples'].clock, failed.start.clock)
 
     def test_ok_and_filter_ok_preserve_result_axes_and_list_captures(self):
         trigger = _bool_wf([1, 0, 1, 0, 0])

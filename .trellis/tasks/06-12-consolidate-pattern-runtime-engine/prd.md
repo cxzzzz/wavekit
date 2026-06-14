@@ -74,10 +74,12 @@ Keep only one Pattern execution engine while preserving declarative and programm
 * Keep the first unguarded declarative `WaitStep` trigger optimization simple. Do not retain cached callable-result reuse solely to avoid double invocation side effects; callable side effects are out of scope for this cleanup.
 * Systematize result success naming around `ok`: keep `MatchStatus.OK` / `ctx.OK` semantics, replace `MatchResult.valid` with `MatchResult.ok`, and replace `filter_valid()` with `filter_ok()`.
 * Do not keep `valid` / `filter_ok()` compatibility aliases in this cleanup; delete the old result API directly to avoid inconsistent naming and confusion with hardware `valid` signals.
+* Add minimal status filtering helpers after the `ok` rename: `MatchResult.failed`, `MatchResult.filter_status(status)`, and `MatchResult.filter_failed()`. `filter_status` accepts `MatchStatus` or `int` and should preserve all result/capture axis alignment even when no rows match.
 * Align runtime operation concepts with the public API and declarative AST split: `WaitOp` observes only and must not contain a `consume` flag or `channel`; `ConsumeOp` owns FIFO/exclusive matching and independently holds its channel plus ready-channel cache. Prefer clear boundaries over deduplicating every small piece of wait/consume logic.
 * Keep condition validation lazy and centralized in `PatternRuntime.eval_condition()`; do not validate conditions eagerly when constructing `PatternContext` runtime ops.
 * Cache waveform clock-axis validation by waveform object identity inside `PatternRuntime.note_waveform()` so each waveform's clock array is aligned once per runtime instead of on every cycle observation.
 * Let dynamic channel callable exceptions propagate naturally from `PatternRuntime.resolve_channel()`; only invalid returned channel values should be converted to `PatternError`.
+* Pattern callbacks documented as `callable(index, captures)` receive the absolute waveform sample index, even when `match(start_cycle=...)` limits scanning. Do not rebase callback index to the scan-window start.
 
 ## Acceptance Criteria (evolving)
 
@@ -107,10 +109,12 @@ Keep only one Pattern execution engine while preserving declarative and programm
 * [x] Declarative AST uses separate `WaitStep` and `ConsumeStep` nodes; no `WaitStep.channel` field remains.
 * [x] First unguarded `WaitStep` trigger handling is simple and does not cache callable results for reuse by the compiled step body.
 * [x] Result success APIs use `ok` / `filter_ok()` and no longer expose `valid` / `filter_valid()` aliases.
+* [x] Result status filtering helpers expose `failed`, `filter_status(status)`, and `filter_failed()` while preserving result and capture axes.
 * [x] Runtime `WaitOp` and `ConsumeOp` are separate concepts with no `consume` flag or channel handling inside `WaitOp`.
 * [x] Runtime condition type validation is centralized in `PatternRuntime.eval_condition()` with no separate eager `validate_condition()` path.
 * [x] Waveform clock-axis alignment is cached by waveform object identity after the first validation in each runtime.
 * [x] Dynamic channel callables are not wrapped by `resolve_channel()`; callable exceptions propagate naturally.
+* [x] Callable `index` semantics are documented as absolute waveform sample indices, not scan-window-relative indices.
 
 ## Definition of Done
 
@@ -250,7 +254,15 @@ Keep only one Pattern execution engine while preserving declarative and programm
 
 **Decision**: Use `ok` / `filter_ok()` for result-success queries. Keep the semantics of `MatchStatus.OK` and `ctx.OK`, but replace `MatchResult.valid` with `MatchResult.ok` and replace `filter_valid()` with `filter_ok()`. Do not keep `valid` / `filter_valid()` aliases in this task; remove the old API directly so the naming model is unambiguous.
 
-**Consequences**: Code using `result.valid` or `result.filter_valid()` must migrate to `result.ok` or `result.filter_ok()`. This cleanup intentionally favors a consistent result API over compatibility aliases. Future work may add a more complete status-filtering family such as `failed`, `timed_out`, `require_failed`, `filter(status=...)`, or `filter_failed()`, but this round should stay focused on `ok` and `filter_ok()`.
+**Consequences**: Code using `result.valid` or `result.filter_valid()` must migrate to `result.ok` or `result.filter_ok()`. This cleanup intentionally favors a consistent result API over compatibility aliases. Minimal status filtering is available through `failed`, `filter_status(status)`, and `filter_failed()`; more specialized convenience masks such as `timed_out` or `require_failed` remain future work unless usage proves they are worth the extra API surface.
+
+### Add minimal MatchResult status filters
+
+**Context**: After removing `valid` / `filter_valid()`, users still need a concise way to inspect and slice timeout or requirement-violation rows without hand-writing masks and manually masking every capture. Keeping only `filter_ok()` makes failed-result analysis awkward, especially for protocol debugging where failures are often the interesting rows.
+
+**Decision**: Add the minimal general helpers: `failed` as `status != MatchStatus.OK`, `filter_status(status)` for exact `MatchStatus`/`int` matches, and `filter_failed()` for all non-OK rows. `filter_ok()` delegates to `filter_status(MatchStatus.OK)` so all exact-status filtering follows one path.
+
+**Consequences**: The public result API covers success, failure, and exact status filtering without adding many named convenience methods. `filter_status()` intentionally returns an empty aligned `MatchResult` for unknown integer statuses rather than validating against enum members, matching the existing waveform-comparison/masking model.
 
 ### Split runtime WaitOp and ConsumeOp responsibilities
 
