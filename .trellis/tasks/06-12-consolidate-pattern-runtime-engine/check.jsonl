@@ -1,6 +1,0 @@
-{"file":".trellis/tasks/06-12-consolidate-pattern-runtime-engine/prd.md","reason":"Review implementation against explicit requirements, decisions, acceptance criteria, and out-of-scope items."}
-{"file":".trellis/spec/backend/directory-structure.md","reason":"Check final module organization and file responsibilities after deleting engine.py."}
-{"file":".trellis/spec/backend/error-handling.md","reason":"Check PatternError relocation and exception behavior remain consistent."}
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check verification commands, formatting, lint, typing, and test expectations."}
-{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check helper relocation avoids duplication and leaves a single source of truth."}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check DSL/compiler/runtime/result boundaries remain coherent after consolidation."}

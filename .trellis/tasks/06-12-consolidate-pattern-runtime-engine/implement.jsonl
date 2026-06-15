@@ -1,6 +1,0 @@
-{"file":".trellis/tasks/06-12-consolidate-pattern-runtime-engine/prd.md","reason":"Task requirements, accepted architecture decisions, scope boundaries, and acceptance criteria for consolidating Pattern runtime engines."}
-{"file":".trellis/spec/backend/directory-structure.md","reason":"Project module organization conventions; pattern module layout guidance must be considered when moving engine helpers."}
-{"file":".trellis/spec/backend/error-handling.md","reason":"Error type conventions and PatternError usage guidance for moving PatternError out of engine.py."}
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Required lint, format, mypy, and test expectations for backend changes."}
-{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Avoid duplicate helper logic while relocating validation and error code."}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Pattern DSL/compiler/runtime boundaries change; use this guide to keep data flow contracts explicit."}
