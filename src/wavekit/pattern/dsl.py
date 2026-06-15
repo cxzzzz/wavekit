@@ -35,7 +35,12 @@ PatternBody = Callable[['PatternContext'], Awaitable[object]]
 class Pattern:
     """Builder for a temporal pattern over waveform signals.
 
-    Methods are chained to construct a step sequence::
+    Use the declarative builder for fixed-shape transactions, or pass an async
+    body to ``Pattern(program, ...)`` for dynamic branches, retries, per-ID
+    routing, or row-oriented Python records. Both authoring styles execute on
+    the same runtime and share the same wait/consume/delay semantics.
+
+    Declarative methods are chained to construct a step sequence::
 
         p = (
             Pattern()
@@ -293,7 +298,11 @@ class Pattern:
         start_cycle: int | None = None,
         end_cycle: int | None = None,
     ) -> list[Any]:
-        """Run a programmable pattern and collect non-``None`` return values."""
+        """Run a programmable pattern and collect non-``None`` return values.
+
+        Return a Python object from the async body to emit one record; return
+        ``None`` to skip the current candidate.
+        """
         if self._program is None:
             raise PatternError('Pattern.collect() is only available for programmable Pattern')
 

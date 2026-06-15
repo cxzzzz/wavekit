@@ -38,7 +38,8 @@ class Channel:
         self._consumed_at: int = -1
 
 
-# Type aliases for step parameters
+# Type aliases for step parameters. Callable ``index`` values are absolute
+# waveform sample indices, not rebased by match(start_cycle=...).
 Condition = Union[Waveform, Callable[[int, dict], bool]]
 IntValue = Union[int, Callable[[int, dict], int]]
 SignalValue = Union[Waveform, Callable[[int, dict], Any]]
@@ -70,7 +71,8 @@ class WaitStep:
     Attributes
     ----------
     cond:
-        Waveform or ``callable(index, captures) -> bool``.
+        Waveform or ``callable(index, captures) -> bool``. ``index`` is the
+        absolute waveform sample index.
     require:
         Optional condition that must hold every cycle while waiting;
         violation terminates the instance with ``REQUIRE_VIOLATED``.
@@ -87,10 +89,12 @@ class ConsumeStep:
     Attributes
     ----------
     cond:
-        Waveform or ``callable(index, captures) -> bool``.
+        Waveform or ``callable(index, captures) -> bool``. ``index`` is the
+        absolute waveform sample index.
     channel:
         Explicit ``Channel`` / hashable key (or ``callable`` returning one) for
-        FIFO consumption.
+        FIFO consumption. Callable ``index`` is the absolute waveform sample
+        index.
     require:
         Optional condition that must hold every cycle while waiting or blocked
         by channel arbitration; violation terminates the instance with
@@ -104,7 +108,10 @@ class ConsumeStep:
 
 @dataclass
 class DelayStep:
-    """Blocking: unconditionally wait *n* cycles."""
+    """Blocking: unconditionally wait *n* cycles.
+
+    Callable ``n`` receives the absolute waveform sample index.
+    """
 
     n: IntValue
     require: Condition | None = None
@@ -118,6 +125,8 @@ class CaptureStep:
         * ``'last'``  – overwrite each time (default; ``cap[name]`` is scalar)
         * ``'first'`` – keep only the first write (``cap[name]`` is scalar)
         * ``'list'``  – append every write (``cap[name]`` is a Python list)
+
+    Callable ``signal`` receives the absolute waveform sample index.
     """
 
     name: str

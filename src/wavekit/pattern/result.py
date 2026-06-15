@@ -38,6 +38,15 @@ class MatchResult:
         Named capture values.  Scalar captures are plain Waveforms;
         list captures (``mode='list'``) are Waveforms with ``object`` dtype
         where each element is a Python list.
+    ok : Waveform
+        Boolean mask where ``status == MatchStatus.OK``.
+    failed : Waveform
+        Boolean mask where ``status != MatchStatus.OK``.
+
+    Notes
+    -----
+    Use :meth:`filter_ok`, :meth:`filter_status`, and :meth:`filter_failed` to
+    keep result fields and captures aligned when selecting rows by status.
     """
 
     def __init__(
@@ -69,7 +78,11 @@ class MatchResult:
         return self.filter_status(MatchStatus.OK)
 
     def filter_status(self, status: MatchStatus | int) -> MatchResult:
-        """Return a new MatchResult keeping only matches with *status*."""
+        """Return a new MatchResult keeping only matches with *status*.
+
+        ``status`` may be a :class:`MatchStatus` or integer value. Unknown
+        integer statuses simply produce an empty aligned result.
+        """
         mask = self.status == int(status)
         return MatchResult(
             start=self.start.mask(mask),

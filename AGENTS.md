@@ -226,13 +226,18 @@ Every operation returns a **new** `Waveform`; none mutate in place.
 ## Pattern Matching
 
 The `Pattern` API extracts all matching protocol transactions from waveforms in a
-single NFA-based scan. It is useful for latency measurement, protocol
+single unified-runtime scan. It is useful for latency measurement, protocol
 compliance checking, and temporal data extraction.
 
 ### How it works
 
-- A `Pattern` is a sequence of **steps** describing what to wait for and what to
-  capture.
+- A `Pattern` has two authoring styles: declarative builder steps for fixed-shape
+  transactions, and an async programmable body for dynamic branches, retries,
+  per-ID routing, or row-oriented Python records.
+- Both styles share one runtime and the same `wait` / `consume` / `delay`
+  semantics.
+- A declarative `Pattern` is a sequence of **steps** describing what to wait for
+  and what to capture.
 - Calling `.match()` runs the engine over all loaded waveforms and returns a
   `MatchResult` (struct-of-arrays, one entry per matched instance).
 - If the **first step is `wait`**, its condition is used as the trigger: one
@@ -276,7 +281,10 @@ live in the same coordinate system as ordinary signal waveforms.
 | `.status` | `Waveform[uint8]` | `MatchStatus.OK=0`, `TIMEOUT=1`, `REQUIRE_VIOLATED=2`. |
 | `.captures` | `dict[str, Waveform]` | Named captures. List captures (`name[]`) have `object` dtype where each element is a Python list. |
 | `.ok` | property | Boolean 1-bit Waveform: `status == OK`. |
+| `.failed` | property | Boolean 1-bit Waveform: `status != OK`. |
 | `.filter_ok()` | method | Return new `MatchResult` with only `OK` instances. |
+| `.filter_status(status)` | method | Return new `MatchResult` with only the requested `MatchStatus` or integer status. |
+| `.filter_failed()` | method | Return new `MatchResult` with only non-OK instances. |
 
 **`end` is inclusive**: to extract a waveform slice for a match use
 `wf.cycle_slice(start, end + 1)`.
@@ -284,8 +292,9 @@ live in the same coordinate system as ordinary signal waveforms.
 ### Dynamic conditions and captures
 
 Any `cond` or `signal` argument can be a **callable** `(index, captures) -> value`
-instead of a static `Waveform`. `index` is the current waveform array index;
-`captures` is the instance's capture dict so far.
+instead of a static `Waveform`. `index` is the absolute waveform sample index,
+not rebased by `match(start_cycle=...)`; `captures` is the instance's capture
+dict so far.
 
 ```python
 # Capture the length field, then repeat that many times
@@ -314,6 +323,39 @@ result = (
     .match()
 )
 ```
+
+### Programmable Pattern usage
+
+Programmable patterns run an async body under the same runtime. The runtime starts
+one candidate per scanned cycle, so use a positive current-cycle start guard and
+return `None` for non-start cycles:
+
+```python
+fire = valid & ready  # precompute fixed waveform expressions outside the body
+
+async def tx(ctx):
+    if ctx.value(fire):
+        await ctx.consume(lambda: ctx.value(done), channel='done')
+        return ctx.OK
+    return None
+
+result = Pattern(tx, timeout=64, max_active=10000).match()
+```
+
+Agent contracts:
+- Prefer a current-cycle guard such as `if ctx.value(fire): ...` for starts.
+- Avoid beginning a programmable body with `await ctx.wait(fire)` unless
+  accumulating suspended candidates is intentional.
+- Precompute fixed waveform expressions outside the async body; do not write
+  `ctx.value(valid & ready)` or `await ctx.wait(valid & ready)` inside it.
+- Dynamic callbacks should be cheap and side-effect-free. For local/capture-
+  dependent logic, use scalar reads such as
+  `lambda: ctx.value(valid) and ctx.value(id) == expected_id`.
+- In programmable callbacks, `ctx.index` is the absolute waveform sample index,
+  not rebased by `match(start_cycle=...)`.
+- `collect()` records each non-`None` Python return value; `match()` records
+  `return ctx.OK` as success and skips `return None`.
+- Do not use `tick` parameters or `MatchResult.valid` / `filter_valid()` aliases.
 
 **Dynamic channel for AXI-style ID routing:**
 
@@ -364,6 +406,8 @@ result = (
    waveforms loaded with the same `clock` signal to all pattern steps.
 9. **`MatchResult.end` is inclusive**: use `cycle_slice(start, end + 1)` to
    extract the corresponding waveform window.
+10. **Pattern time movement is explicit**: `wait` / `consume` resume in the same
+    cycle when already true; insert `delay(1)` for next-cycle behavior.
 
 ---
 
