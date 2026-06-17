@@ -124,7 +124,7 @@ class FstReader(Reader):
     def _load_value_change(
         self,
         signal: FstSignal,
-        xz_value: int,
+        decoder,
         end_time: int | None = None,
     ) -> np.ndarray:
         changes: list[tuple[int, int]] = []
@@ -132,7 +132,7 @@ class FstReader(Reader):
         def value_change_callback(_data, time, _facidx, value):
             if end_time is None or int(time) <= end_time:
                 text = pylibfst.string(value)
-                changes.append((int(time), int(re.sub(r'[xXzZ]', str(xz_value), text or '0'), 2)))
+                changes.append((int(time), decoder(text or '0')))
 
         def value_change_callback_varlen(_data, time, _facidx, _value, length):
             raise ValueError(
@@ -157,19 +157,18 @@ class FstReader(Reader):
             raise ValueError(f"signal '{signal.full_name}' has no value changes")
         return np.array(changes, dtype=dtype)
 
-    def load_waveform(
+    def _sample_on_clock(
         self,
         signal: Signal | str,
         clock: Signal | str,
-        xz_value: int = 0,
-        signed: bool = False,
-        sample_on_posedge: bool = False,
-        begin_time: int | None = None,
-        end_time: int | None = None,
-        begin_cycle: int | None = None,
-        end_cycle: int | None = None,
+        decoder,
+        signed: bool,
+        sample_on_posedge: bool,
+        begin_time: int | None,
+        end_time: int | None,
+        begin_cycle: int | None,
+        end_cycle: int | None,
     ) -> Waveform:
-        """Load a single FST signal as a clock-synchronised waveform."""
         if begin_time is not None and begin_cycle is not None:
             raise ValueError('begin_time and begin_cycle are mutually exclusive')
         if end_time is not None and end_cycle is not None:
@@ -178,7 +177,10 @@ class FstReader(Reader):
         fst_signal, requested_range = self._resolve_signal(signal)
         fst_clock, _ = self._resolve_signal(clock)
 
-        all_clock_changes = self._load_value_change(fst_clock, xz_value=0)
+        all_clock_changes = self._load_value_change(
+            fst_clock,
+            decoder=lambda raw: int(re.sub(r'[xXzZ]', '0', raw), 2),
+        )
         sample_value = 1 if sample_on_posedge else 0
         clock_edge_times = all_clock_changes[all_clock_changes[:, 1] == sample_value, 0]
 
@@ -200,7 +202,7 @@ class FstReader(Reader):
         # iteration semantics do not guarantee an initial value at begin_time.
         signal_value_change = self._load_value_change(
             fst_signal,
-            xz_value=xz_value,
+            decoder=decoder,
             end_time=end_time,
         )
 
@@ -210,7 +212,7 @@ class FstReader(Reader):
             width=fst_signal.width,
             signed=signed,
             sample_on_posedge=sample_on_posedge,
-            signal=fst_signal.full_name,
+            signal='',
             clock_offset=clock_offset,
         )
 

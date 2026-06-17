@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from abc import abstractmethod
 from collections.abc import Sequence
 from typing import Any, Literal
@@ -63,7 +64,6 @@ class Reader:
         # exception wont be suppressed
         return False
 
-    @abstractmethod
     def load_waveform(
         self,
         signal: Signal | str,
@@ -124,7 +124,8 @@ class Reader:
         Waveform:
             One sample per clock edge within the requested window.  The
             ``.clock`` array contains absolute cycle numbers from the start
-            of simulation.
+            of simulation.  The waveform's ``name`` and ``signal.full_name``
+            are set to the user-provided *signal* path.
 
         Raises
         ------
@@ -132,6 +133,86 @@ class Reader:
             If both *begin_time* and *begin_cycle* (or both *end_time* and
             *end_cycle*) are provided simultaneously.
         """
+        self._validate_xz_value(xz_value)
+        signal_path = signal.full_name if isinstance(signal, Signal) else signal
+        wf = self._sample_on_clock(
+            signal, clock,
+            decoder=lambda raw: int(re.sub(r'[xXzZ]', str(xz_value), raw), 2),
+            signed=signed,
+            sample_on_posedge=sample_on_posedge,
+            begin_time=begin_time,
+            end_time=end_time,
+            begin_cycle=begin_cycle,
+            end_cycle=end_cycle,
+        )
+        wf.signal = Signal(
+            name=signal_path.rsplit('.', 1)[-1], full_name=signal_path,
+            width=wf.width, range=None, signed=signed,
+        )
+        return wf
+
+    def load_unknown_mask(
+        self,
+        signal: Signal | str,
+        clock: Signal | str,
+        include_x: bool = True,
+        include_z: bool = True,
+        sample_on_posedge: bool = False,
+        begin_time: int | None = None,
+        end_time: int | None = None,
+        begin_cycle: int | None = None,
+        end_cycle: int | None = None,
+    ) -> Waveform:
+        """Load source X/Z presence as an unsigned bitmask waveform.
+
+        The returned :class:`~wavekit.Waveform` is sampled on the same clock
+        edges and supports the same time/cycle windowing as
+        :meth:`load_waveform`, but its values are masks instead of substituted
+        two-state signal values.  A mask bit is ``1`` when the corresponding
+        source bit is selected by *include_x* and/or *include_z*.
+
+        Parameters
+        ----------
+        signal:
+            Full dotted signal path or :class:`~wavekit.signal.Signal` object.
+        clock:
+            Clock signal path or :class:`~wavekit.signal.Signal` object.
+        include_x:
+            If ``True`` (default), mark source ``X``/``x`` bits.
+        include_z:
+            If ``True`` (default), mark source ``Z``/``z`` bits.
+        sample_on_posedge, begin_time, end_time, begin_cycle, end_cycle:
+            Same sampling/windowing semantics as :meth:`load_waveform`.
+
+        Returns
+        -------
+        Waveform:
+            Unsigned mask waveform named ``unknown_mask(<signal>)``.
+        """
+        signal_path = signal.full_name if isinstance(signal, Signal) else signal
+
+        def mask_decoder(raw: str) -> int:
+            s = re.sub(r'[01]', '0', raw)
+            s = re.sub(r'[xX]', '1' if include_x else '0', s)
+            s = re.sub(r'[zZ]', '1' if include_z else '0', s)
+            return int(s, 2)
+
+        wf = self._sample_on_clock(
+            signal, clock,
+            decoder=mask_decoder,
+            signed=False,
+            sample_on_posedge=sample_on_posedge,
+            begin_time=begin_time,
+            end_time=end_time,
+            begin_cycle=begin_cycle,
+            end_cycle=end_cycle,
+        )
+        mask_name = f'unknown_mask({signal_path})'
+        wf.signal = Signal(
+            name=mask_name.rsplit('.', 1)[-1], full_name=mask_name,
+            width=wf.width, range=None, signed=False,
+        )
+        return wf
 
     @abstractmethod
     def top_scope_list(self) -> Sequence[Scope]:
@@ -164,8 +245,30 @@ class Reader:
             value=value,
             clock=clock,
             time=time,
-            signal=Signal(name=signal, full_name=signal, width=width, range=None, signed=signed),
+            signal=Signal(
+                name=signal.rsplit('.', 1)[-1], full_name=signal,
+                width=width, range=None, signed=signed,
+            ),
         )
+
+    @abstractmethod
+    def _sample_on_clock(
+        self,
+        signal: Signal | str,
+        clock: Signal | str,
+        decoder,
+        signed: bool,
+        sample_on_posedge: bool,
+        begin_time: int | None,
+        end_time: int | None,
+        begin_cycle: int | None,
+        end_cycle: int | None,
+    ) -> Waveform:
+        """Sample *signal* on every *clock* edge and return a raw Waveform.
+
+        Subclasses implement file-format-specific loading.  The returned
+        Waveform is a simple value array — naming is handled by the caller.
+        """
 
     def _search_roots(self, root_scope: Scope | None) -> Sequence[Scope]:
         """Return the list of scopes to start a search from."""
@@ -361,6 +464,7 @@ class Reader:
             )
             # waves == { ('state',): Waveform, ('next',): Waveform }
         """
+        self._validate_xz_value(xz_value)
         matched_clocks = self.get_matched_signals(clock_pattern, root_scope=root_scope)
         if not matched_clocks:
             raise Exception(f'clock pattern {clock_pattern} can not match any signal')
@@ -395,6 +499,64 @@ class Reader:
                 k: self.load_waveform(sig.full_name, matched_clocks[k].full_name, **load_kwargs)
                 for k, sig in matched_signals.items()
             }
+
+    def load_matched_unknown_masks(
+        self,
+        pattern: str,
+        clock_pattern: str,
+        include_x: bool = True,
+        include_z: bool = True,
+        sample_on_posedge: bool = False,
+        begin_time: int | None = None,
+        end_time: int | None = None,
+        begin_cycle: int | None = None,
+        end_cycle: int | None = None,
+        root_scope: Scope | None = None,
+    ) -> dict[tuple[Any, ...], Waveform]:
+        """Batch-load X/Z mask waveforms for all signals matching *pattern*.
+
+        Clock assignment follows :meth:`load_matched_waveforms`: a single
+        matched clock is broadcast to all signals; otherwise clock keys must
+        exactly match signal keys.  The returned dict uses the same keys as
+        :meth:`get_matched_signals` for *pattern*.
+        """
+        matched_clocks = self.get_matched_signals(clock_pattern, root_scope=root_scope)
+        if not matched_clocks:
+            raise Exception(f'clock pattern {clock_pattern} can not match any signal')
+
+        matched_signals = self.get_matched_signals(pattern, root_scope=root_scope)
+
+        load_kwargs: dict[str, Any] = dict(
+            include_x=include_x,
+            include_z=include_z,
+            sample_on_posedge=sample_on_posedge,
+            begin_time=begin_time,
+            end_time=end_time,
+            begin_cycle=begin_cycle,
+            end_cycle=end_cycle,
+        )
+
+        if len(matched_clocks) == 1:
+            clock_full_name = next(iter(matched_clocks.values())).full_name
+            return {
+                k: self.load_unknown_mask(sig.full_name, clock_full_name, **load_kwargs)
+                for k, sig in matched_signals.items()
+            }
+        else:
+            if set(matched_clocks.keys()) != set(matched_signals.keys()):
+                raise Exception(
+                    f'clock pattern {clock_pattern!r} matched keys {sorted(matched_clocks.keys())} '
+                    f'which do not match signal pattern keys {sorted(matched_signals.keys())}'
+                )
+            return {
+                k: self.load_unknown_mask(sig.full_name, matched_clocks[k].full_name, **load_kwargs)
+                for k, sig in matched_signals.items()
+            }
+
+    @staticmethod
+    def _validate_xz_value(xz_value: int) -> None:
+        if xz_value not in (0, 1):
+            raise ValueError('xz_value must be 0 or 1')
 
     @abstractmethod
     def close(self):
@@ -442,6 +604,7 @@ class Reader:
             If provided, all signal paths in *expr* are resolved within this
             scope instead of the file's top-level scopes.
         """
+        self._validate_xz_value(xz_value)
         substituted, path_entries = extract_wave_paths(expr)
 
         load_kwargs: dict[str, Any] = dict(

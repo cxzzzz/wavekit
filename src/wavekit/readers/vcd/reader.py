@@ -75,17 +75,17 @@ class VcdReader(Reader):
     def end_time(self) -> int:
         return self.file_handle.endtime
 
-    def load_waveform(
+    def _sample_on_clock(
         self,
         signal: Signal | str,
         clock: Signal | str,
-        xz_value: int = 0,
-        signed: bool = False,
-        sample_on_posedge: bool = False,
-        begin_time: int | None = None,
-        end_time: int | None = None,
-        begin_cycle: int | None = None,
-        end_cycle: int | None = None,
+        decoder,
+        signed: bool,
+        sample_on_posedge: bool,
+        begin_time: int | None,
+        end_time: int | None,
+        begin_cycle: int | None,
+        end_cycle: int | None,
     ) -> Waveform:
         if begin_time is not None and begin_cycle is not None:
             raise ValueError('begin_time and begin_cycle are mutually exclusive')
@@ -151,7 +151,7 @@ class VcdReader(Reader):
         clock_value_change = all_clock_changes[clock_mask]
 
         signal_value_change = np.array(
-            [(v[0], int(re.sub(r'[xXzZ]', str(xz_value), v[1]), 2)) for v in signal_handle.tv],
+            [(v[0], decoder(v[1])) for v in signal_handle.tv],
             dtype=np.object_ if width > 64 else np.uint64,
         )
         if len(signal_value_change) == 0:
@@ -162,7 +162,7 @@ class VcdReader(Reader):
             width=width,
             signed=signed,
             sample_on_posedge=sample_on_posedge,
-            signal=lookup_path,
+            signal='',
             clock_offset=clock_offset,
         )
 

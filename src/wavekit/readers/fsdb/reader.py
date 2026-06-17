@@ -5,7 +5,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -192,6 +192,88 @@ class FsdbReader(Reader):
         begin_cycle: int | None = None,
         end_cycle: int | None = None,
     ) -> Waveform:
+        self._validate_xz_value(xz_value)
+        signal_path = signal.full_name if isinstance(signal, Signal) else signal
+
+        def load_value_change(npi_signal: Any, begin: int, end: int) -> np.ndarray:
+            return self.file_handle.load_value_change(
+                npi_signal,
+                begin_time=begin,
+                end_time=end,
+                xz_value=xz_value,
+            )
+
+        wf = self._sample_on_clock(
+            signal=signal,
+            clock=clock,
+            signed=signed,
+            sample_on_posedge=sample_on_posedge,
+            begin_time=begin_time,
+            end_time=end_time,
+            begin_cycle=begin_cycle,
+            end_cycle=end_cycle,
+            load_signal_value_change=load_value_change,
+        )
+        wf.signal = Signal(
+            name=signal_path.rsplit('.', 1)[-1], full_name=signal_path,
+            width=wf.width, range=None, signed=signed,
+        )
+        return wf
+
+    def load_unknown_mask(
+        self,
+        signal: Signal | str,
+        clock: Signal | str,
+        include_x: bool = True,
+        include_z: bool = True,
+        sample_on_posedge: bool = False,
+        begin_time: int | None = None,
+        end_time: int | None = None,
+        begin_cycle: int | None = None,
+        end_cycle: int | None = None,
+    ) -> Waveform:
+        """Load X/Z presence for an FSDB signal as an unsigned mask waveform."""
+        signal_path = signal.full_name if isinstance(signal, Signal) else signal
+
+        def load_value_change(npi_signal: Any, begin: int, end: int) -> np.ndarray:
+            return self.file_handle.load_unknown_mask_value_change(
+                npi_signal,
+                begin_time=begin,
+                end_time=end,
+                include_x=include_x,
+                include_z=include_z,
+            )
+
+        wf = self._sample_on_clock(
+            signal=signal,
+            clock=clock,
+            signed=False,
+            sample_on_posedge=sample_on_posedge,
+            begin_time=begin_time,
+            end_time=end_time,
+            begin_cycle=begin_cycle,
+            end_cycle=end_cycle,
+            load_signal_value_change=load_value_change,
+        )
+        mask_name = f'unknown_mask({signal_path})'
+        wf.signal = Signal(
+            name=mask_name.rsplit('.', 1)[-1], full_name=mask_name,
+            width=wf.width, range=None, signed=False,
+        )
+        return wf
+
+    def _sample_on_clock(
+        self,
+        signal: Signal | str,
+        clock: Signal | str,
+        signed: bool,
+        sample_on_posedge: bool,
+        begin_time: int | None,
+        end_time: int | None,
+        begin_cycle: int | None,
+        end_cycle: int | None,
+        load_signal_value_change: Callable[[Any, int, int], np.ndarray],
+    ) -> Waveform:
         if begin_time is not None and begin_cycle is not None:
             raise ValueError('begin_time and begin_cycle are mutually exclusive')
         if end_time is not None and end_cycle is not None:
@@ -244,11 +326,10 @@ class FsdbReader(Reader):
 
         # Load signal within the requested window only (FSDB NPI provides the
         # correct initial value at begin_time even if the last change was earlier)
-        signal_value_change = self.file_handle.load_value_change(
+        signal_value_change = load_signal_value_change(
             npi_signal,
-            begin_time=begin_time_actual,
-            end_time=end_time_actual,
-            xz_value=xz_value,
+            begin_time_actual,
+            end_time_actual,
         )
 
         full_wave = self.value_change_to_waveform(
@@ -257,7 +338,7 @@ class FsdbReader(Reader):
             width=npi_signal.width(),
             signed=signed,
             sample_on_posedge=sample_on_posedge,
-            signal=signal_path,
+            signal='',
             clock_offset=clock_offset,
         )
 

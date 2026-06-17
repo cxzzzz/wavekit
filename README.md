@@ -84,6 +84,22 @@ with VcdReader("fifo_tb.vcd") as f:
     burst_cycles = wr_en.rising_edge()
 ```
 
+To inspect unknown/high-impedance source bits without changing the ordinary
+two-state value model, load an unsigned unknown mask alongside the value
+waveform.  Each mask bit is `1` where the source sample contained `X` or `Z`.
+
+```python
+from wavekit import VcdReader
+
+with VcdReader("fifo_tb.vcd") as f:
+    clock = "fifo_tb.clk"
+    data = f.load_waveform("fifo_tb.s_fifo.data[7:0]", clock=clock, xz_value=0)
+    unknown = f.load_unknown_mask("fifo_tb.s_fifo.data[7:0]", clock=clock)
+
+    # Keep only samples whose source bits were fully known.
+    known_data = data.mask(unknown == 0)
+```
+
 ---
 
 ### 3. Expression Evaluation
