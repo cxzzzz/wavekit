@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
+
 from helpers import bool_wf as _bool_wf
 from helpers import wf as _wf
-
 from wavekit import Channel, Signal, Waveform
 from wavekit.pattern import MatchStatus, Pattern, PatternError
 
