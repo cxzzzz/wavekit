@@ -38,8 +38,20 @@ class Reader:
     If the bit-range suffix is omitted and the file stores the signal with a
     range, the range is appended automatically.
 
+    Unknown-mask API (experimental)
+    -------------------------------
+    :meth:`load_unknown_mask` and :meth:`load_matched_unknown_masks` return
+    source X/Z bit presence as ordinary unsigned :class:`~wavekit.Waveform`
+    bitmasks, so users can detect unknown bits without changing the two-state
+    value model.
+
+    .. note::
+
+       This API is **experimental**.  The mask-as-ordinary-Waveform design
+       may change in a future release based on real-world usage feedback.
+
     Pattern syntax (used by :meth:`get_matched_signals`, :meth:`get_matched_scopes`,
-    :meth:`load_matched_waveforms`, :meth:`eval`)
+    :meth:`load_matched_waveforms`, :meth:`load_matched_unknown_masks`, :meth:`eval`)
     -------------------------------------------------
     * ``{a,b,c}``     — matches ``a``, ``b``, or ``c``; captures each as a key.
     * ``{0..7}``       — integer range 0 to 7 inclusive; step defaults to 1.
@@ -169,6 +181,12 @@ class Reader:
     ) -> Waveform:
         """Load source X/Z presence as an unsigned bitmask waveform.
 
+        .. note::
+
+           This API is **experimental**.  The mask-as-ordinary-Waveform
+           design may change in a future release based on real-world usage
+           feedback.
+
         The returned :class:`~wavekit.Waveform` is sampled on the same clock
         edges and supports the same time/cycle windowing as
         :meth:`load_waveform`, but its values are masks instead of substituted
@@ -195,7 +213,12 @@ class Reader:
         """
         signal_path = signal.full_name if isinstance(signal, Signal) else signal
 
-        value_mapping = {'0': 0, '1': 0, 'x': 1 if include_x else 0, 'z': 1 if include_z else 0}
+        value_mapping = {
+            '0': 0,
+            '1': 0,
+            'x': 1 if include_x else 0,
+            'z': 1 if include_z else 0,
+        }
         wf = self._sample_on_clock(
             signal,
             clock,
@@ -208,7 +231,7 @@ class Reader:
             end_cycle=end_cycle,
         )
         wf.signal = Signal(
-            name=f'unknown_mask_{signal_path.rsplit(".", 1)[-1]}',  #mask_name.rsplit('.', 1)[-1],
+            name=f'unknown_mask_{signal_path.rsplit(".", 1)[-1]}',
             full_name=f'unknown_mask({signal_path})',
             width=wf.width,
             range=None,
@@ -268,8 +291,8 @@ class Reader:
 
         Subclasses implement file-format-specific loading.  Returns a tuple
         of (value_change_array, width) where value_change_array has shape
-        (N, 2) with columns [time, value], and width is the full bit-width
-        of the signal (before any user-requested sub-range).
+        (N, 2) with columns [time, value], and width is the effective decoded
+        width after any backend-applied range selection.
 
         Parameters
         ----------
@@ -621,10 +644,35 @@ class Reader:
     ) -> dict[tuple[Any, ...], Waveform]:
         """Batch-load X/Z mask waveforms for all signals matching *pattern*.
 
+        .. note::
+
+           This API is **experimental**.  See :meth:`load_unknown_mask`.
+
         Clock assignment follows :meth:`load_matched_waveforms`: a single
         matched clock is broadcast to all signals; otherwise clock keys must
         exactly match signal keys.  The returned dict uses the same keys as
         :meth:`get_matched_signals` for *pattern*.
+
+        Parameters
+        ----------
+        pattern:
+            Signal path pattern (brace/regex).  See class docstring.
+        clock_pattern:
+            Clock signal path or pattern.  Must match at least one signal.
+        include_x:
+            If ``True`` (default), mark source ``X``/``x`` bits.
+        include_z:
+            If ``True`` (default), mark source ``Z``/``z`` bits.
+        sample_on_posedge, begin_time, end_time, begin_cycle, end_cycle:
+            Same sampling/windowing semantics as :meth:`load_waveform`.
+        root_scope:
+            If provided, both *pattern* and *clock_pattern* are searched within
+            this scope instead of the file's top-level scopes.
+
+        Returns
+        -------
+        dict[tuple, Waveform]:
+            Same keys as :meth:`get_matched_signals` on *pattern*.
         """
         matched_clocks = self.get_matched_signals(clock_pattern, root_scope=root_scope)
         if not matched_clocks:

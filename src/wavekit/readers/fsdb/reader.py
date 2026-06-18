@@ -196,17 +196,12 @@ class FsdbReader(Reader):
         begin_time: int | None = None,
         end_time: int | None = None,
     ) -> tuple[np.ndarray, int]:
-        """Load raw value changes for an FSDB signal.
-
-        Converts the value_mapping dict to an FSDB decode mode and delegates to
-        the NPI reader.
-        """
+        """Load mapped FSDB value changes through the NPI reader."""
+        # FSDB/NPI resolves any trailing bit range and reports the effective width.
         npi_signal = self.file_handle.get_signal(path)
         c = value_mapping
-        mode = _MAPPING_TO_FSDB_MODE.get(
-            (c.get('0', 0), c.get('1', 0), c.get('x', 0), c.get('z', 0)),
-            5,  # mask-none fallback
-        )
+        key = (c['0'], c['1'], c['x'], c['z'])
+        mode = _MAPPING_TO_FSDB_MODE[key]
         begin = begin_time if begin_time is not None else 0
         end = end_time if end_time is not None else 2**64 - 1
         result = self.file_handle.load_value_change_mode(

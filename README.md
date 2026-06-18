@@ -88,6 +88,9 @@ To inspect unknown/high-impedance source bits without changing the ordinary
 two-state value model, load an unsigned unknown mask alongside the value
 waveform.  Each mask bit is `1` where the source sample contained `X` or `Z`.
 
+> **Experimental**: The `load_unknown_mask` / `load_matched_unknown_masks`
+> APIs are experimental and may change in a future release.
+
 ```python
 from wavekit import VcdReader
 
@@ -201,7 +204,9 @@ print(f"Stall durations: {stalls.duration.value} cycles")
 |--------|-------------|
 | `VcdReader(file)` / `FstReader(file)` / `FsdbReader(file)` | Open a waveform file. Use as a context manager. `FsdbReader` requires Verdi runtime (`WAVEKIT_NPI_LIB`, `VERDI_HOME`, or `LD_LIBRARY_PATH`). |
 | `reader.load_waveform(signal, clock, ...)` | Load one signal sampled on every clock edge. Returns `Waveform`. |
+| `reader.load_unknown_mask(signal, clock, ...)` | **Experimental.** Load X/Z bit presence as an unsigned mask `Waveform`. |
 | `reader.load_matched_waveforms(pattern, clock_pattern, ...)` | Batch-load signals matching a brace/regex pattern. Returns `dict[tuple, Waveform]`. |
+| `reader.load_matched_unknown_masks(pattern, clock_pattern, ...)` | **Experimental.** Batch-load X/Z masks for matched signals. Returns `dict[tuple, Waveform]`. |
 | `reader.eval(expr, clock, mode='single'\|'zip', ...)` | Evaluate an arithmetic expression with embedded signal paths. |
 | `reader.get_matched_signals(pattern)` | Resolve a pattern to signal paths without loading data. |
 | `reader.top_scope_list()` | Return root `Scope` nodes of the signal hierarchy. |

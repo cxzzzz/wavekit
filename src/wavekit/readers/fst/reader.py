@@ -127,19 +127,7 @@ class FstReader(Reader):
         begin_time: int | None = None,
         end_time: int | None = None,
     ) -> tuple[np.ndarray, int]:
-        """Load raw value changes for an FST signal.
-
-        Parameters
-        ----------
-        path:
-            Full signal path (may include a range suffix).
-        value_mapping:
-            Character-to-bit mapping.
-        begin_time, end_time:
-            Time bounds.  *end_time* limits FST iteration; *begin_time* is
-            ignored (FST always loads from the beginning for correct initial
-            values).
-        """
+        """Load mapped FST value changes with optional trailing range selection."""
         fst_signal, range_suffix = self._resolve_signal(path)
         width = fst_signal.width or 1
 

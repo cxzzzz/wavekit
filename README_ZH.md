@@ -82,6 +82,22 @@ with VcdReader("fifo_tb.vcd") as f:
     burst_cycles = wr_en.rising_edge()
 ```
 
+加载未知态（X/Z）掩码，在不改变两态数值模型的前提下检测源信号中的未知位。掩码中每一位为 `1` 表示对应源位为 `X` 或 `Z`。
+
+> **实验性功能**：`load_unknown_mask` / `load_matched_unknown_masks` 为实验性 API，未来版本可能调整。
+
+```python
+from wavekit import VcdReader
+
+with VcdReader("fifo_tb.vcd") as f:
+    clock = "fifo_tb.clk"
+    data = f.load_waveform("fifo_tb.s_fifo.data[7:0]", clock=clock, xz_value=0)
+    unknown = f.load_unknown_mask("fifo_tb.s_fifo.data[7:0]", clock=clock)
+
+    # 只保留源位完全已知的采样
+    known_data = data.mask(unknown == 0)
+```
+
 ### 3. 表达式求值
 
 直接通过信号路径字符串书写表达式，无需逐个手动加载信号。
@@ -177,7 +193,9 @@ print(f"Stall 持续时间: {stalls.duration.value} 周期")
 |------|------|
 | `VcdReader(file)` / `FstReader(file)` / `FsdbReader(file)` | 打开波形文件。建议作为上下文管理器使用。`FsdbReader` 需要 Verdi 运行时环境（通过 `WAVEKIT_NPI_LIB`、`VERDI_HOME` 或 `LD_LIBRARY_PATH` 配置）。 |
 | `reader.load_waveform(signal, clock, ...)` | 加载单个信号，按时钟边沿采样，返回 `Waveform`。 |
+| `reader.load_unknown_mask(signal, clock, ...)` | **实验性**。加载 X/Z 位存在性为无符号掩码 `Waveform`。 |
 | `reader.load_matched_waveforms(pattern, clock_pattern, ...)` | 按模式批量加载信号，返回 `dict[tuple, Waveform]`。 |
+| `reader.load_matched_unknown_masks(pattern, clock_pattern, ...)` | **实验性**。按模式批量加载 X/Z 掩码，返回 `dict[tuple, Waveform]`。 |
 | `reader.eval(expr, clock, mode='single'\|'zip', ...)` | 对包含信号路径的算术表达式直接求值。 |
 | `reader.get_matched_signals(pattern)` | 将模式解析为信号路径列表，不加载数据。 |
 | `reader.top_scope_list()` | 返回信号层级的根 `Scope` 节点。 |

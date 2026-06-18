@@ -109,6 +109,7 @@ def test_fst_reader_midrange_load(fst_path):
 
     assert high_bits.width == 2
     assert np.array_equal(high_bits.value, (full.value >> 2) & 0x3)
+    assert np.any(high_bits.value == 0)
 
 
 def test_fst_reader_load_unknown_mask_include_flags(unknown_fst_path):

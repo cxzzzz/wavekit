@@ -81,17 +81,7 @@ class VcdReader(Reader):
         begin_time: int | None = None,
         end_time: int | None = None,
     ) -> tuple[np.ndarray, int]:
-        """Load raw value changes for a VCD signal.
-
-        Parameters
-        ----------
-        path:
-            Full signal path (may include a range suffix, e.g. ``"tb.sig[3:0]"``).
-        value_mapping:
-            Character-to-bit mapping, e.g. ``{'0': 0, '1': 1, 'x': 0, 'z': 0}``.
-        begin_time, end_time:
-            Time bounds (ignored — VCD always loads all value changes).
-        """
+        """Load mapped VCD value changes with optional trailing range selection."""
         bare_signal_path, range_suffix = split_by_range_expr(path)
 
         # VCD does not support multi-dimensional (more than one bracket pair)
