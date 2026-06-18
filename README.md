@@ -3,7 +3,7 @@
 [![CI](https://github.com/cxzzzz/wavekit/actions/workflows/python-package.yml/badge.svg)](https://github.com/cxzzzz/wavekit/actions/workflows/python-package.yml)
 [![PyPI version](https://img.shields.io/pypi/v/wavekit.svg)](https://pypi.org/project/wavekit/)
 [![Python Versions](https://img.shields.io/pypi/pyversions/wavekit.svg)](https://pypi.org/project/wavekit/)
-[![Downloads](https://img.shields.io/pypi/dm/wavekit.svg)](https://pypi.org/project/wavekit/)
+[![Downloads](https://pepy.tech/badge/wavekit)](https://pepy.tech/project/wavekit)
 [![License](https://img.shields.io/github/license/cxzzzz/wavekit.svg)](LICENSE)
 
 English | [中文](README_ZH.md)
