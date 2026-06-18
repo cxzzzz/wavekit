@@ -81,6 +81,35 @@ waves = r.load_matched_waveforms("tb.dut.fifo_{0..3}.w_ptr[2:0]", "tb.clk")
 # -> { (0,): Waveform, (1,): Waveform, (2,): Waveform, (3,): Waveform }
 ```
 
+### `reader.load_unknown_mask(signal, clock, ...) -> Waveform`
+
+Load X/Z presence as a normal unsigned `Waveform`.  Each returned value is a
+bitmask; bit `1` means the corresponding source bit was selected by
+`include_x` and/or `include_z`.
+
+| Parameter | Type | Default | Notes |
+|-----------|------|---------|-------|
+| `signal` | `str` | required | Full dotted path, with optional range suffix. |
+| `clock` | `str` | required | Full dotted path of the sampling clock. |
+| `include_x` | `bool` | `True` | Mark source `X`/`x` bits. |
+| `include_z` | `bool` | `True` | Mark source `Z`/`z` bits. |
+| `sample_on_posedge` / windows | | same as `load_waveform` | Align masks exactly with value waveforms. |
+
+When both flags are `False`, the returned mask is all zero.  The returned mask
+is always unsigned, has the requested signal width after range selection, and is
+named `unknown_mask(<signal>)`.
+
+```python
+data = r.load_waveform("tb.dut.data[7:0]", clock="tb.clk", xz_value=0)
+mask = r.load_unknown_mask("tb.dut.data[7:0]", clock="tb.clk")
+known_data = data.mask(mask == 0)
+```
+
+### `reader.load_matched_unknown_masks(pattern, clock_pattern, ...) -> dict[tuple, Waveform]`
+
+Batch-load unknown masks with the same pattern and clock assignment rules as
+`load_matched_waveforms`.  Returned keys match `get_matched_signals(pattern)`.
+
 ---
 
 ### `reader.get_matched_signals(pattern) -> dict[tuple, str]`
@@ -126,7 +155,8 @@ Return the root `Scope` nodes of the hierarchy.  Each `Scope` has:
 
 ## Pattern syntax
 
-Used in `load_matched_waveforms`, `get_matched_signals`, and `eval`.
+Used in `load_matched_waveforms`, `load_matched_unknown_masks`,
+`get_matched_signals`, and `eval`.
 
 | Syntax | Example | Keys produced |
 |--------|---------|---------------|

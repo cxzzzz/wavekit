@@ -582,38 +582,68 @@ cdef class NpiFsdbScope:
         return npi_fsdb_scope_property_str(npiFsdbScopeDefName, self.scope_handle).decode('ascii')
 
 
+cdef enum FsdbDecodeMode:
+    FSDB_DECODE_VALUE_XZ_0 = 0
+    FSDB_DECODE_VALUE_XZ_1 = 1
+    FSDB_DECODE_X_MASK = 2
+    FSDB_DECODE_Z_MASK = 3
+    FSDB_DECODE_XZ_MASK = 4
+    FSDB_DECODE_MASK_NONE = 5
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef inline int cstr_to_ull_array(char* str, unsigned int xz_value, unsigned long long* result, int total_bits):
+cdef inline int cstr_to_ull_array(
+    char* str,
+    FsdbDecodeMode mode,
+    unsigned long long* result,
+    int total_bits,
+):
     cdef int bit_count = 0
     cdef int pos = 0
     cdef int chunk_idx = 0
     cdef int bit_in_chunk = 0
     cdef char c
-    cdef char zero = b'0'
+    cdef unsigned int bit
+    cdef bint append_bit
+
+    cdef unsigned int val_1 = (mode == FSDB_DECODE_VALUE_XZ_0 or mode == FSDB_DECODE_VALUE_XZ_1)
+    cdef unsigned int val_x = (mode == FSDB_DECODE_VALUE_XZ_1
+                              or mode == FSDB_DECODE_X_MASK
+                              or mode == FSDB_DECODE_XZ_MASK)
+    cdef unsigned int val_z = (mode == FSDB_DECODE_VALUE_XZ_1
+                              or mode == FSDB_DECODE_Z_MASK
+                              or mode == FSDB_DECODE_XZ_MASK)
 
     for i in range((total_bits + 63) // 64):
         result[i] = 0
 
     while bit_count < total_bits:
         c = str[pos]
-        if c == b'\0':
+        append_bit = True
+
+        if c == b'0':
+            bit = 0
+        elif c == b'1':
+            bit = val_1
+        elif c == b'x' or c == b'X':
+            bit = val_x
+        elif c == b'z' or c == b'Z':
+            bit = val_z
+        elif c == b'\0':
             break
-        if c == b'0' or c == b'1':
-            result[chunk_idx] = (result[chunk_idx] << 1) + (c - zero)
-            bit_in_chunk += 1
-            bit_count += 1
-        elif c == b'x' or c == b'z' or c == b'X' or c == b'Z':
-            result[chunk_idx] = (result[chunk_idx] << 1) + xz_value
-            bit_in_chunk += 1
-            bit_count += 1
         elif c == b'{' or c == b'}' or c == b',':
-            pass
+            append_bit = False
         else:
             raise ValueError(f"unknown char '{chr(c)}' in fsdb signal value \"{str.decode('ascii')}\"")
-        if bit_in_chunk == 64:
-            chunk_idx += 1
-            bit_in_chunk = 0
+
+        if append_bit:
+            result[chunk_idx] = (result[chunk_idx] << 1) + bit
+            bit_in_chunk += 1
+            bit_count += 1
+            if bit_in_chunk == 64:
+                chunk_idx += 1
+                bit_in_chunk = 0
         pos += 1
 
     return bit_count
@@ -640,15 +670,16 @@ cdef class NpiFsdbReader:
         assert signal_handle != NULL, f"can't find signal: {signal}"
         return NpiFsdbSignal.init(signal_handle)
 
-    @cython.boundscheck(False)  # 关闭边界检查以提升性能
-    @cython.wraparound(False)   # 关闭负索引检查以提升性能
-    def load_value_change(
+    @cython.boundscheck(False)
+    @cython.wraparound(False)
+    cpdef np.ndarray load_value_change_mode(
         self,
         NpiFsdbSignal signal,
         unsigned long long begin_time,
         unsigned long long end_time,
-        int xz_value
-    ) -> np.ndarray:
+        int mode,
+    ):
+        cdef FsdbDecodeMode c_mode = <FsdbDecodeMode>mode
 
         cdef int width = signal.width()
         cdef npiFsdbVctHandle signal_vct_handle = npi_fsdb_create_vct(signal.sig_handle)
@@ -683,7 +714,7 @@ cdef class NpiFsdbReader:
                 break
             time_array.push_back(cur_time)
 
-            cstr_to_ull_array(<char*>cur_value.value.str, xz_value, chunk_values, width)
+            cstr_to_ull_array(<char*>cur_value.value.str, c_mode, chunk_values, width)
             for i in range(value_array_num):
                 value_array[i].push_back(chunk_values[i])
             first = False

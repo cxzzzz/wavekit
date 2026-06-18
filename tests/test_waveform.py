@@ -408,7 +408,7 @@ def test_signal_synchronization():
     assert wave.width == 8
     assert wave.signal.width == 8
     assert wave.name == 'test_sig'
-    assert wave.signal.name == 'test_sig'
+    assert wave.signal.full_name == 'test_sig'
 
     # Modify via Waveform property
     wave.width = 16
@@ -417,16 +417,16 @@ def test_signal_synchronization():
 
     wave.name = 'new_name'
     assert wave.name == 'new_name'
-    assert wave.signal.name == 'new_name'
+    assert wave.signal.full_name == 'new_name'
 
     # Modify via Signal object
     wave.signal.width = 32
     assert wave.width == 32
     assert wave.signal.width == 32
 
-    wave.signal.name = 'final_name'
+    wave.signal.full_name = 'final_name'
     assert wave.name == 'final_name'
-    assert wave.signal.name == 'final_name'
+    assert wave.signal.full_name == 'final_name'
 
     # Check signed synchronization
     wave.signed = True

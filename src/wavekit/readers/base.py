@@ -38,8 +38,20 @@ class Reader:
     If the bit-range suffix is omitted and the file stores the signal with a
     range, the range is appended automatically.
 
+    Unknown-mask API (experimental)
+    -------------------------------
+    :meth:`load_unknown_mask` and :meth:`load_matched_unknown_masks` return
+    source X/Z bit presence as ordinary unsigned :class:`~wavekit.Waveform`
+    bitmasks, so users can detect unknown bits without changing the two-state
+    value model.
+
+    .. note::
+
+       This API is **experimental**.  The mask-as-ordinary-Waveform design
+       may change in a future release based on real-world usage feedback.
+
     Pattern syntax (used by :meth:`get_matched_signals`, :meth:`get_matched_scopes`,
-    :meth:`load_matched_waveforms`, :meth:`eval`)
+    :meth:`load_matched_waveforms`, :meth:`load_matched_unknown_masks`, :meth:`eval`)
     -------------------------------------------------
     * ``{a,b,c}``     — matches ``a``, ``b``, or ``c``; captures each as a key.
     * ``{0..7}``       — integer range 0 to 7 inclusive; step defaults to 1.
@@ -63,7 +75,6 @@ class Reader:
         # exception wont be suppressed
         return False
 
-    @abstractmethod
     def load_waveform(
         self,
         signal: Signal | str,
@@ -124,7 +135,8 @@ class Reader:
         Waveform:
             One sample per clock edge within the requested window.  The
             ``.clock`` array contains absolute cycle numbers from the start
-            of simulation.
+            of simulation.  The waveform's ``name`` and ``signal.full_name``
+            are set to the user-provided *signal* path.
 
         Raises
         ------
@@ -132,6 +144,100 @@ class Reader:
             If both *begin_time* and *begin_cycle* (or both *end_time* and
             *end_cycle*) are provided simultaneously.
         """
+        self._validate_xz_value(xz_value)
+        signal_path = signal.full_name if isinstance(signal, Signal) else signal
+        value_mapping = {'0': 0, '1': 1, 'x': xz_value, 'z': xz_value}
+        wf = self._sample_on_clock(
+            signal,
+            clock,
+            value_mapping=value_mapping,
+            signed=signed,
+            sample_on_posedge=sample_on_posedge,
+            begin_time=begin_time,
+            end_time=end_time,
+            begin_cycle=begin_cycle,
+            end_cycle=end_cycle,
+        )
+        wf.signal = Signal(
+            name=signal_path.rsplit('.', 1)[-1],
+            full_name=signal_path,
+            width=wf.width,
+            range=None,
+            signed=signed,
+        )
+        return wf
+
+    def load_unknown_mask(
+        self,
+        signal: Signal | str,
+        clock: Signal | str,
+        include_x: bool = True,
+        include_z: bool = True,
+        sample_on_posedge: bool = False,
+        begin_time: int | None = None,
+        end_time: int | None = None,
+        begin_cycle: int | None = None,
+        end_cycle: int | None = None,
+    ) -> Waveform:
+        """Load source X/Z presence as an unsigned bitmask waveform.
+
+        .. note::
+
+           This API is **experimental**.  The mask-as-ordinary-Waveform
+           design may change in a future release based on real-world usage
+           feedback.
+
+        The returned :class:`~wavekit.Waveform` is sampled on the same clock
+        edges and supports the same time/cycle windowing as
+        :meth:`load_waveform`, but its values are masks instead of substituted
+        two-state signal values.  A mask bit is ``1`` when the corresponding
+        source bit is selected by *include_x* and/or *include_z*.
+
+        Parameters
+        ----------
+        signal:
+            Full dotted signal path or :class:`~wavekit.signal.Signal` object.
+        clock:
+            Clock signal path or :class:`~wavekit.signal.Signal` object.
+        include_x:
+            If ``True`` (default), mark source ``X``/``x`` bits.
+        include_z:
+            If ``True`` (default), mark source ``Z``/``z`` bits.
+        sample_on_posedge, begin_time, end_time, begin_cycle, end_cycle:
+            Same sampling/windowing semantics as :meth:`load_waveform`.
+
+        Returns
+        -------
+        Waveform:
+            Unsigned mask waveform named ``unknown_mask(<signal>)``.
+        """
+        signal_path = signal.full_name if isinstance(signal, Signal) else signal
+
+        value_mapping = {
+            '0': 0,
+            '1': 0,
+            'x': 1 if include_x else 0,
+            'z': 1 if include_z else 0,
+        }
+        wf = self._sample_on_clock(
+            signal,
+            clock,
+            value_mapping=value_mapping,
+            signed=False,
+            sample_on_posedge=sample_on_posedge,
+            begin_time=begin_time,
+            end_time=end_time,
+            begin_cycle=begin_cycle,
+            end_cycle=end_cycle,
+        )
+        wf.signal = Signal(
+            name=f'unknown_mask_{signal_path.rsplit(".", 1)[-1]}',
+            full_name=f'unknown_mask({signal_path})',
+            width=wf.width,
+            range=None,
+            signed=False,
+        )
+        return wf
 
     @abstractmethod
     def top_scope_list(self) -> Sequence[Scope]:
@@ -144,7 +250,7 @@ class Reader:
         """
 
     @staticmethod
-    def value_change_to_waveform(
+    def _value_change_to_waveform(
         value_change: np.ndarray,
         clock_changes: np.ndarray,
         width: int | None,
@@ -164,8 +270,134 @@ class Reader:
             value=value,
             clock=clock,
             time=time,
-            signal=Signal(name=signal, full_name=signal, width=width, range=None, signed=signed),
+            signal=Signal(
+                name=signal.rsplit('.', 1)[-1],
+                full_name=signal,
+                width=width,
+                range=None,
+                signed=signed,
+            ),
         )
+
+    @abstractmethod
+    def _load_value_changes(
+        self,
+        path: str,
+        value_mapping: dict[str, int],
+        begin_time: int | None = None,
+        end_time: int | None = None,
+    ) -> tuple[np.ndarray, int]:
+        """Load raw value changes for a signal.
+
+        Subclasses implement file-format-specific loading.  Returns a tuple
+        of (value_change_array, width) where value_change_array has shape
+        (N, 2) with columns [time, value], and width is the effective decoded
+        width after any backend-applied range selection.
+
+        Parameters
+        ----------
+        path:
+            Full signal path (may include a range suffix).
+        value_mapping:
+            Character-to-bit mapping, e.g. ``{'0': 0, '1': 1, 'x': 0, 'z': 0}``.
+        begin_time:
+            Optional earliest time to include (inclusive).
+        end_time:
+            Optional latest time to include (exclusive).
+        """  # noqa: E501
+
+    def _sample_on_clock(
+        self,
+        signal: Signal | str,
+        clock: Signal | str,
+        value_mapping: dict[str, int],
+        signed: bool,
+        sample_on_posedge: bool,
+        begin_time: int | None,
+        end_time: int | None,
+        begin_cycle: int | None,
+        end_cycle: int | None,
+    ) -> Waveform:
+        """Sample *signal* on every *clock* edge and return a raw Waveform.
+
+        Subclasses provide :meth:`_load_value_changes` for format-specific I/O.
+        The returned Waveform is a simple value array — naming is handled by
+        the caller.
+        """
+        if begin_time is not None and begin_cycle is not None:
+            raise ValueError('begin_time and begin_cycle are mutually exclusive')
+        if end_time is not None and end_cycle is not None:
+            raise ValueError('end_time and end_cycle are mutually exclusive')
+
+        signal_path = signal.full_name if isinstance(signal, Signal) else signal
+        clock_path = clock.full_name if isinstance(clock, Signal) else clock
+
+        # Load clock value changes for absolute cycle computation
+        clock_mapping = {'0': 0, '1': 1, 'x': 0, 'z': 0}
+        all_clock_changes, _ = self._load_value_changes(clock_path, clock_mapping)
+
+        # Find sampling edge timestamps
+        sample_value = 1 if sample_on_posedge else 0
+        clock_edge_times = all_clock_changes[all_clock_changes[:, 1] == sample_value, 0]
+
+        if len(clock_edge_times) == 0:
+            edge_kind = 'pos' if sample_on_posedge else 'neg'
+            raise ValueError(f'no {edge_kind}edges found in clock signal')
+
+        # Convert begin_cycle/end_cycle to begin_time/end_time
+        if begin_cycle is not None:
+            if begin_cycle >= len(clock_edge_times):
+                raise ValueError(
+                    f'begin_cycle {begin_cycle} out of range (max {len(clock_edge_times) - 1})'
+                )
+            begin_time = int(clock_edge_times[begin_cycle])
+        if end_cycle is not None:
+            if end_cycle > len(clock_edge_times):
+                raise ValueError(
+                    f'end_cycle {end_cycle} out of range (max {len(clock_edge_times)})'
+                )
+            if end_cycle < len(clock_edge_times):
+                end_time = int(clock_edge_times[end_cycle])
+
+        # Compute clock_offset = number of sampling edges before begin_time
+        begin_time = begin_time if begin_time is not None else 0
+        clock_offset = int(
+            np.searchsorted(
+                clock_edge_times,
+                begin_time,
+                side='left',
+            )
+        )
+
+        # Trim clock to window [begin_time, end_time)
+        clock_mask = all_clock_changes[:, 0] >= begin_time
+        if end_time is not None:
+            clock_mask &= all_clock_changes[:, 0] < end_time
+        windowed_clock_changes = all_clock_changes[clock_mask]
+
+        # Load signal value changes (backend handles range suffix internally)
+        signal_value_change, width = self._load_value_changes(
+            signal_path,
+            value_mapping,
+            begin_time=begin_time,
+            end_time=end_time,
+        )
+
+        if len(signal_value_change) == 0:
+            raise ValueError(f"signal '{signal_path}' has no value changes")
+
+        # Convert to Waveform via sampling and trim
+        result = self._value_change_to_waveform(
+            signal_value_change,
+            windowed_clock_changes,
+            width=width,
+            signed=signed,
+            sample_on_posedge=sample_on_posedge,
+            signal='',
+            clock_offset=clock_offset,
+        )
+
+        return result
 
     def _search_roots(self, root_scope: Scope | None) -> Sequence[Scope]:
         """Return the list of scopes to start a search from."""
@@ -284,7 +516,7 @@ class Reader:
             common_keys = set(dict1.keys()).intersection(dict2.keys())
             if common_keys:
                 raise Exception(
-                    'found more than one scope with the same keys: ' f'keys:{list(common_keys)}'
+                    f'found more than one scope with the same keys: keys:{list(common_keys)}'
                 )
             return {**dict1, **dict2}
 
@@ -361,6 +593,7 @@ class Reader:
             )
             # waves == { ('state',): Waveform, ('next',): Waveform }
         """
+        self._validate_xz_value(xz_value)
         matched_clocks = self.get_matched_signals(clock_pattern, root_scope=root_scope)
         if not matched_clocks:
             raise Exception(f'clock pattern {clock_pattern} can not match any signal')
@@ -395,6 +628,89 @@ class Reader:
                 k: self.load_waveform(sig.full_name, matched_clocks[k].full_name, **load_kwargs)
                 for k, sig in matched_signals.items()
             }
+
+    def load_matched_unknown_masks(
+        self,
+        pattern: str,
+        clock_pattern: str,
+        include_x: bool = True,
+        include_z: bool = True,
+        sample_on_posedge: bool = False,
+        begin_time: int | None = None,
+        end_time: int | None = None,
+        begin_cycle: int | None = None,
+        end_cycle: int | None = None,
+        root_scope: Scope | None = None,
+    ) -> dict[tuple[Any, ...], Waveform]:
+        """Batch-load X/Z mask waveforms for all signals matching *pattern*.
+
+        .. note::
+
+           This API is **experimental**.  See :meth:`load_unknown_mask`.
+
+        Clock assignment follows :meth:`load_matched_waveforms`: a single
+        matched clock is broadcast to all signals; otherwise clock keys must
+        exactly match signal keys.  The returned dict uses the same keys as
+        :meth:`get_matched_signals` for *pattern*.
+
+        Parameters
+        ----------
+        pattern:
+            Signal path pattern (brace/regex).  See class docstring.
+        clock_pattern:
+            Clock signal path or pattern.  Must match at least one signal.
+        include_x:
+            If ``True`` (default), mark source ``X``/``x`` bits.
+        include_z:
+            If ``True`` (default), mark source ``Z``/``z`` bits.
+        sample_on_posedge, begin_time, end_time, begin_cycle, end_cycle:
+            Same sampling/windowing semantics as :meth:`load_waveform`.
+        root_scope:
+            If provided, both *pattern* and *clock_pattern* are searched within
+            this scope instead of the file's top-level scopes.
+
+        Returns
+        -------
+        dict[tuple, Waveform]:
+            Same keys as :meth:`get_matched_signals` on *pattern*.
+        """
+        matched_clocks = self.get_matched_signals(clock_pattern, root_scope=root_scope)
+        if not matched_clocks:
+            raise Exception(f'clock pattern {clock_pattern} can not match any signal')
+
+        matched_signals = self.get_matched_signals(pattern, root_scope=root_scope)
+
+        load_kwargs: dict[str, Any] = dict(
+            include_x=include_x,
+            include_z=include_z,
+            sample_on_posedge=sample_on_posedge,
+            begin_time=begin_time,
+            end_time=end_time,
+            begin_cycle=begin_cycle,
+            end_cycle=end_cycle,
+        )
+
+        if len(matched_clocks) == 1:
+            clock_full_name = next(iter(matched_clocks.values())).full_name
+            return {
+                k: self.load_unknown_mask(sig.full_name, clock_full_name, **load_kwargs)
+                for k, sig in matched_signals.items()
+            }
+        else:
+            if set(matched_clocks.keys()) != set(matched_signals.keys()):
+                raise Exception(
+                    f'clock pattern {clock_pattern!r} matched keys {sorted(matched_clocks.keys())} '
+                    f'which do not match signal pattern keys {sorted(matched_signals.keys())}'
+                )
+            return {
+                k: self.load_unknown_mask(sig.full_name, matched_clocks[k].full_name, **load_kwargs)
+                for k, sig in matched_signals.items()
+            }
+
+    @staticmethod
+    def _validate_xz_value(xz_value: int) -> None:
+        if xz_value not in (0, 1):
+            raise ValueError('xz_value must be 0 or 1')
 
     @abstractmethod
     def close(self):
@@ -442,6 +758,7 @@ class Reader:
             If provided, all signal paths in *expr* are resolved within this
             scope instead of the file's top-level scopes.
         """
+        self._validate_xz_value(xz_value)
         substituted, path_entries = extract_wave_paths(expr)
 
         load_kwargs: dict[str, Any] = dict(

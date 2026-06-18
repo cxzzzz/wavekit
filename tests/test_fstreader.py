@@ -18,6 +18,14 @@ def test_fst_reader_exported():
     assert FstReader.__name__ == 'FstReader'
 
 
+@pytest.fixture()
+def unknown_fst_path():
+    path = Path(__file__).resolve().parent / 'testdata' / 'unknown_states.fst'
+    if not path.exists():
+        pytest.skip('unknown_states.fst fixture is unavailable')
+    return path
+
+
 def test_fst_reader_top_scope_list_normalizes_names_and_preserves_aliases(fst_path):
     with FstReader(str(fst_path)) as reader:
         top = reader.top_scope_list()
@@ -49,7 +57,7 @@ def test_fst_reader_load_waveform_without_range(fst_path):
     with FstReader(str(fst_path)) as reader:
         counter = reader.load_waveform('tb.dut.counter', clock='tb.clk', sample_on_posedge=True)
 
-    assert counter.name == 'tb.dut.counter[3:0]'
+    assert counter.name == 'tb.dut.counter'
     assert counter.width == 4
     assert counter.signed is False
     assert np.array_equal(counter.time[:5], np.array([10, 30, 50, 70, 90], dtype=np.uint64))
@@ -92,6 +100,97 @@ def test_fst_reader_subrange_load(fst_path):
     assert np.all(low_bits.value < 4)
     assert matched_low_bits.width == 2
     assert np.array_equal(matched_low_bits.value, low_bits.value)
+
+
+def test_fst_reader_midrange_load(fst_path):
+    with FstReader(str(fst_path)) as reader:
+        full = reader.load_waveform('tb.dut.counter[3:0]', clock='tb.clk')
+        high_bits = reader.load_waveform('tb.dut.counter[3:2]', clock='tb.clk')
+
+    assert high_bits.width == 2
+    assert np.array_equal(high_bits.value, (full.value >> 2) & 0x3)
+    assert np.any(high_bits.value == 0)
+
+
+def test_fst_reader_load_unknown_mask_include_flags(unknown_fst_path):
+    with FstReader(str(unknown_fst_path)) as reader:
+        both = reader.load_unknown_mask('tb.bus[3:0]', clock='tb.clk', begin_cycle=1, end_cycle=6)
+        x_only = reader.load_unknown_mask(
+            'tb.bus[3:0]', clock='tb.clk', include_z=False, begin_cycle=1, end_cycle=6
+        )
+        z_only = reader.load_unknown_mask(
+            'tb.bus[3:0]', clock='tb.clk', include_x=False, begin_cycle=1, end_cycle=6
+        )
+        values = reader.load_waveform('tb.bus[3:0]', clock='tb.clk', begin_cycle=1, end_cycle=6)
+
+    assert both.name == 'unknown_mask(tb.bus[3:0])'
+    assert both.width == 4
+    assert both.signed is False
+    assert np.array_equal(
+        both.value,
+        np.array([0b1111, 0b1111, 0b0010, 0b0101, 0], dtype=np.uint64),
+    )
+    assert np.array_equal(x_only.value, np.array([0b1111, 0, 0b0010, 0b0001, 0], dtype=np.uint64))
+    assert np.array_equal(z_only.value, np.array([0, 0b1111, 0, 0b0100, 0], dtype=np.uint64))
+    assert np.array_equal(both.clock, values.clock)
+    assert np.array_equal(both.time, values.time)
+
+
+def test_fst_reader_load_unknown_mask_range_and_matched(unknown_fst_path):
+    with FstReader(str(unknown_fst_path)) as reader:
+        full = reader.load_unknown_mask('tb.bus[3:0]', clock='tb.clk', begin_cycle=1, end_cycle=6)
+        mid = reader.load_unknown_mask('tb.bus[3:2]', clock='tb.clk', begin_cycle=1, end_cycle=6)
+        low = reader.load_unknown_mask('tb.bus[1:0]', clock='tb.clk', begin_cycle=1, end_cycle=6)
+        masks = reader.load_matched_unknown_masks(
+            'tb.data_{0,1}[3:0]', 'tb.clk', begin_cycle=1, end_cycle=6
+        )
+        values = reader.load_matched_waveforms(
+            'tb.data_{0,1}[3:0]', 'tb.clk', begin_cycle=1, end_cycle=6
+        )
+
+    assert mid.width == 2
+    assert mid.name == 'unknown_mask(tb.bus[3:2])'
+    assert np.array_equal(mid.value, (full.value >> 2) & 0x3)
+    assert low.width == 2
+    assert low.name == 'unknown_mask(tb.bus[1:0])'
+    assert np.array_equal(low.value, np.array([0b11, 0b11, 0b10, 0b01, 0], dtype=np.uint64))
+    assert set(masks) == set(values) == {('0',), ('1',)}
+    assert masks[('0',)].name == 'unknown_mask(tb.data_0[3:0])'
+    assert masks[('1',)].name == 'unknown_mask(tb.data_1[3:0])'
+
+
+def test_fst_reader_unknown_mask_both_false_is_all_zero(unknown_fst_path):
+    with FstReader(str(unknown_fst_path)) as reader:
+        both = reader.load_unknown_mask(
+            'tb.bus[3:0]',
+            clock='tb.clk',
+            include_x=False,
+            include_z=False,
+            begin_cycle=1,
+            end_cycle=6,
+        )
+        masks = reader.load_matched_unknown_masks(
+            'tb.data_{0,1}[3:0]',
+            'tb.clk',
+            include_x=False,
+            include_z=False,
+            begin_cycle=1,
+            end_cycle=6,
+        )
+
+    assert np.array_equal(both.value, np.zeros(5, dtype=np.uint64))
+    assert np.array_equal(masks[('0',)].value, np.zeros(5, dtype=np.uint64))
+    assert np.array_equal(masks[('1',)].value, np.zeros(5, dtype=np.uint64))
+
+
+def test_fst_reader_rejects_invalid_xz_value(unknown_fst_path):
+    with FstReader(str(unknown_fst_path)) as reader:
+        with pytest.raises(ValueError, match='xz_value must be 0 or 1'):
+            reader.load_waveform('tb.bus[3:0]', clock='tb.clk', xz_value=2)
+        with pytest.raises(ValueError, match='xz_value must be 0 or 1'):
+            reader.load_matched_waveforms('tb.bus[3:0]', 'tb.clk', xz_value=2)
+        with pytest.raises(ValueError, match='xz_value must be 0 or 1'):
+            reader.eval('tb.bus[3:0] + 1', clock='tb.clk', xz_value=2)
 
 
 def test_fst_reader_load_matched_waveforms(fst_path):

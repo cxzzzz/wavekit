@@ -1,0 +1,58 @@
+$date
+    2026-06-14
+$end
+$version
+    wavekit unknown mask fixture
+$end
+$timescale 1ns $end
+$scope module tb $end
+$var wire 1 ! clk $end
+$var wire 4 " bus [3:0] $end
+$var wire 4 # data_0 [3:0] $end
+$var wire 4 $ data_1 [3:0] $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+b0000 "
+b0000 #
+b1111 $
+#5
+1!
+#10
+0!
+bxxxx "
+b0001 #
+bzzzz $
+#15
+1!
+#20
+0!
+bzzzz "
+bx010 #
+b1010 $
+#25
+1!
+#30
+0!
+b10x1 "
+b101z #
+b0x0z $
+#35
+1!
+#40
+0!
+b1z0x "
+b1111 #
+b0000 $
+#45
+1!
+#50
+0!
+b1010 "
+b0000 #
+b1111 $
+#55
+1!
+#60
+0!

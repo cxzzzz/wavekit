@@ -10,7 +10,6 @@ from vcdvcd import Scope as VcdVcdScope
 
 from ...scope import Scope
 from ...signal import Signal
-from ...waveform import Waveform
 from ..base import Reader
 from ..pattern_parser import split_by_range_expr
 
@@ -75,33 +74,20 @@ class VcdReader(Reader):
     def end_time(self) -> int:
         return self.file_handle.endtime
 
-    def load_waveform(
+    def _load_value_changes(
         self,
-        signal: Signal | str,
-        clock: Signal | str,
-        xz_value: int = 0,
-        signed: bool = False,
-        sample_on_posedge: bool = False,
+        path: str,
+        value_mapping: dict[str, int],
         begin_time: int | None = None,
         end_time: int | None = None,
-        begin_cycle: int | None = None,
-        end_cycle: int | None = None,
-    ) -> Waveform:
-        if begin_time is not None and begin_cycle is not None:
-            raise ValueError('begin_time and begin_cycle are mutually exclusive')
-        if end_time is not None and end_cycle is not None:
-            raise ValueError('end_time and end_cycle are mutually exclusive')
-
-        signal_path = signal.full_name if isinstance(signal, Signal) else signal
-        clock_path = clock.full_name if isinstance(clock, Signal) else clock
-
-        # Strip range suffix to get the bare signal path for lookup
-        bare_signal_path, range_suffix = split_by_range_expr(signal_path)
+    ) -> tuple[np.ndarray, int]:
+        """Load mapped VCD value changes with optional trailing range selection."""
+        bare_signal_path, range_suffix = split_by_range_expr(path)
 
         # VCD does not support multi-dimensional (more than one bracket pair)
         if range_suffix and len(re.findall(r'\[[\d:]+\]', range_suffix)) > 1:
             raise ValueError(
-                f"VCD does not support multi-dimensional range access: '{signal_path}'. "
+                f"VCD does not support multi-dimensional range access: '{path}'. "
                 'Use FSDB or load the full signal and slice manually.'
             )
 
@@ -121,84 +107,55 @@ class VcdReader(Reader):
         width = int(signal_handle.size)
         _, file_range_suffix = split_by_range_expr(lookup_path)
 
-        # Always load the full clock to compute absolute cycle numbers and clock_offset
-        all_clock_changes = np.array(
-            [(v[0], int(re.sub(r'[xXzZ]', '0', v[1]), 2)) for v in self.file_handle[clock_path].tv],
-            dtype=np.uint64,
-        )
-        if len(all_clock_changes) == 0:
-            raise ValueError(f"clock signal '{clock_path}' has no value changes")
+        # Check file-range compatibility for sub-range access
+        if range_suffix and file_range_suffix:
+            file_range_match = re.fullmatch(r'\[(\d+)(?::(\d+))?\]', file_range_suffix)
+            if file_range_match is not None:
+                file_low = (
+                    int(file_range_match.group(2))
+                    if file_range_match.group(2) is not None
+                    else int(file_range_match.group(1))
+                )
+            if file_low != 0:
+                raise ValueError(
+                    f"sub-range access for signal '{lookup_path}' is only supported "
+                    'when the stored signal range starts at bit 0'
+                )
 
-        # Determine clock edge timestamps for the sampling edge
-        sample_value = 1 if sample_on_posedge else 0
-        clock_edge_times = all_clock_changes[all_clock_changes[:, 1] == sample_value, 0]
-
-        # Convert begin_cycle/end_cycle to begin_time/end_time
-        if begin_cycle is not None:
-            begin_time = int(clock_edge_times[begin_cycle])
-        if end_cycle is not None:
-            end_time = int(clock_edge_times[end_cycle])
-
-        # Compute clock_offset = number of sampling edges before begin_time
-        begin_time_actual = begin_time if begin_time is not None else 0
-        clock_offset = int(np.searchsorted(clock_edge_times, begin_time_actual, side='left'))
-
-        # Trim clock to window [begin_time_actual, end_time] to reduce memory usage in value_change
-        end_time_actual = end_time if end_time is not None else np.iinfo(np.uint64).max
-        clock_mask = all_clock_changes[:, 0] >= begin_time_actual
-        if end_time is not None:
-            clock_mask &= all_clock_changes[:, 0] <= end_time_actual
-        clock_value_change = all_clock_changes[clock_mask]
-
-        signal_value_change = np.array(
-            [(v[0], int(re.sub(r'[xXzZ]', str(xz_value), v[1]), 2)) for v in signal_handle.tv],
-            dtype=np.object_ if width > 64 else np.uint64,
-        )
-        if len(signal_value_change) == 0:
-            raise ValueError(f"signal '{lookup_path}' has no value changes")
-        full_wave = self.value_change_to_waveform(
-            signal_value_change,
-            clock_value_change,
-            width=width,
-            signed=signed,
-            sample_on_posedge=sample_on_posedge,
-            signal=lookup_path,
-            clock_offset=clock_offset,
-        )
-
-        result = full_wave.time_slice(begin_time, end_time)
-
-        # Apply sub-range slice if user specified a range
+        high = width - 1
+        low = 0
         if range_suffix:
-            m = re.fullmatch(r'\[(\d+)(?::(\d+))?\]', range_suffix)
-            if m:
-                high = int(m.group(1))
-                low = int(m.group(2)) if m.group(2) is not None else high
-                if file_range_suffix:
-                    file_range_match = re.fullmatch(r'\[(\d+)(?::(\d+))?\]', file_range_suffix)
-                    assert file_range_match is not None
-                    file_low = (
-                        int(file_range_match.group(2))
-                        if file_range_match.group(2) is not None
-                        else int(file_range_match.group(1))
-                    )
-                    if file_low != 0:
-                        raise ValueError(
-                            f"sub-range access for signal '{lookup_path}' is only supported "
-                            'when the stored signal range starts at bit 0'
-                        )
-                if high >= width:
-                    raise ValueError(
-                        f"bit index {high} out of range for signal '{lookup_path}' "
-                        f'with width {width}'
-                    )
-                if low < 0:
-                    raise ValueError(f'bit index {low} cannot be negative')
-                slice_width = high - low + 1
-                if slice_width < width:
-                    result = result[high:low]
+            range_match = re.fullmatch(r'\[(\d+)(?::(\d+))?\]', range_suffix)
+            if range_match is None:
+                raise ValueError(f"unsupported range access for signal '{path}': {range_suffix}")
+            high = int(range_match.group(1))
+            low = int(range_match.group(2)) if range_match.group(2) is not None else high
+            if high < low:
+                raise ValueError(
+                    f"reversed range {range_suffix} is not supported for signal '{path}'"
+                )
+            if high >= width:
+                raise ValueError(
+                    f"bit index {high} out of range for signal '{path}' with width {width}"
+                )
 
-        return result
+        def decode(raw: str, high: int, low: int) -> int:
+            decoded = 0
+            # VCD binary values may be shorter than the signal width when leading
+            # bits are zero, so map bit indexes to raw-string positions manually.
+            raw = raw.lower()
+            for bit_index in range(min(high, len(raw) - 1), low - 1, -1):
+                raw_index = len(raw) - 1 - bit_index
+                decoded = (decoded << 1) + value_mapping.get(raw[raw_index], 0)
+            return decoded
+
+        value_width = high - low + 1
+        dtype = np.object_ if value_width > 64 else np.uint64
+        pairs = [(v[0], decode(v[1], high, low)) for v in signal_handle.tv]
+        result = np.array(pairs, dtype=dtype)
+        if len(result) == 0:
+            raise ValueError(f"signal '{lookup_path}' has no value changes")
+        return result, value_width
 
     def close(self):
         pass

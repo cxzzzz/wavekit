@@ -98,11 +98,11 @@ class Waveform:
 
     @property
     def name(self) -> str:
-        return self.signal.name
+        return self.signal.full_name
 
     @name.setter
     def name(self, value: str):
-        self.signal.name = value
+        self.signal.full_name = value
 
     def __str__(self):
         return f'Waveform({self.signal})'
