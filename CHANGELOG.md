@@ -7,6 +7,19 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.7.0a1 - 2026-06-19
+
+### Added
+- Programmable Pattern API (async body + declarative builder unified runtime)
+- Unknown-mask waveform loading (`load_unknown_mask`, `load_matched_unknown_masks`)
+- Pattern result status filters (`filter_ok`, `filter_failed`, `filter_status`)
+
+### Changed
+- Unify declarative/programmable pattern runtime into single engine
+- Remove legacy pattern engine and tick compatibility
+- Simplify reader backend hook docstrings; mark unknown-mask API experimental
+- Unify value-change loading across readers
+
 ## v0.6.1 - 2026-05-23
 
 ### Fixed
