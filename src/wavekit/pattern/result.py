@@ -38,6 +38,15 @@ class MatchResult:
         Named capture values.  Scalar captures are plain Waveforms;
         list captures (``mode='list'``) are Waveforms with ``object`` dtype
         where each element is a Python list.
+    ok : Waveform
+        Boolean mask where ``status == MatchStatus.OK``.
+    failed : Waveform
+        Boolean mask where ``status != MatchStatus.OK``.
+
+    Notes
+    -----
+    Use :meth:`filter_ok`, :meth:`filter_status`, and :meth:`filter_failed` to
+    keep result fields and captures aligned when selecting rows by status.
     """
 
     def __init__(
@@ -55,13 +64,37 @@ class MatchResult:
         self.captures = captures
 
     @property
-    def valid(self) -> Waveform:
+    def ok(self) -> Waveform:
         """Boolean mask: ``status == OK``."""
         return self.status == MatchStatus.OK
 
-    def filter_valid(self) -> MatchResult:
+    @property
+    def failed(self) -> Waveform:
+        """Boolean mask: ``status != OK``."""
+        return self.status != MatchStatus.OK
+
+    def filter_ok(self) -> MatchResult:
         """Return a new MatchResult keeping only ``status == OK`` matches."""
-        mask = self.valid
+        return self.filter_status(MatchStatus.OK)
+
+    def filter_status(self, status: MatchStatus | int) -> MatchResult:
+        """Return a new MatchResult keeping only matches with *status*.
+
+        ``status`` may be a :class:`MatchStatus` or integer value. Unknown
+        integer statuses simply produce an empty aligned result.
+        """
+        mask = self.status == int(status)
+        return MatchResult(
+            start=self.start.mask(mask),
+            end=self.end.mask(mask),
+            duration=self.duration.mask(mask),
+            status=self.status.mask(mask),
+            captures={name: val.mask(mask) for name, val in self.captures.items()},
+        )
+
+    def filter_failed(self) -> MatchResult:
+        """Return a new MatchResult keeping only non-OK matches."""
+        mask = self.failed
         return MatchResult(
             start=self.start.mask(mask),
             end=self.end.mask(mask),

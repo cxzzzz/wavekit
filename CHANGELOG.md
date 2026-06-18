@@ -16,7 +16,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Add `FstReader` for loading FST waveform files through the same reader APIs as VCD and FSDB.
-- Add `Channel`-based FIFO consumption to `Pattern.wait()` for ordered request/response pairing and per-ID routing.
+- Add `Channel`-based FIFO consumption to Pattern matching for ordered request/response pairing and per-ID routing.
 - Add relative time access helpers for waveform analysis.
 - Add Chinese README documentation.
 

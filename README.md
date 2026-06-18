@@ -16,7 +16,7 @@ English | [中文](README_ZH.md)
 
 - **Flexible Signal Extraction**: Flexible batch signal extraction via brace expansion, integer ranges, and regular expressions — load groups of related signals in one call.
 - **Rich Analysis Tools**: Numpy-like API for arithmetic, masking, bit-field manipulation, edge detection, and time/cycle slicing — compose complex signal queries in just a few lines.
-- **Pattern Matching**: NFA-based temporal pattern engine that scans waveforms in a single pass to extract protocol transactions, measure latencies, and detect timing violations.
+- **Pattern Matching**: Unified temporal pattern runtime that scans waveforms in a single pass to extract protocol transactions, measure latencies, and detect timing violations.
 - **High-Performance Parsing & Storage**: VCD, FST, and FSDB readers with Numpy-backed storage for fast loading and memory efficiency, handling large simulation files with ease.
 
 ## 📦 Installation
@@ -132,9 +132,16 @@ with VcdReader("fifo_tb.vcd") as f:
 
 ### 4. Pattern Matching
 
-Describe a temporal sequence of events; the engine finds all matching transactions in one pass.
+`Pattern` scans a waveform and extracts all matching transactions — a request/response pair, a burst, a stall interval, or any other repeating timing pattern.
 
-**AXI-lite Read Latency**
+There are two ways to describe a pattern:
+
+- **Declarative** — chain steps like `.wait()`, `.consume()`, `.capture()`, `.loop()`. Best for fixed transaction flows.
+- **Programmable** — pass a handler function to `Pattern(...)`. Best for dynamic branches, per-ID routing, and other complex flows.
+
+#### Declarative examples
+
+**AXI-Lite read latency**
 
 ```python
 from wavekit import VcdReader, Pattern
@@ -147,38 +154,37 @@ with VcdReader("axi_tb.vcd") as f:
     rready  = f.load_waveform("tb.dut.rready",      clock=clk)
     rdata   = f.load_waveform("tb.dut.rdata[31:0]", clock=clk)
 
-result = (
-    Pattern()
-    .wait(arvalid & arready)   # AR handshake → start
-    .wait(rvalid  & rready)    # R  handshake → end
-    .capture("rdata", rdata)
-    .timeout(256)
-    .match()
-)
+    result = (
+        Pattern(timeout=256)
+        .wait(arvalid & arready)   # AR handshake → transaction starts
+        .wait(rvalid  & rready)    # R  handshake → transaction ends
+        .capture("rdata", rdata)
+        .match()
+    )
 
-valid = result.filter_valid()
-print(f"Read latencies (cycles): {valid.duration.value}")
-print(f"Read data: {valid.captures['rdata'].value}")
+    ok = result.filter_ok()
+    print(f"Read latencies (cycles): {ok.duration.value}")
+    print(f"Read data: {ok.captures['rdata'].value}")
 ```
 
-**AXI Write Burst (multi-beat)**
+**AXI write burst (multi-beat)**
 
 ```python
-beat = Pattern().wait(wvalid & wready).capture("beats", wdata, mode="list")
+beat = Pattern().consume(wvalid & wready, channel="w").capture("beats", wdata, mode="list")
 
 result = (
     Pattern()
-    .wait(awvalid & awready)   # AW handshake → burst start
-    .loop(beat, until=wlast)   # collect beats until wlast
+    .wait(awvalid & awready)   # AW handshake → burst starts
+    .loop(beat, until=wlast)   # collect each beat until wlast
     .timeout(512)
     .match()
 )
 
-for i, inst in enumerate(result.filter_valid()):
+for i, inst in enumerate(result.filter_ok()):
     print(f"Burst {i}: {len(inst.captures['beats'])} beats")
 ```
 
-**Stall Detection**
+**Stall detection**
 
 ```python
 stall = valid & (ready == 0)
@@ -186,13 +192,50 @@ stall = valid & (ready == 0)
 result = (
     Pattern()
     .wait(stall.rising_edge())             # stall begins
-    .loop(Pattern().delay(1), when=stall)  # wait while stalling
+    .loop(Pattern().delay(1), when=stall)  # keep waiting until stall ends
     .match()
 )
 
-stalls = result.filter_valid()
+stalls = result.filter_ok()
 print(f"Stall durations: {stalls.duration.value} cycles")
 ```
+
+#### Programmable example
+
+**Out-of-order AXI reads by ID**
+
+When R beats from different IDs interleave on the bus, match each AR to its response beats by `arid` and collect results as Python dicts.
+
+```python
+arfire = arvalid & arready   # precompute outside the handler
+rfire = rvalid & rready
+
+async def read_burst(ctx):
+    if ctx.value(arfire):
+        my_id = ctx.value(arid)
+        beats = []
+
+        while True:
+            await ctx.consume(
+                lambda: ctx.value(rfire) and ctx.value(rid) == my_id,
+                channel=("r", my_id),
+            )
+            beats.append(int(ctx.value(rdata)))
+            if ctx.value(rlast):
+                break
+
+        return {"arid": my_id, "beats": beats}
+    return None
+
+records = Pattern(read_burst, timeout=64).collect()
+```
+
+Some tips for programmable patterns:
+
+- Precompute fixed waveform expressions (like `fire = valid & ready`) outside
+  the handler function so they aren't rebuilt every cycle.
+- Start the handler with `if ctx.value(fire): ...` and `return None`
+  otherwise — this tells the runtime which cycles begin a transaction.
 
 ---
 
@@ -289,9 +332,21 @@ changed = wave != wave.back(3)
 
 ### Pattern
 
+**Construction**
+
+| API | Description |
+|-----|-------------|
+| `Pattern(timeout=..., max_active=...)` | Create a Declarative Pattern. Add steps with builder methods, then call `.match()`. |
+| `Pattern(async_fn, timeout=..., max_active=...)` | Create a Programmable Pattern. The async function receives `ctx`. |
+| `.match(start_cycle=None, end_cycle=None)` | Run the pattern and return `MatchResult`. In a Programmable Pattern, return `ctx.OK` for success and `None` to skip. |
+| `.collect(start_cycle=None, end_cycle=None)` | Programmable Pattern only. Collect each non-`None` Python return value. |
+
+**Declarative Steps**
+
 | Method | Description |
 |--------|-------------|
-| `.wait(cond, *, require=None, channel=None, tick=True)` | Block until `cond` is True. `require` is checked each waiting cycle (failure → `REQUIRE_VIOLATED`). `channel` binds the wait to a shared FIFO consumer group (see [Channels](#channels) below). `tick=False` matches on the current cycle without consuming it. |
+| `.wait(cond, *, require=None)` | Block until `cond` is True without consuming the event. Resumes in the same cycle when already true; use `.delay(1)` for next-cycle behavior. `require` is checked each waiting cycle (failure → `REQUIRE_VIOLATED`). |
+| `.consume(cond, channel, *, require=None)` | Block until `cond` is True and this instance can exclusively consume from `channel`. Resumes in the same cycle on success. Use this for FIFO request/response pairing and per-key routing. |
 | `.delay(n, *, require=None)` | Advance `n` cycles. `delay(0)` is a no-op. `require` must hold every cycle. |
 | `.capture(name, signal, *, mode='last')` | Record signal value at current cycle. `mode='last'` (default) overwrites; `'first'` keeps the first write; `'list'` appends to a list. |
 | `.require(cond)` | Assert condition; fail with `REQUIRE_VIOLATED` if False. |
@@ -299,27 +354,54 @@ changed = wave != wave.back(3)
 | `.repeat(body, n)` | Execute body exactly `n` times. `n` may be a callable. |
 | `.branch(cond, true_body, false_body)` | Conditional branch. |
 | `.timeout(max_cycles)` | Terminate unfinished instances with `TIMEOUT`. |
-| `.match(start_cycle=None, end_cycle=None)` | Run the engine; return `MatchResult`. |
 
-**Channels**
+The same time and ownership operations are available inside Programmable
+Patterns as `await ctx.wait(...)`, `await ctx.consume(...)`, and
+`await ctx.delay(...)`.
 
-A `Channel` is an identity object representing a shared FIFO consumer group: at most one in-flight pattern instance may consume per cycle. Each `wait()` step has its own implicit channel, so multiple instances of the same pattern automatically serialize one-per-cycle on that step. Pass an explicit `Channel` (or `callable(index, captures) -> Channel`) when you need to override the default serialization — typically when events arrive on physically parallel buses (multi-bank memory, multi-lane retire) and several instances should consume *concurrently* by routing each to its own per-key channel.
+**Programmable Context**
+
+| API | Description |
+|-----|-------------|
+| `ctx.value(waveform, offset=0)` | Read a scalar value at the current sample plus optional offset. |
+| `ctx.cycle(waveform, offset=0)` | Read the cycle number at the current sample plus optional offset. |
+| `ctx.time(waveform, offset=0)` | Read the timestamp at the current sample plus optional offset. |
+| `await ctx.wait(cond, require=None)` | Observe cycles until `cond` is true; does not consume the event. |
+| `await ctx.consume(cond, channel, require=None)` | Wait for `cond` and exclusively consume from `channel`. |
+| `await ctx.delay(n, require=None)` | Advance `n` cycles. |
+| `ctx.capture(name, value, mode='last')` | Record a capture for programmable `.match()`. |
+| `ctx.OK` | Return from programmable `.match()` to record a successful match. |
+
+**Dynamic callbacks**
+
+Declarative callbacks use `callable(index, captures)`. `index` is the absolute
+waveform sample index; it is not rebased when `match(start_cycle=...)` is used.
+
+**Channels and consume vs. wait**
+
+When multiple in-flight instances are waiting for the same kind of event, plain
+`wait()` won't pair each request with its own response — every instance sees
+every event. `consume()` solves this: it hands the event to exactly one instance
+per cycle, in FIFO order.
+
+A `Channel` is the FIFO queue that `consume()` uses. Pass a `Channel` object, a
+hashable key, or a dynamic callback to `consume(..., channel=...)`. All
+instances sharing the same channel key consume from the same queue.
 
 ```python
 from collections import defaultdict
 from wavekit import Channel, Pattern
 
 # Multi-bank cache: each bank has its own response port, so two banks
-# can return data in the *same* cycle. Without partitioning, the default
-# serialization rule would force one instance to wait an extra cycle.
-# A per-bank Channel lets each in-flight read consume from its own bank.
+# can return data in the *same* cycle. A per-bank Channel lets each in-flight
+# read consume from its own bank while preserving FIFO order within that bank.
 banks = defaultdict(Channel)
 
 result = (
     Pattern()
     .wait(req_valid)
     .capture('bank', req_addr & 1)
-    .wait(
+    .consume(
         lambda i, cap: bank_valid[cap['bank']].value[i],
         channel=lambda i, cap: banks[cap['bank']],
     )
@@ -337,7 +419,11 @@ result = (
 | `.duration` | `end - start + 1` cycles. |
 | `.status` | `MatchStatus.OK`, `TIMEOUT`, or `REQUIRE_VIOLATED`. |
 | `.captures` | `dict[str, Waveform]` of captured values. |
-| `.filter_valid()` | Return only `OK` matches. |
+| `.ok` | Boolean Waveform where `status == MatchStatus.OK`. |
+| `.failed` | Boolean Waveform where `status != MatchStatus.OK`. |
+| `.filter_ok()` | Return only `OK` matches. |
+| `.filter_status(status)` | Return only matches with the given `MatchStatus` or integer status. |
+| `.filter_failed()` | Return only non-OK matches. |
 
 ---
 
