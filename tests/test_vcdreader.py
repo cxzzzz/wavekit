@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from wavekit import VcdReader, Waveform
-from wavekit.readers.base import Reader
+from wavekit.readers.base import Reader  # noqa: F401  # used in test_value_change_to_waveform
 from wavekit.readers.expr_parser import extract_wave_paths
 from wavekit.readers.pattern_parser import (
     expand_brace_pattern,
@@ -77,6 +77,15 @@ def test_vcd_reader_subrange_load(vcd_path):
     assert np.array_equal(matched_low_bits.value, low_bits.value)
 
 
+def test_vcd_reader_midrange_load(vcd_path):
+    with VcdReader(str(vcd_path)) as reader:
+        full = reader.load_waveform('tb.u0.J_state[3:0]', clock='tb.tck')
+        high_bits = reader.load_waveform('tb.u0.J_state[3:2]', clock='tb.tck')
+
+    assert high_bits.width == 2
+    assert np.array_equal(high_bits.value, (full.value >> 2) & 0x3)
+
+
 @pytest.fixture()
 def unknown_vcd_path():
     return Path(__file__).resolve().parent / 'testdata' / 'unknown_states.vcd'
@@ -110,8 +119,13 @@ def test_vcd_reader_load_unknown_mask_include_flags(unknown_vcd_path):
 
 def test_vcd_reader_load_unknown_mask_range_selection(unknown_vcd_path):
     with VcdReader(str(unknown_vcd_path)) as reader:
+        full = reader.load_unknown_mask('tb.bus[3:0]', clock='tb.clk', begin_cycle=1, end_cycle=6)
+        mid = reader.load_unknown_mask('tb.bus[3:2]', clock='tb.clk', begin_cycle=1, end_cycle=6)
         low = reader.load_unknown_mask('tb.bus[1:0]', clock='tb.clk', begin_cycle=1, end_cycle=6)
 
+    assert mid.width == 2
+    assert mid.name == 'unknown_mask(tb.bus[3:2])'
+    assert np.array_equal(mid.value, (full.value >> 2) & 0x3)
     assert low.width == 2
     assert low.name == 'unknown_mask(tb.bus[1:0])'
     assert np.array_equal(low.value, np.array([0b11, 0b11, 0b10, 0b01, 0], dtype=np.uint64))
@@ -140,6 +154,7 @@ def test_load_unknown_mask_name_signed(unknown_vcd_path):
 
 def test_load_waveform_signal_object_name(vcd_path):
     from wavekit.signal import Signal
+
     sig = Signal(name='J_state[3:0]', full_name='tb.u0.J_state[3:0]', width=4, range=(3, 0))
     with VcdReader(str(vcd_path)) as reader:
         w = reader.load_waveform(sig, clock='tb.tck', signed=True)
@@ -149,6 +164,7 @@ def test_load_waveform_signal_object_name(vcd_path):
 
 def test_load_unknown_mask_signal_object_name(unknown_vcd_path):
     from wavekit.signal import Signal
+
     sig = Signal(name='bus[3:0]', full_name='tb.bus[3:0]', width=4, range=(3, 0))
     with VcdReader(str(unknown_vcd_path)) as reader:
         w = reader.load_unknown_mask(sig, clock='tb.clk', begin_cycle=1, end_cycle=6)
@@ -165,9 +181,7 @@ def test_load_waveform_subrange_name(vcd_path):
 
 def test_load_matched_waveforms_name_with_brace(vcd_path):
     with VcdReader(str(vcd_path)) as reader:
-        waves = reader.load_matched_waveforms(
-            'tb.u0.J_{state,next}[3:0]', 'tb.tck', signed=True
-        )
+        waves = reader.load_matched_waveforms('tb.u0.J_{state,next}[3:0]', 'tb.tck', signed=True)
     assert waves[('state',)].name == 'tb.u0.J_state[3:0]'
     assert waves[('next',)].name == 'tb.u0.J_next[3:0]'
     assert waves[('state',)].signed is True
@@ -197,8 +211,12 @@ def test_vcd_reader_load_unknown_mask_fully_known_is_zero(unknown_vcd_path):
 def test_vcd_reader_load_unknown_mask_both_false_is_all_zero(unknown_vcd_path):
     with VcdReader(str(unknown_vcd_path)) as reader:
         mask = reader.load_unknown_mask(
-            'tb.bus[3:0]', clock='tb.clk', include_x=False, include_z=False,
-            begin_cycle=1, end_cycle=6,
+            'tb.bus[3:0]',
+            clock='tb.clk',
+            include_x=False,
+            include_z=False,
+            begin_cycle=1,
+            end_cycle=6,
         )
 
     assert mask.name == 'unknown_mask(tb.bus[3:0])'
@@ -225,8 +243,12 @@ def test_vcd_reader_load_matched_unknown_masks(unknown_vcd_path):
 def test_vcd_reader_matched_unknown_mask_both_false_is_all_zero(unknown_vcd_path):
     with VcdReader(str(unknown_vcd_path)) as reader:
         masks = reader.load_matched_unknown_masks(
-            'tb.data_{0,1}[3:0]', 'tb.clk', include_x=False, include_z=False,
-            begin_cycle=1, end_cycle=6,
+            'tb.data_{0,1}[3:0]',
+            'tb.clk',
+            include_x=False,
+            include_z=False,
+            begin_cycle=1,
+            end_cycle=6,
         )
 
     assert set(masks) == {('0',), ('1',)}
@@ -329,7 +351,7 @@ def test_value_change_to_waveform_sample_on_posedge():
     value_change = np.array([[0, 0], [5, 1], [10, 0]], dtype=np.uint64)
     clock_changes = np.array([[0, 0], [5, 1], [10, 0], [15, 1]], dtype=np.uint64)
 
-    wave = Reader.value_change_to_waveform(
+    wave = Reader._value_change_to_waveform(
         value_change,
         clock_changes,
         width=1,
@@ -530,7 +552,7 @@ def test_value_change_to_waveform_clock_offset():
     value_change = np.array([[0, 0], [5, 1], [10, 0]], dtype=np.uint64)
     clock_changes = np.array([[0, 0], [5, 1], [10, 0], [15, 1]], dtype=np.uint64)
 
-    wave_no_offset = Reader.value_change_to_waveform(
+    wave_no_offset = Reader._value_change_to_waveform(
         value_change,
         clock_changes,
         width=1,
@@ -538,7 +560,7 @@ def test_value_change_to_waveform_clock_offset():
         sample_on_posedge=True,
         signal='tb.sig',
     )
-    wave_with_offset = Reader.value_change_to_waveform(
+    wave_with_offset = Reader._value_change_to_waveform(
         value_change,
         clock_changes,
         width=1,

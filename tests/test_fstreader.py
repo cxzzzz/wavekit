@@ -102,6 +102,15 @@ def test_fst_reader_subrange_load(fst_path):
     assert np.array_equal(matched_low_bits.value, low_bits.value)
 
 
+def test_fst_reader_midrange_load(fst_path):
+    with FstReader(str(fst_path)) as reader:
+        full = reader.load_waveform('tb.dut.counter[3:0]', clock='tb.clk')
+        high_bits = reader.load_waveform('tb.dut.counter[3:2]', clock='tb.clk')
+
+    assert high_bits.width == 2
+    assert np.array_equal(high_bits.value, (full.value >> 2) & 0x3)
+
+
 def test_fst_reader_load_unknown_mask_include_flags(unknown_fst_path):
     with FstReader(str(unknown_fst_path)) as reader:
         both = reader.load_unknown_mask('tb.bus[3:0]', clock='tb.clk', begin_cycle=1, end_cycle=6)
@@ -128,6 +137,8 @@ def test_fst_reader_load_unknown_mask_include_flags(unknown_fst_path):
 
 def test_fst_reader_load_unknown_mask_range_and_matched(unknown_fst_path):
     with FstReader(str(unknown_fst_path)) as reader:
+        full = reader.load_unknown_mask('tb.bus[3:0]', clock='tb.clk', begin_cycle=1, end_cycle=6)
+        mid = reader.load_unknown_mask('tb.bus[3:2]', clock='tb.clk', begin_cycle=1, end_cycle=6)
         low = reader.load_unknown_mask('tb.bus[1:0]', clock='tb.clk', begin_cycle=1, end_cycle=6)
         masks = reader.load_matched_unknown_masks(
             'tb.data_{0,1}[3:0]', 'tb.clk', begin_cycle=1, end_cycle=6
@@ -136,6 +147,9 @@ def test_fst_reader_load_unknown_mask_range_and_matched(unknown_fst_path):
             'tb.data_{0,1}[3:0]', 'tb.clk', begin_cycle=1, end_cycle=6
         )
 
+    assert mid.width == 2
+    assert mid.name == 'unknown_mask(tb.bus[3:2])'
+    assert np.array_equal(mid.value, (full.value >> 2) & 0x3)
     assert low.width == 2
     assert low.name == 'unknown_mask(tb.bus[1:0])'
     assert np.array_equal(low.value, np.array([0b11, 0b11, 0b10, 0b01, 0], dtype=np.uint64))
@@ -147,12 +161,20 @@ def test_fst_reader_load_unknown_mask_range_and_matched(unknown_fst_path):
 def test_fst_reader_unknown_mask_both_false_is_all_zero(unknown_fst_path):
     with FstReader(str(unknown_fst_path)) as reader:
         both = reader.load_unknown_mask(
-            'tb.bus[3:0]', clock='tb.clk', include_x=False, include_z=False,
-            begin_cycle=1, end_cycle=6,
+            'tb.bus[3:0]',
+            clock='tb.clk',
+            include_x=False,
+            include_z=False,
+            begin_cycle=1,
+            end_cycle=6,
         )
         masks = reader.load_matched_unknown_masks(
-            'tb.data_{0,1}[3:0]', 'tb.clk', include_x=False, include_z=False,
-            begin_cycle=1, end_cycle=6,
+            'tb.data_{0,1}[3:0]',
+            'tb.clk',
+            include_x=False,
+            include_z=False,
+            begin_cycle=1,
+            end_cycle=6,
         )
 
     assert np.array_equal(both.value, np.zeros(5, dtype=np.uint64))

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import re
 from abc import abstractmethod
 from collections.abc import Sequence
 from typing import Any, Literal
@@ -135,9 +134,11 @@ class Reader:
         """
         self._validate_xz_value(xz_value)
         signal_path = signal.full_name if isinstance(signal, Signal) else signal
+        value_mapping = {'0': 0, '1': 1, 'x': xz_value, 'z': xz_value}
         wf = self._sample_on_clock(
-            signal, clock,
-            decoder=lambda raw: int(re.sub(r'[xXzZ]', str(xz_value), raw), 2),
+            signal,
+            clock,
+            value_mapping=value_mapping,
             signed=signed,
             sample_on_posedge=sample_on_posedge,
             begin_time=begin_time,
@@ -146,8 +147,11 @@ class Reader:
             end_cycle=end_cycle,
         )
         wf.signal = Signal(
-            name=signal_path.rsplit('.', 1)[-1], full_name=signal_path,
-            width=wf.width, range=None, signed=signed,
+            name=signal_path.rsplit('.', 1)[-1],
+            full_name=signal_path,
+            width=wf.width,
+            range=None,
+            signed=signed,
         )
         return wf
 
@@ -191,15 +195,11 @@ class Reader:
         """
         signal_path = signal.full_name if isinstance(signal, Signal) else signal
 
-        def mask_decoder(raw: str) -> int:
-            s = re.sub(r'[01]', '0', raw)
-            s = re.sub(r'[xX]', '1' if include_x else '0', s)
-            s = re.sub(r'[zZ]', '1' if include_z else '0', s)
-            return int(s, 2)
-
+        value_mapping = {'0': 0, '1': 0, 'x': 1 if include_x else 0, 'z': 1 if include_z else 0}
         wf = self._sample_on_clock(
-            signal, clock,
-            decoder=mask_decoder,
+            signal,
+            clock,
+            value_mapping=value_mapping,
             signed=False,
             sample_on_posedge=sample_on_posedge,
             begin_time=begin_time,
@@ -207,10 +207,12 @@ class Reader:
             begin_cycle=begin_cycle,
             end_cycle=end_cycle,
         )
-        mask_name = f'unknown_mask({signal_path})'
         wf.signal = Signal(
-            name=mask_name.rsplit('.', 1)[-1], full_name=mask_name,
-            width=wf.width, range=None, signed=False,
+            name=f'unknown_mask_{signal_path.rsplit(".", 1)[-1]}',  #mask_name.rsplit('.', 1)[-1],
+            full_name=f'unknown_mask({signal_path})',
+            width=wf.width,
+            range=None,
+            signed=False,
         )
         return wf
 
@@ -225,7 +227,7 @@ class Reader:
         """
 
     @staticmethod
-    def value_change_to_waveform(
+    def _value_change_to_waveform(
         value_change: np.ndarray,
         clock_changes: np.ndarray,
         width: int | None,
@@ -246,17 +248,46 @@ class Reader:
             clock=clock,
             time=time,
             signal=Signal(
-                name=signal.rsplit('.', 1)[-1], full_name=signal,
-                width=width, range=None, signed=signed,
+                name=signal.rsplit('.', 1)[-1],
+                full_name=signal,
+                width=width,
+                range=None,
+                signed=signed,
             ),
         )
 
     @abstractmethod
+    def _load_value_changes(
+        self,
+        path: str,
+        value_mapping: dict[str, int],
+        begin_time: int | None = None,
+        end_time: int | None = None,
+    ) -> tuple[np.ndarray, int]:
+        """Load raw value changes for a signal.
+
+        Subclasses implement file-format-specific loading.  Returns a tuple
+        of (value_change_array, width) where value_change_array has shape
+        (N, 2) with columns [time, value], and width is the full bit-width
+        of the signal (before any user-requested sub-range).
+
+        Parameters
+        ----------
+        path:
+            Full signal path (may include a range suffix).
+        value_mapping:
+            Character-to-bit mapping, e.g. ``{'0': 0, '1': 1, 'x': 0, 'z': 0}``.
+        begin_time:
+            Optional earliest time to include (inclusive).
+        end_time:
+            Optional latest time to include (exclusive).
+        """  # noqa: E501
+
     def _sample_on_clock(
         self,
         signal: Signal | str,
         clock: Signal | str,
-        decoder,
+        value_mapping: dict[str, int],
         signed: bool,
         sample_on_posedge: bool,
         begin_time: int | None,
@@ -266,9 +297,84 @@ class Reader:
     ) -> Waveform:
         """Sample *signal* on every *clock* edge and return a raw Waveform.
 
-        Subclasses implement file-format-specific loading.  The returned
-        Waveform is a simple value array — naming is handled by the caller.
+        Subclasses provide :meth:`_load_value_changes` for format-specific I/O.
+        The returned Waveform is a simple value array — naming is handled by
+        the caller.
         """
+        if begin_time is not None and begin_cycle is not None:
+            raise ValueError('begin_time and begin_cycle are mutually exclusive')
+        if end_time is not None and end_cycle is not None:
+            raise ValueError('end_time and end_cycle are mutually exclusive')
+
+        signal_path = signal.full_name if isinstance(signal, Signal) else signal
+        clock_path = clock.full_name if isinstance(clock, Signal) else clock
+
+        # Load clock value changes for absolute cycle computation
+        clock_mapping = {'0': 0, '1': 1, 'x': 0, 'z': 0}
+        all_clock_changes, _ = self._load_value_changes(clock_path, clock_mapping)
+
+        # Find sampling edge timestamps
+        sample_value = 1 if sample_on_posedge else 0
+        clock_edge_times = all_clock_changes[all_clock_changes[:, 1] == sample_value, 0]
+
+        if len(clock_edge_times) == 0:
+            edge_kind = 'pos' if sample_on_posedge else 'neg'
+            raise ValueError(f'no {edge_kind}edges found in clock signal')
+
+        # Convert begin_cycle/end_cycle to begin_time/end_time
+        if begin_cycle is not None:
+            if begin_cycle >= len(clock_edge_times):
+                raise ValueError(
+                    f'begin_cycle {begin_cycle} out of range (max {len(clock_edge_times) - 1})'
+                )
+            begin_time = int(clock_edge_times[begin_cycle])
+        if end_cycle is not None:
+            if end_cycle > len(clock_edge_times):
+                raise ValueError(
+                    f'end_cycle {end_cycle} out of range (max {len(clock_edge_times)})'
+                )
+            if end_cycle < len(clock_edge_times):
+                end_time = int(clock_edge_times[end_cycle])
+
+        # Compute clock_offset = number of sampling edges before begin_time
+        begin_time = begin_time if begin_time is not None else 0
+        clock_offset = int(
+            np.searchsorted(
+                clock_edge_times,
+                begin_time,
+                side='left',
+            )
+        )
+
+        # Trim clock to window [begin_time, end_time)
+        clock_mask = all_clock_changes[:, 0] >= begin_time
+        if end_time is not None:
+            clock_mask &= all_clock_changes[:, 0] < end_time
+        windowed_clock_changes = all_clock_changes[clock_mask]
+
+        # Load signal value changes (backend handles range suffix internally)
+        signal_value_change, width = self._load_value_changes(
+            signal_path,
+            value_mapping,
+            begin_time=begin_time,
+            end_time=end_time,
+        )
+
+        if len(signal_value_change) == 0:
+            raise ValueError(f"signal '{signal_path}' has no value changes")
+
+        # Convert to Waveform via sampling and trim
+        result = self._value_change_to_waveform(
+            signal_value_change,
+            windowed_clock_changes,
+            width=width,
+            signed=signed,
+            sample_on_posedge=sample_on_posedge,
+            signal='',
+            clock_offset=clock_offset,
+        )
+
+        return result
 
     def _search_roots(self, root_scope: Scope | None) -> Sequence[Scope]:
         """Return the list of scopes to start a search from."""
@@ -387,7 +493,7 @@ class Reader:
             common_keys = set(dict1.keys()).intersection(dict2.keys())
             if common_keys:
                 raise Exception(
-                    'found more than one scope with the same keys: ' f'keys:{list(common_keys)}'
+                    f'found more than one scope with the same keys: keys:{list(common_keys)}'
                 )
             return {**dict1, **dict2}
 

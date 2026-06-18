@@ -670,52 +670,16 @@ cdef class NpiFsdbReader:
         assert signal_handle != NULL, f"can't find signal: {signal}"
         return NpiFsdbSignal.init(signal_handle)
 
-    @cython.boundscheck(False)  # 关闭边界检查以提升性能
-    @cython.wraparound(False)   # 关闭负索引检查以提升性能
-    def load_value_change(
-        self,
-        NpiFsdbSignal signal,
-        unsigned long long begin_time,
-        unsigned long long end_time,
-        int xz_value
-    ) -> np.ndarray:
-        if xz_value not in (0, 1):
-            raise ValueError('xz_value must be 0 or 1')
-        return self.load_value_change_mode(
-            signal,
-            begin_time,
-            end_time,
-            FSDB_DECODE_VALUE_XZ_1 if xz_value else FSDB_DECODE_VALUE_XZ_0,
-        )
-
-    def load_unknown_mask_value_change(
-        self,
-        NpiFsdbSignal signal,
-        unsigned long long begin_time,
-        unsigned long long end_time,
-        bint include_x,
-        bint include_z,
-    ) -> np.ndarray:
-        cdef FsdbDecodeMode mode
-        if include_x and include_z:
-            mode = FSDB_DECODE_XZ_MASK
-        elif include_x:
-            mode = FSDB_DECODE_X_MASK
-        elif include_z:
-            mode = FSDB_DECODE_Z_MASK
-        else:
-            mode = FSDB_DECODE_MASK_NONE
-        return self.load_value_change_mode(signal, begin_time, end_time, mode)
-
     @cython.boundscheck(False)
     @cython.wraparound(False)
-    cdef np.ndarray load_value_change_mode(
+    cpdef np.ndarray load_value_change_mode(
         self,
         NpiFsdbSignal signal,
         unsigned long long begin_time,
         unsigned long long end_time,
-        FsdbDecodeMode mode,
+        int mode,
     ):
+        cdef FsdbDecodeMode c_mode = <FsdbDecodeMode>mode
 
         cdef int width = signal.width()
         cdef npiFsdbVctHandle signal_vct_handle = npi_fsdb_create_vct(signal.sig_handle)
@@ -750,7 +714,7 @@ cdef class NpiFsdbReader:
                 break
             time_array.push_back(cur_time)
 
-            cstr_to_ull_array(<char*>cur_value.value.str, mode, chunk_values, width)
+            cstr_to_ull_array(<char*>cur_value.value.str, c_mode, chunk_values, width)
             for i in range(value_array_num):
                 value_array[i].push_back(chunk_values[i])
             first = False

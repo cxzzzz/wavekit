@@ -95,9 +95,9 @@ bitmask; bit `1` means the corresponding source bit was selected by
 | `include_z` | `bool` | `True` | Mark source `Z`/`z` bits. |
 | `sample_on_posedge` / windows | | same as `load_waveform` | Align masks exactly with value waveforms. |
 
-Both flags cannot be `False`.  The returned mask is always unsigned, has the
-requested signal width after range selection, and is named
-`unknown_mask(<signal>)`.
+When both flags are `False`, the returned mask is all zero.  The returned mask
+is always unsigned, has the requested signal width after range selection, and is
+named `unknown_mask(<signal>)`.
 
 ```python
 data = r.load_waveform("tb.dut.data[7:0]", clock="tb.clk", xz_value=0)

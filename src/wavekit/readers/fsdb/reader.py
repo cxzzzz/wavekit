@@ -5,13 +5,12 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 
 from ...scope import Scope
 from ...signal import Signal, SignalCompositeType
-from ...waveform import Waveform
 from ..base import Reader
 from .npi_fsdb_reader import (
     NPI_FSDB_CT_ARRAY,
@@ -23,6 +22,16 @@ from .npi_fsdb_reader import (
     NpiFsdbScope,
     NpiFsdbSignal,
 )
+
+# Mapping from (val_0, val_1, val_x, val_z) to FSDB decode mode integer.
+_MAPPING_TO_FSDB_MODE: dict[tuple[int, int, int, int], int] = {
+    (0, 1, 0, 0): 0,  # xz_value=0  (value decode, X/Z→0)
+    (0, 1, 1, 1): 1,  # xz_value=1  (value decode, X/Z→1)
+    (0, 0, 1, 0): 2,  # X-only mask
+    (0, 0, 0, 1): 3,  # Z-only mask
+    (0, 0, 1, 1): 4,  # X-or-Z mask
+    (0, 0, 0, 0): 5,  # mask none (both false)
+}
 
 
 @dataclass
@@ -180,174 +189,33 @@ class FsdbReader(Reader):
         except Exception as exc:
             raise self._runtime_error(init_error, exc) from exc
 
-    def load_waveform(
+    def _load_value_changes(
         self,
-        signal: Signal | str,
-        clock: Signal | str,
-        xz_value: int = 0,
-        signed: bool = False,
-        sample_on_posedge: bool = False,
+        path: str,
+        value_mapping: dict[str, int],
         begin_time: int | None = None,
         end_time: int | None = None,
-        begin_cycle: int | None = None,
-        end_cycle: int | None = None,
-    ) -> Waveform:
-        self._validate_xz_value(xz_value)
-        signal_path = signal.full_name if isinstance(signal, Signal) else signal
+    ) -> tuple[np.ndarray, int]:
+        """Load raw value changes for an FSDB signal.
 
-        def load_value_change(npi_signal: Any, begin: int, end: int) -> np.ndarray:
-            return self.file_handle.load_value_change(
-                npi_signal,
-                begin_time=begin,
-                end_time=end,
-                xz_value=xz_value,
-            )
-
-        wf = self._sample_on_clock(
-            signal=signal,
-            clock=clock,
-            signed=signed,
-            sample_on_posedge=sample_on_posedge,
-            begin_time=begin_time,
-            end_time=end_time,
-            begin_cycle=begin_cycle,
-            end_cycle=end_cycle,
-            load_signal_value_change=load_value_change,
+        Converts the value_mapping dict to an FSDB decode mode and delegates to
+        the NPI reader.
+        """
+        npi_signal = self.file_handle.get_signal(path)
+        c = value_mapping
+        mode = _MAPPING_TO_FSDB_MODE.get(
+            (c.get('0', 0), c.get('1', 0), c.get('x', 0), c.get('z', 0)),
+            5,  # mask-none fallback
         )
-        wf.signal = Signal(
-            name=signal_path.rsplit('.', 1)[-1], full_name=signal_path,
-            width=wf.width, range=None, signed=signed,
-        )
-        return wf
-
-    def load_unknown_mask(
-        self,
-        signal: Signal | str,
-        clock: Signal | str,
-        include_x: bool = True,
-        include_z: bool = True,
-        sample_on_posedge: bool = False,
-        begin_time: int | None = None,
-        end_time: int | None = None,
-        begin_cycle: int | None = None,
-        end_cycle: int | None = None,
-    ) -> Waveform:
-        """Load X/Z presence for an FSDB signal as an unsigned mask waveform."""
-        signal_path = signal.full_name if isinstance(signal, Signal) else signal
-
-        def load_value_change(npi_signal: Any, begin: int, end: int) -> np.ndarray:
-            return self.file_handle.load_unknown_mask_value_change(
-                npi_signal,
-                begin_time=begin,
-                end_time=end,
-                include_x=include_x,
-                include_z=include_z,
-            )
-
-        wf = self._sample_on_clock(
-            signal=signal,
-            clock=clock,
-            signed=False,
-            sample_on_posedge=sample_on_posedge,
-            begin_time=begin_time,
-            end_time=end_time,
-            begin_cycle=begin_cycle,
-            end_cycle=end_cycle,
-            load_signal_value_change=load_value_change,
-        )
-        mask_name = f'unknown_mask({signal_path})'
-        wf.signal = Signal(
-            name=mask_name.rsplit('.', 1)[-1], full_name=mask_name,
-            width=wf.width, range=None, signed=False,
-        )
-        return wf
-
-    def _sample_on_clock(
-        self,
-        signal: Signal | str,
-        clock: Signal | str,
-        signed: bool,
-        sample_on_posedge: bool,
-        begin_time: int | None,
-        end_time: int | None,
-        begin_cycle: int | None,
-        end_cycle: int | None,
-        load_signal_value_change: Callable[[Any, int, int], np.ndarray],
-    ) -> Waveform:
-        if begin_time is not None and begin_cycle is not None:
-            raise ValueError('begin_time and begin_cycle are mutually exclusive')
-        if end_time is not None and end_cycle is not None:
-            raise ValueError('end_time and end_cycle are mutually exclusive')
-
-        signal_path = signal.full_name if isinstance(signal, Signal) else signal
-        clock_path = clock.full_name if isinstance(clock, Signal) else clock
-
-        # Resolve NPI signal handles — reuse the handle if already available
-        npi_signal = (
-            signal._npi_signal
-            if isinstance(signal, FsdbSignal) and signal._npi_signal is not None
-            else self.file_handle.get_signal(signal_path)
-        )
-        npi_clock = (
-            clock._npi_signal
-            if isinstance(clock, FsdbSignal) and clock._npi_signal is not None
-            else self.file_handle.get_signal(clock_path)
-        )
-
-        # Always load the full clock to compute absolute cycle numbers
-        all_clock_changes = self.file_handle.load_value_change(
-            npi_clock,
-            begin_time=0,
-            end_time=2**64 - 1,
-            xz_value=0,
-        )
-
-        # Determine clock edge timestamps for the sampling edge
-        sample_value = 1 if sample_on_posedge else 0
-        clock_edge_times = all_clock_changes[all_clock_changes[:, 1] == sample_value, 0]
-
-        # Convert begin_cycle/end_cycle to begin_time/end_time
-        if begin_cycle is not None:
-            begin_time = int(clock_edge_times[begin_cycle])
-        if end_cycle is not None:
-            end_time = int(clock_edge_times[end_cycle])
-
-        begin_time_actual = begin_time if begin_time is not None else 0
-        end_time_actual = end_time if end_time is not None else 2**64 - 1
-
-        # Compute clock_offset = number of sampling edges before begin_time_actual
-        clock_offset = int(np.searchsorted(clock_edge_times, begin_time_actual, side='left'))
-
-        # Trim clock to window [begin_time_actual, end_time_actual] to reduce memory in value_change
-        clock_mask = all_clock_changes[:, 0] >= begin_time_actual
-        if end_time is not None:
-            clock_mask &= all_clock_changes[:, 0] <= end_time_actual
-        windowed_clock_changes = all_clock_changes[clock_mask]
-
-        # Load signal within the requested window only (FSDB NPI provides the
-        # correct initial value at begin_time even if the last change was earlier)
-        signal_value_change = load_signal_value_change(
+        begin = begin_time if begin_time is not None else 0
+        end = end_time if end_time is not None else 2**64 - 1
+        result = self.file_handle.load_value_change_mode(
             npi_signal,
-            begin_time_actual,
-            end_time_actual,
+            begin,
+            end,
+            mode,
         )
-
-        full_wave = self.value_change_to_waveform(
-            signal_value_change,
-            windowed_clock_changes,
-            width=npi_signal.width(),
-            signed=signed,
-            sample_on_posedge=sample_on_posedge,
-            signal='',
-            clock_offset=clock_offset,
-        )
-
-        # time_slice trims the garbage samples produced by clock edges before
-        # begin_time (where the windowed signal data hasn't started yet)
-        return full_wave.time_slice(
-            begin_time_actual if begin_time is not None else None,
-            end_time if end_time is not None else None,
-        )
+        return result, npi_signal.width()
 
     def top_scope_list(self) -> Sequence[Scope]:
         if not hasattr(self, '_top_scope_list'):

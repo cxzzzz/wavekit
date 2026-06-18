@@ -9,7 +9,6 @@ import pylibfst
 
 from ...scope import Scope
 from ...signal import Signal
-from ...waveform import Waveform
 from ..base import Reader
 from ..pattern_parser import split_by_range_expr
 
@@ -121,27 +120,68 @@ class FstReader(Reader):
             raise ValueError(f"signal '{signal_path}' not found")
         return self._signal_by_name[lookup_path], range_suffix
 
-    def _load_value_change(
+    def _load_value_changes(
         self,
-        signal: FstSignal,
-        decoder,
+        path: str,
+        value_mapping: dict[str, int],
+        begin_time: int | None = None,
         end_time: int | None = None,
-    ) -> np.ndarray:
+    ) -> tuple[np.ndarray, int]:
+        """Load raw value changes for an FST signal.
+
+        Parameters
+        ----------
+        path:
+            Full signal path (may include a range suffix).
+        value_mapping:
+            Character-to-bit mapping.
+        begin_time, end_time:
+            Time bounds.  *end_time* limits FST iteration; *begin_time* is
+            ignored (FST always loads from the beginning for correct initial
+            values).
+        """
+        fst_signal, range_suffix = self._resolve_signal(path)
+        width = fst_signal.width or 1
+
+        high = width - 1
+        low = 0
+        if range_suffix:
+            range_match = re.fullmatch(r'\[(\d+)(?::(\d+))?\]', range_suffix)
+            if range_match is None:
+                raise ValueError(f"unsupported range access for signal '{path}': {range_suffix}")
+            high = int(range_match.group(1))
+            low = int(range_match.group(2)) if range_match.group(2) is not None else high
+            if high < low:
+                raise ValueError(
+                    f"reversed range {range_suffix} is not supported for signal '{path}'"
+                )
+            if high >= width:
+                raise ValueError(
+                    f"bit index {high} out of range for signal '{path}' with width {width}"
+                )
+
+        def decoder(raw: str, high: int, low: int) -> int:
+            raw = raw[width - 1 - high : width - low]
+            decoded = 0
+            for c in raw.lower():
+                decoded = (decoded << 1) + value_mapping.get(c, 0)
+            return decoded
+
         changes: list[tuple[int, int]] = []
 
         def value_change_callback(_data, time, _facidx, value):
             if end_time is None or int(time) <= end_time:
                 text = pylibfst.string(value)
-                changes.append((int(time), decoder(text or '0')))
+                changes.append((int(time), decoder(text or '0', high, low)))
 
         def value_change_callback_varlen(_data, time, _facidx, _value, length):
             raise ValueError(
-                f"unsupported variable-length FST value for signal '{signal.full_name}' "
+                f"unsupported variable-length FST value for signal '{fst_signal.full_name}' "
                 f'at time {int(time)} with length {int(length)}'
             )
 
         pylibfst.lib.fstReaderClrFacProcessMaskAll(self.file_handle)
-        pylibfst.lib.fstReaderSetFacProcessMask(self.file_handle, signal.handle)
+        pylibfst.lib.fstReaderSetFacProcessMask(self.file_handle, fst_signal.handle)
         if end_time is None:
             pylibfst.lib.fstReaderSetUnlimitedTimeRange(self.file_handle)
         else:
@@ -152,97 +192,12 @@ class FstReader(Reader):
             value_change_callback_varlen,
         )
 
-        dtype = np.object_ if (signal.width is not None and signal.width > 64) else np.uint64
+        value_width = high - low + 1
+        dtype = np.object_ if value_width > 64 else np.uint64
         if not changes:
-            raise ValueError(f"signal '{signal.full_name}' has no value changes")
-        return np.array(changes, dtype=dtype)
-
-    def _sample_on_clock(
-        self,
-        signal: Signal | str,
-        clock: Signal | str,
-        decoder,
-        signed: bool,
-        sample_on_posedge: bool,
-        begin_time: int | None,
-        end_time: int | None,
-        begin_cycle: int | None,
-        end_cycle: int | None,
-    ) -> Waveform:
-        if begin_time is not None and begin_cycle is not None:
-            raise ValueError('begin_time and begin_cycle are mutually exclusive')
-        if end_time is not None and end_cycle is not None:
-            raise ValueError('end_time and end_cycle are mutually exclusive')
-
-        fst_signal, requested_range = self._resolve_signal(signal)
-        fst_clock, _ = self._resolve_signal(clock)
-
-        all_clock_changes = self._load_value_change(
-            fst_clock,
-            decoder=lambda raw: int(re.sub(r'[xXzZ]', '0', raw), 2),
-        )
-        sample_value = 1 if sample_on_posedge else 0
-        clock_edge_times = all_clock_changes[all_clock_changes[:, 1] == sample_value, 0]
-
-        if begin_cycle is not None:
-            begin_time = int(clock_edge_times[begin_cycle])
-        if end_cycle is not None:
-            end_time = int(clock_edge_times[end_cycle])
-
-        begin_time_actual = begin_time if begin_time is not None else 0
-        end_time_actual = end_time if end_time is not None else np.iinfo(np.uint64).max
-        clock_offset = int(np.searchsorted(clock_edge_times, begin_time_actual, side='left'))
-
-        clock_mask = all_clock_changes[:, 0] >= begin_time_actual
-        if end_time is not None:
-            clock_mask &= all_clock_changes[:, 0] <= end_time_actual
-        windowed_clock_changes = all_clock_changes[clock_mask]
-
-        # Load from the beginning for MVP correctness: pylibfst time-limit
-        # iteration semantics do not guarantee an initial value at begin_time.
-        signal_value_change = self._load_value_change(
-            fst_signal,
-            decoder=decoder,
-            end_time=end_time,
-        )
-
-        full_wave = self.value_change_to_waveform(
-            signal_value_change,
-            windowed_clock_changes,
-            width=fst_signal.width,
-            signed=signed,
-            sample_on_posedge=sample_on_posedge,
-            signal='',
-            clock_offset=clock_offset,
-        )
-
-        result = full_wave.time_slice(begin_time, end_time)
-
-        if requested_range:
-            match = re.fullmatch(r'\[(\d+)(?::(\d+))?\]', requested_range)
-            if match is None:
-                raise ValueError(
-                    f"unsupported range access for signal '{fst_signal.full_name}': "
-                    f'{requested_range}'
-                )
-            high = int(match.group(1))
-            low = int(match.group(2)) if match.group(2) is not None else high
-            if fst_signal.width is None:
-                raise ValueError(f"width is unknown for signal '{fst_signal.full_name}'")
-            if fst_signal.range is not None and fst_signal.range[1] != 0:
-                raise ValueError(
-                    f"sub-range access for signal '{fst_signal.full_name}' is only supported "
-                    'when the stored signal range starts at bit 0'
-                )
-            if high >= fst_signal.width:
-                raise ValueError(
-                    f"bit index {high} out of range for signal '{fst_signal.full_name}' "
-                    f'with width {fst_signal.width}'
-                )
-            if high - low + 1 < fst_signal.width:
-                result = result[high:low]
-
-        return result
+            raise ValueError(f"signal '{fst_signal.full_name}' has no value changes")
+        result = np.array(changes, dtype=dtype)
+        return result, value_width
 
     def top_scope_list(self) -> Sequence[Scope]:
         """Return top-level scopes from the FST hierarchy."""
