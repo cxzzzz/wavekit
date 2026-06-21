@@ -15,7 +15,7 @@ from wavekit.readers.pattern_parser import (
 
 @pytest.fixture()
 def vcd_path():
-    return Path(__file__).resolve().parent / 'testdata' / 'jtag.vcd'
+    return Path(__file__).resolve().parent / 'fixtures' / 'vcd' / 'jtag.vcd'
 
 
 def test_pattern_parsing():
@@ -88,7 +88,7 @@ def test_vcd_reader_midrange_load(vcd_path):
 
 @pytest.fixture()
 def unknown_vcd_path():
-    return Path(__file__).resolve().parent / 'testdata' / 'unknown_states.vcd'
+    return Path(__file__).resolve().parent / 'fixtures' / 'vcd' / 'unknown_states.vcd'
 
 
 def test_vcd_reader_load_unknown_mask_include_flags(unknown_vcd_path):

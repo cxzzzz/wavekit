@@ -8,7 +8,7 @@ from wavekit import FstReader, Waveform
 
 @pytest.fixture()
 def fst_path():
-    path = Path(__file__).resolve().parent / 'testdata' / 'counter.fst'
+    path = Path(__file__).resolve().parent / 'fixtures' / 'fst' / 'counter.fst'
     if not path.exists():
         pytest.skip('counter.fst fixture is unavailable')
     return path
@@ -20,7 +20,7 @@ def test_fst_reader_exported():
 
 @pytest.fixture()
 def unknown_fst_path():
-    path = Path(__file__).resolve().parent / 'testdata' / 'unknown_states.fst'
+    path = Path(__file__).resolve().parent / 'fixtures' / 'fst' / 'unknown_states.fst'
     if not path.exists():
         pytest.skip('unknown_states.fst fixture is unavailable')
     return path

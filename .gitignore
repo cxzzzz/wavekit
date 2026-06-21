@@ -20,6 +20,14 @@ src/wavekit/**/*.cpp
 example/**/*.vcd
 example/**/*.vvp
 
+tests/fsdb_work/
+tests/fsdb/*.local.sh
+tests/readers/fixtures/fsdb/*.local.sh
+tests/testdata/*_from_fsdb.vcd
+tests/readers/fixtures/fsdb/*_from_fsdb.vcd
+npiLog/
+fsdb2vcdLog/
+
 .vscode/
 .pypirc
 poetry.toml

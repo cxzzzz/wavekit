@@ -666,8 +666,13 @@ cdef class NpiFsdbReader:
 
     def get_signal(self, str signal) -> NpiFsdbSignal:
         """Look up a signal by its full hierarchical path and return an NpiFsdbSignal handle."""
-        cdef npiFsdbSigHandle signal_handle = npi_fsdb_sig_by_name(self.fsdb_handle, signal.encode('ascii'), NULL)
-        assert signal_handle != NULL, f"can't find signal: {signal}"
+        cdef npiFsdbSigHandle signal_handle = npi_fsdb_sig_by_name(
+            self.fsdb_handle,
+            signal.encode('ascii'),
+            NULL,
+        )
+        if signal_handle == NULL:
+            raise ValueError(f"signal '{signal}' not found")
         return NpiFsdbSignal.init(signal_handle)
 
     @cython.boundscheck(False)
