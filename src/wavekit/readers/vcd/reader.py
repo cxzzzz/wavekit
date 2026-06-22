@@ -82,26 +82,38 @@ class VcdReader(Reader):
         end_time: int | None = None,
     ) -> tuple[np.ndarray, int]:
         """Load mapped VCD value changes with optional trailing range selection."""
-        bare_signal_path, range_suffix = split_by_range_expr(path)
 
-        # VCD does not support multi-dimensional (more than one bracket pair)
-        if range_suffix and len(re.findall(r'\[[\d:]+\]', range_suffix)) > 1:
-            raise ValueError(
-                f"VCD does not support multi-dimensional range access: '{path}'. "
-                'Use FSDB or load the full signal and slice manually.'
-            )
+        def resolve_signal_path(path: str) -> tuple[str, str]:
+            # Exact dumped reference first, so Verilator leaves with multiple
+            # bracket groups (for example packed_arr[0][2:0]) are not mistaken
+            # for aggregate paths plus a trailing requested range.
+            if path in self.file_handle.references_to_ids:
+                return path, ''
 
-        # Resolve the actual VCD signal name (may include a range suffix in the file)
-        lookup_path = bare_signal_path
-        if lookup_path not in self.file_handle.references_to_ids:
-            pattern = re.compile(rf'^{re.escape(lookup_path)}\[\d+(?::\d+)?\]$')
+            bare_signal_path, range_suffix = split_by_range_expr(path)
+
+            # Bare/base signal exact lookup after splitting a trailing requested
+            # range, for ordinary range selection such as data[1:0] from data.
+            if bare_signal_path in self.file_handle.references_to_ids:
+                return bare_signal_path, range_suffix
+
+            # File-side range lookup for dumps that store the vector range in
+            # the reference name, resolving a requested base like data to the
+            # unique dumped reference data[7:0].
+            pattern = re.compile(rf'^{re.escape(bare_signal_path)}\[\d+(?::\d+)?\]$')
             matches = [
                 ref for ref in self.file_handle.references_to_ids.keys() if pattern.fullmatch(ref)
             ]
             if len(matches) == 1:
-                lookup_path = matches[0]
-            elif len(matches) > 1:
-                raise ValueError(f'pattern {lookup_path} matches more than one signal')
+                return matches[0], range_suffix
+            if len(matches) > 1:
+                raise ValueError(f'pattern {bare_signal_path} matches more than one signal')
+
+            # Preserve VCD-style not-found behavior when no exact, bare, or
+            # file-side range reference resolves.
+            raise KeyError(bare_signal_path)
+
+        lookup_path, range_suffix = resolve_signal_path(path)
 
         signal_handle = self.file_handle[lookup_path]
         width = int(signal_handle.size)

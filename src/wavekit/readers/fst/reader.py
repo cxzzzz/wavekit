@@ -105,7 +105,13 @@ class FstReader(Reader):
 
     def _resolve_signal(self, signal: Signal | str) -> tuple[FstSignal, str]:
         signal_path = signal.full_name if isinstance(signal, Signal) else signal
-        bare_signal_path, range_suffix = split_by_range_expr(signal_path)
+        # Exact dumped reference first, so Verilator multidimensional leaves
+        # like packed_arr[0][2:0] are not treated as a base plus sub-range.
+        if signal_path in self._signal_by_name:
+            bare_signal_path = signal_path
+            range_suffix = ''
+        else:
+            bare_signal_path, range_suffix = split_by_range_expr(signal_path)
         lookup_path = bare_signal_path
 
         if lookup_path not in self._signal_by_name:

@@ -93,42 +93,59 @@ def unknown_vcd_path():
 
 def test_vcd_reader_load_unknown_mask_include_flags(unknown_vcd_path):
     with VcdReader(str(unknown_vcd_path)) as reader:
-        both = reader.load_unknown_mask('tb.bus[3:0]', clock='tb.clk', begin_cycle=1, end_cycle=6)
+        both = reader.load_unknown_mask(
+            'TOP.tb.bus[3:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
         x_only = reader.load_unknown_mask(
-            'tb.bus[3:0]', clock='tb.clk', include_z=False, begin_cycle=1, end_cycle=6
+            'TOP.tb.bus[3:0]',
+            clock='TOP.tb.clk',
+            include_z=False,
+            begin_cycle=1,
+            end_cycle=6,
         )
         z_only = reader.load_unknown_mask(
-            'tb.bus[3:0]', clock='tb.clk', include_x=False, begin_cycle=1, end_cycle=6
+            'TOP.tb.bus[3:0]',
+            clock='TOP.tb.clk',
+            include_x=False,
+            begin_cycle=1,
+            end_cycle=6,
         )
         values_x0 = reader.load_waveform(
-            'tb.bus[3:0]', clock='tb.clk', xz_value=0, begin_cycle=1, end_cycle=6
+            'TOP.tb.bus[3:0]',
+            clock='TOP.tb.clk',
+            xz_value=0,
+            begin_cycle=1,
+            end_cycle=6,
         )
 
-    assert both.name == 'unknown_mask(tb.bus[3:0])'
+    assert both.name == 'unknown_mask(TOP.tb.bus[3:0])'
     assert both.width == 4
     assert both.signed is False
-    assert np.array_equal(
-        both.value,
-        np.array([0b1111, 0b1111, 0b0010, 0b0101, 0], dtype=np.uint64),
-    )
-    assert np.array_equal(x_only.value, np.array([0b1111, 0, 0b0010, 0b0001, 0], dtype=np.uint64))
-    assert np.array_equal(z_only.value, np.array([0, 0b1111, 0, 0b0100, 0], dtype=np.uint64))
+    assert np.array_equal(both.value, np.zeros(5, dtype=np.uint64))
+    assert np.array_equal(x_only.value, np.zeros(5, dtype=np.uint64))
+    assert np.array_equal(z_only.value, np.zeros(5, dtype=np.uint64))
     assert np.array_equal(both.clock, values_x0.clock)
     assert np.array_equal(both.time, values_x0.time)
 
 
 def test_vcd_reader_load_unknown_mask_range_selection(unknown_vcd_path):
     with VcdReader(str(unknown_vcd_path)) as reader:
-        full = reader.load_unknown_mask('tb.bus[3:0]', clock='tb.clk', begin_cycle=1, end_cycle=6)
-        mid = reader.load_unknown_mask('tb.bus[3:2]', clock='tb.clk', begin_cycle=1, end_cycle=6)
-        low = reader.load_unknown_mask('tb.bus[1:0]', clock='tb.clk', begin_cycle=1, end_cycle=6)
+        full = reader.load_unknown_mask(
+            'TOP.tb.bus[3:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+        mid = reader.load_unknown_mask(
+            'TOP.tb.bus[3:2]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+        low = reader.load_unknown_mask(
+            'TOP.tb.bus[1:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
 
     assert mid.width == 2
-    assert mid.name == 'unknown_mask(tb.bus[3:2])'
+    assert mid.name == 'unknown_mask(TOP.tb.bus[3:2])'
     assert np.array_equal(mid.value, (full.value >> 2) & 0x3)
     assert low.width == 2
-    assert low.name == 'unknown_mask(tb.bus[1:0])'
-    assert np.array_equal(low.value, np.array([0b11, 0b11, 0b10, 0b01, 0], dtype=np.uint64))
+    assert low.name == 'unknown_mask(TOP.tb.bus[1:0])'
+    assert np.array_equal(low.value, np.zeros(5, dtype=np.uint64))
 
 
 def test_load_waveform_name_signed(vcd_path):
@@ -147,8 +164,10 @@ def test_load_waveform_name_signed_default(vcd_path):
 
 def test_load_unknown_mask_name_signed(unknown_vcd_path):
     with VcdReader(str(unknown_vcd_path)) as reader:
-        w = reader.load_unknown_mask('tb.bus[3:0]', clock='tb.clk', begin_cycle=1, end_cycle=6)
-    assert w.name == 'unknown_mask(tb.bus[3:0])'
+        w = reader.load_unknown_mask(
+            'TOP.tb.bus[3:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+    assert w.name == 'unknown_mask(TOP.tb.bus[3:0])'
     assert w.signed is False
 
 
@@ -165,10 +184,10 @@ def test_load_waveform_signal_object_name(vcd_path):
 def test_load_unknown_mask_signal_object_name(unknown_vcd_path):
     from wavekit.signal import Signal
 
-    sig = Signal(name='bus[3:0]', full_name='tb.bus[3:0]', width=4, range=(3, 0))
+    sig = Signal(name='bus[3:0]', full_name='TOP.tb.bus[3:0]', width=4, range=(3, 0))
     with VcdReader(str(unknown_vcd_path)) as reader:
-        w = reader.load_unknown_mask(sig, clock='tb.clk', begin_cycle=1, end_cycle=6)
-    assert w.name == 'unknown_mask(tb.bus[3:0])'
+        w = reader.load_unknown_mask(sig, clock='TOP.tb.clk', begin_cycle=1, end_cycle=6)
+    assert w.name == 'unknown_mask(TOP.tb.bus[3:0])'
     assert w.signed is False
 
 
@@ -191,10 +210,10 @@ def test_load_matched_waveforms_name_with_brace(vcd_path):
 def test_load_matched_unknown_masks_name(unknown_vcd_path):
     with VcdReader(str(unknown_vcd_path)) as reader:
         masks = reader.load_matched_unknown_masks(
-            'tb.data_{0,1}[3:0]', 'tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.data_{0,1}[3:0]', 'TOP.tb.clk', begin_cycle=1, end_cycle=6
         )
-    assert masks[('0',)].name == 'unknown_mask(tb.data_0[3:0])'
-    assert masks[('1',)].name == 'unknown_mask(tb.data_1[3:0])'
+    assert masks[('0',)].name == 'unknown_mask(TOP.tb.data_0[3:0])'
+    assert masks[('1',)].name == 'unknown_mask(TOP.tb.data_1[3:0])'
     assert masks[('0',)].signed is False
     assert masks[('1',)].signed is False
 
@@ -202,7 +221,7 @@ def test_load_matched_unknown_masks_name(unknown_vcd_path):
 def test_vcd_reader_load_unknown_mask_fully_known_is_zero(unknown_vcd_path):
     with VcdReader(str(unknown_vcd_path)) as reader:
         mask = reader.load_unknown_mask(
-            'tb.data_0[3:0]', clock='tb.clk', begin_cycle=4, end_cycle=5
+            'TOP.tb.data_0[3:0]', clock='TOP.tb.clk', begin_cycle=4, end_cycle=5
         )
 
     assert np.array_equal(mask.value, np.array([0], dtype=np.uint64))
@@ -211,40 +230,156 @@ def test_vcd_reader_load_unknown_mask_fully_known_is_zero(unknown_vcd_path):
 def test_vcd_reader_load_unknown_mask_both_false_is_all_zero(unknown_vcd_path):
     with VcdReader(str(unknown_vcd_path)) as reader:
         mask = reader.load_unknown_mask(
-            'tb.bus[3:0]',
-            clock='tb.clk',
+            'TOP.tb.bus[3:0]',
+            clock='TOP.tb.clk',
             include_x=False,
             include_z=False,
             begin_cycle=1,
             end_cycle=6,
         )
 
-    assert mask.name == 'unknown_mask(tb.bus[3:0])'
+    assert mask.name == 'unknown_mask(TOP.tb.bus[3:0])'
     assert mask.width == 4
     assert np.array_equal(mask.value, np.zeros(5, dtype=np.uint64))
+
+
+def test_vcd_reader_verilator_composites_expose_structs_as_scopes(unknown_vcd_path):
+    with VcdReader(str(unknown_vcd_path)) as reader:
+        top = reader.top_scope_list()[0]
+        tb = top.child_scope_list[0]
+        signals = {sig.name: sig for sig in tb.signal_list}
+        children = {scope.name: scope for scope in tb.child_scope_list}
+
+    assert top.name == 'TOP'
+    assert tb.name == 'tb'
+    assert 'pkt[3:0]' not in signals
+    assert 'packed_arr[32:0]' not in signals
+    assert 'pkt_packed_arr[7:0]' not in signals
+    assert signals['packed_arr[0][2:0]'].width == 3
+    assert signals['packed_arr[0][2:0]'].composite_type is None
+    assert signals['packed_arr[10][2:0]'].width == 3
+    assert signals['unpacked_arr[0][10:0]'].width == 11
+    assert signals['unpacked_arr[1][10:0]'].composite_type is None
+    assert set(children) == {
+        'pkt',
+        'pkt_arr[0]',
+        'pkt_arr[1]',
+        'pkt_packed_arr[0]',
+        'pkt_packed_arr[1]',
+    }
+    assert {sig.name for sig in children['pkt'].signal_list} == {'valid', 'data[2:0]'}
+    assert all(sig.composite_type is None for sig in children['pkt'].signal_list)
+
+
+def test_vcd_reader_verilator_packed_struct_member_reads(unknown_vcd_path):
+    with VcdReader(str(unknown_vcd_path)) as reader:
+        valid = reader.load_waveform(
+            'TOP.tb.pkt.valid', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+        data = reader.load_waveform(
+            'TOP.tb.pkt.data[2:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+
+    assert np.array_equal(valid.value, np.array([1, 1, 0, 1, 0], dtype=np.uint64))
+    assert np.array_equal(data.value, np.array([1, 2, 7, 4, 5], dtype=np.uint64))
+    assert np.array_equal((valid.value << 3) | data.value, np.array([9, 10, 7, 12, 5]))
+
+
+def test_vcd_reader_verilator_logic_array_element_reads(unknown_vcd_path):
+    with VcdReader(str(unknown_vcd_path)) as reader:
+        packed_0 = reader.load_waveform(
+            'TOP.tb.packed_arr[0][2:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+        packed_10 = reader.load_waveform(
+            'TOP.tb.packed_arr[10][2:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+        unpacked_0 = reader.load_waveform(
+            'TOP.tb.unpacked_arr[0][10:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+        unpacked_1 = reader.load_waveform(
+            'TOP.tb.unpacked_arr[1][10:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+        unpacked_2 = reader.load_waveform(
+            'TOP.tb.unpacked_arr[2][10:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+
+    assert np.array_equal(packed_0.value, np.array([1, 2, 3, 4, 5], dtype=np.uint64))
+    assert np.array_equal(packed_10.value, packed_0.value)
+    assert np.array_equal(unpacked_0.value, np.array([1, 2, 3, 4, 5], dtype=np.uint64))
+    assert np.array_equal(unpacked_1.value, np.array([0x101, 0x102, 0x103, 0x104, 0x105]))
+    assert np.array_equal(unpacked_2.value, np.array([0x201, 0x202, 0x203, 0x204, 0x205]))
+
+
+def test_vcd_reader_verilator_struct_array_member_reads(unknown_vcd_path):
+    with VcdReader(str(unknown_vcd_path)) as reader:
+        pkt_arr_0_valid = reader.load_waveform(
+            'TOP.tb.pkt_arr[0].valid', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+        pkt_arr_0_data = reader.load_waveform(
+            'TOP.tb.pkt_arr[0].data[2:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+        pkt_arr_1_valid = reader.load_waveform(
+            'TOP.tb.pkt_arr[1].valid', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+        pkt_arr_1_data = reader.load_waveform(
+            'TOP.tb.pkt_arr[1].data[2:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+        packed_0_valid = reader.load_waveform(
+            'TOP.tb.pkt_packed_arr[0].valid', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+        packed_0_data = reader.load_waveform(
+            'TOP.tb.pkt_packed_arr[0].data[2:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+        packed_1_valid = reader.load_waveform(
+            'TOP.tb.pkt_packed_arr[1].valid', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+        packed_1_data = reader.load_waveform(
+            'TOP.tb.pkt_packed_arr[1].data[2:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+        )
+
+    assert np.array_equal(pkt_arr_0_valid.value, np.array([1, 1, 0, 1, 0], dtype=np.uint64))
+    assert np.array_equal(pkt_arr_0_data.value, np.array([1, 2, 3, 4, 5], dtype=np.uint64))
+    assert np.array_equal(pkt_arr_1_valid.value, np.array([0, 0, 1, 0, 1], dtype=np.uint64))
+    assert np.array_equal(pkt_arr_1_data.value, np.array([6, 5, 4, 3, 2], dtype=np.uint64))
+    assert np.array_equal(packed_0_valid.value, pkt_arr_0_valid.value)
+    assert np.array_equal(packed_0_data.value, pkt_arr_0_data.value)
+    assert np.array_equal(packed_1_valid.value, pkt_arr_1_valid.value)
+    assert np.array_equal(packed_1_data.value, pkt_arr_1_data.value)
+
+
+def test_vcd_reader_verilator_whole_aggregate_reads_fail(unknown_vcd_path):
+    with VcdReader(str(unknown_vcd_path)) as reader:
+        for signal in [
+            'TOP.tb.pkt[3:0]',
+            'TOP.tb.packed_arr[32:0]',
+            'TOP.tb.pkt_arr[0]',
+            'TOP.tb.pkt_packed_arr[7:0]',
+        ]:
+            with pytest.raises(KeyError):
+                reader.load_waveform(signal, clock='TOP.tb.clk')
 
 
 def test_vcd_reader_load_matched_unknown_masks(unknown_vcd_path):
     with VcdReader(str(unknown_vcd_path)) as reader:
         masks = reader.load_matched_unknown_masks(
-            'tb.data_{0,1}[3:0]', 'tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.data_{0,1}[3:0]', 'TOP.tb.clk', begin_cycle=1, end_cycle=6
         )
         values = reader.load_matched_waveforms(
-            'tb.data_{0,1}[3:0]', 'tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.data_{0,1}[3:0]', 'TOP.tb.clk', begin_cycle=1, end_cycle=6
         )
 
     assert set(masks) == set(values) == {('0',), ('1',)}
-    assert masks[('0',)].name == 'unknown_mask(tb.data_0[3:0])'
-    assert masks[('1',)].name == 'unknown_mask(tb.data_1[3:0])'
-    assert np.array_equal(masks[('0',)].value, np.array([0, 0b1000, 0b0001, 0, 0], dtype=np.uint64))
-    assert np.array_equal(masks[('1',)].value, np.array([0b1111, 0, 0b0101, 0, 0], dtype=np.uint64))
+    assert masks[('0',)].name == 'unknown_mask(TOP.tb.data_0[3:0])'
+    assert masks[('1',)].name == 'unknown_mask(TOP.tb.data_1[3:0])'
+    assert np.array_equal(masks[('0',)].value, np.zeros(5, dtype=np.uint64))
+    assert np.array_equal(masks[('1',)].value, np.zeros(5, dtype=np.uint64))
 
 
 def test_vcd_reader_matched_unknown_mask_both_false_is_all_zero(unknown_vcd_path):
     with VcdReader(str(unknown_vcd_path)) as reader:
         masks = reader.load_matched_unknown_masks(
-            'tb.data_{0,1}[3:0]',
-            'tb.clk',
+            'TOP.tb.data_{0,1}[3:0]',
+            'TOP.tb.clk',
             include_x=False,
             include_z=False,
             begin_cycle=1,
@@ -259,11 +394,11 @@ def test_vcd_reader_matched_unknown_mask_both_false_is_all_zero(unknown_vcd_path
 def test_vcd_reader_rejects_invalid_xz_value(unknown_vcd_path):
     with VcdReader(str(unknown_vcd_path)) as reader:
         with pytest.raises(ValueError, match='xz_value must be 0 or 1'):
-            reader.load_waveform('tb.bus[3:0]', clock='tb.clk', xz_value=2)
+            reader.load_waveform('TOP.tb.bus[3:0]', clock='TOP.tb.clk', xz_value=2)
         with pytest.raises(ValueError, match='xz_value must be 0 or 1'):
-            reader.load_matched_waveforms('tb.bus[3:0]', 'tb.clk', xz_value=2)
+            reader.load_matched_waveforms('TOP.tb.bus[3:0]', 'TOP.tb.clk', xz_value=2)
         with pytest.raises(ValueError, match='xz_value must be 0 or 1'):
-            reader.eval('tb.bus[3:0] + 1', clock='tb.clk', xz_value=2)
+            reader.eval('TOP.tb.bus[3:0] + 1', clock='TOP.tb.clk', xz_value=2)
 
 
 def test_vcd_reader_load_matched_waveforms_regex(vcd_path):

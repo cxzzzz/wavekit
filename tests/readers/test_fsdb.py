@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from wavekit import FsdbReader, Waveform, has_fsdb_support
+from wavekit.signal import SignalCompositeType
 
 
 @pytest.fixture(scope='module')
@@ -45,6 +46,11 @@ def test_fsdb_reader_top_scope_list(fsdb_runtime):
             'bus',
             'data_0',
             'data_1',
+            'pkt',
+            'packed_arr',
+            'unpacked_arr',
+            'pkt_arr',
+            'pkt_packed_arr',
         }
         assert set(dut_signals) >= {
             'clk',
@@ -60,6 +66,159 @@ def test_fsdb_reader_top_scope_list(fsdb_runtime):
         ):
             for name in names:
                 assert signals[name].width == 4
+
+        assert tb_signals['pkt'].width == 4
+        assert tb_signals['pkt'].composite_type == SignalCompositeType.STRUCT
+        pkt_members = {sig.name: sig for sig in tb_signals['pkt'].member_list or []}
+        assert set(pkt_members) == {'valid', 'data'}
+        assert pkt_members['valid'].width == 1
+        assert pkt_members['data'].width == 3
+
+        packed_members = {sig.name: sig for sig in tb_signals['packed_arr'].member_list or []}
+        assert tb_signals['packed_arr'].width == 33
+        assert tb_signals['packed_arr'].composite_type == SignalCompositeType.ARRAY
+        assert len(packed_members) == 11
+        assert packed_members['packed_arr[0]'].width == 3
+
+        unpacked_members = {sig.name: sig for sig in tb_signals['unpacked_arr'].member_list or []}
+        assert tb_signals['unpacked_arr'].width == 33
+        assert tb_signals['unpacked_arr'].composite_type == SignalCompositeType.ARRAY
+        assert set(unpacked_members) == {'unpacked_arr[0]', 'unpacked_arr[1]', 'unpacked_arr[2]'}
+        assert unpacked_members['unpacked_arr[0]'].width == 11
+
+        pkt_arr_members = {sig.name: sig for sig in tb_signals['pkt_arr'].member_list or []}
+        assert tb_signals['pkt_arr'].width == 8
+        assert tb_signals['pkt_arr'].composite_type == SignalCompositeType.ARRAY
+        assert set(pkt_arr_members) == {'pkt_arr[0]', 'pkt_arr[1]'}
+        assert pkt_arr_members['pkt_arr[0]'].composite_type == SignalCompositeType.STRUCT
+
+        pkt_packed_arr_members = {
+            sig.name: sig for sig in tb_signals['pkt_packed_arr'].member_list or []
+        }
+        assert tb_signals['pkt_packed_arr'].width == 8
+        assert tb_signals['pkt_packed_arr'].composite_type == SignalCompositeType.ARRAY
+        assert set(pkt_packed_arr_members) == {'pkt_packed_arr[0]', 'pkt_packed_arr[1]'}
+        assert (
+            pkt_packed_arr_members['pkt_packed_arr[0]'].composite_type == SignalCompositeType.STRUCT
+        )
+
+
+def test_fsdb_reader_packed_struct_whole_and_fields(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        pkt = reader.load_waveform('simple_tb.pkt', clock='simple_tb.clk', end_cycle=6)
+        valid = reader.load_waveform('simple_tb.pkt.valid', clock='simple_tb.clk', end_cycle=6)
+        data = reader.load_waveform('simple_tb.pkt.data', clock='simple_tb.clk', end_cycle=6)
+
+    assert pkt.width == 4
+    assert valid.width == 1
+    assert data.width == 3
+    assert np.array_equal(pkt.value, np.array([0, 0, 0b1001, 0b1010, 0b0111, 0b1100]))
+    assert np.array_equal(valid.value, (pkt.value >> 3) & 0x1)
+    assert np.array_equal(data.value, pkt.value & 0x7)
+    assert np.array_equal(valid.clock, pkt.clock)
+    assert np.array_equal(data.time, pkt.time)
+
+
+def test_fsdb_reader_array_whole_and_elements(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        packed = reader.load_waveform('simple_tb.packed_arr', clock='simple_tb.clk', end_cycle=6)
+        packed_0 = reader.load_waveform(
+            'simple_tb.packed_arr[0]', clock='simple_tb.clk', end_cycle=6
+        )
+        packed_10 = reader.load_waveform(
+            'simple_tb.packed_arr[10]', clock='simple_tb.clk', end_cycle=6
+        )
+        packed_elements = [
+            reader.load_waveform(f'simple_tb.packed_arr[{idx}]', clock='simple_tb.clk', end_cycle=6)
+            for idx in range(11)
+        ]
+        unpacked = reader.load_waveform(
+            'simple_tb.unpacked_arr', clock='simple_tb.clk', end_cycle=6
+        )
+        unpacked_0 = reader.load_waveform(
+            'simple_tb.unpacked_arr[0]', clock='simple_tb.clk', end_cycle=6
+        )
+        unpacked_1 = reader.load_waveform(
+            'simple_tb.unpacked_arr[1]', clock='simple_tb.clk', end_cycle=6
+        )
+        unpacked_elements = [
+            reader.load_waveform(
+                f'simple_tb.unpacked_arr[{idx}]', clock='simple_tb.clk', end_cycle=6
+            )
+            for idx in range(3)
+        ]
+
+    assert packed.width == 33
+    assert packed_0.width == packed_10.width == 3
+    assert np.array_equal(
+        packed.value,
+        np.array([0, 0, 1227133513, 2454267026, 3681400539, 4908534052]),
+    )
+    assert np.array_equal(packed_0.value, np.array([0, 0, 1, 2, 3, 4]))
+    assert np.array_equal(packed_10.value, packed_0.value)
+    packed_reconstructed = sum(wave.value << (idx * 3) for idx, wave in enumerate(packed_elements))
+    assert np.array_equal(packed.value, packed_reconstructed)
+
+    assert unpacked.width == 33
+    assert unpacked_0.width == unpacked_1.width == 11
+    assert np.array_equal(
+        unpacked.value,
+        np.array([2290649088, 2290649088, 2152204289, 2156400642, 2160596995, 2164793348]),
+    )
+    assert np.array_equal(unpacked_0.value, np.array([0, 0, 1, 2, 3, 4]))
+    assert np.array_equal(unpacked_1.value, np.array([273, 273, 257, 258, 259, 260]))
+    unpacked_reconstructed = sum(
+        wave.value << (idx * 11) for idx, wave in enumerate(unpacked_elements)
+    )
+    assert np.array_equal(unpacked.value, unpacked_reconstructed)
+
+
+def test_fsdb_reader_struct_array_whole_and_fields(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        pkt_arr = reader.load_waveform('simple_tb.pkt_arr', clock='simple_tb.clk', end_cycle=6)
+        pkt_arr_0 = reader.load_waveform('simple_tb.pkt_arr[0]', clock='simple_tb.clk', end_cycle=6)
+        pkt_arr_0_valid = reader.load_waveform(
+            'simple_tb.pkt_arr[0].valid', clock='simple_tb.clk', end_cycle=6
+        )
+        pkt_arr_0_data = reader.load_waveform(
+            'simple_tb.pkt_arr[0].data', clock='simple_tb.clk', end_cycle=6
+        )
+        pkt_arr_1 = reader.load_waveform('simple_tb.pkt_arr[1]', clock='simple_tb.clk', end_cycle=6)
+
+    assert pkt_arr.width == 8
+    assert pkt_arr_0.width == 4
+    assert np.array_equal(pkt_arr.value, np.array([240, 240, 105, 90, 195, 60]))
+    assert np.array_equal(pkt_arr_0.value, np.array([0, 0, 9, 10, 3, 12]))
+    assert np.array_equal(pkt_arr_0_valid.value, (pkt_arr_0.value >> 3) & 0x1)
+    assert np.array_equal(pkt_arr_0_data.value, pkt_arr_0.value & 0x7)
+    assert np.array_equal(pkt_arr.value, pkt_arr_0.value | (pkt_arr_1.value << 4))
+
+
+def test_fsdb_reader_packed_struct_array_whole_and_fields(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        pkt_arr = reader.load_waveform(
+            'simple_tb.pkt_packed_arr', clock='simple_tb.clk', end_cycle=6
+        )
+        pkt_arr_0 = reader.load_waveform(
+            'simple_tb.pkt_packed_arr[0]', clock='simple_tb.clk', end_cycle=6
+        )
+        pkt_arr_1 = reader.load_waveform(
+            'simple_tb.pkt_packed_arr[1]', clock='simple_tb.clk', end_cycle=6
+        )
+        pkt_arr_0_valid = reader.load_waveform(
+            'simple_tb.pkt_packed_arr[0].valid', clock='simple_tb.clk', end_cycle=6
+        )
+        pkt_arr_0_data = reader.load_waveform(
+            'simple_tb.pkt_packed_arr[0].data', clock='simple_tb.clk', end_cycle=6
+        )
+
+    assert pkt_arr.width == 8
+    assert pkt_arr_0.width == pkt_arr_1.width == 4
+    assert np.array_equal(pkt_arr.value, np.array([240, 240, 105, 90, 195, 60]))
+    assert np.array_equal(pkt_arr_0.value, np.array([0, 0, 9, 10, 3, 12]))
+    assert np.array_equal(pkt_arr_0_valid.value, (pkt_arr_0.value >> 3) & 0x1)
+    assert np.array_equal(pkt_arr_0_data.value, pkt_arr_0.value & 0x7)
+    assert np.array_equal(pkt_arr.value, pkt_arr_0.value | (pkt_arr_1.value << 4))
 
 
 def test_fsdb_reader_load_waveform_without_range(fsdb_runtime):
