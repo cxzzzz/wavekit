@@ -1,0 +1,40 @@
+$version wavekit hand-written nonzero range fixture $end
+$timescale 1ps $end
+ $scope module TOP $end
+  $scope module tb $end
+   $var wire 1 ! clk $end
+   $var wire 4 " packed_vec [3:0] $end
+   $var wire 4 # packed_nonzero [7:4] $end
+   $var wire 3 $ packed_arr[10] [2:0] $end
+   $var wire 1 % arr_elem[10][0] $end
+   $var wire 1 & arr_elem[10][1] $end
+   $upscope $end
+ $upscope $end
+$enddefinitions $end
+
+#0
+0!
+b1010 "
+b1100 #
+b101 $
+1%
+0&
+#5
+1!
+#10
+0!
+b0011 "
+b1010 #
+b011 $
+0%
+1&
+#15
+1!
+#20
+0!
+b1111 "
+b0101 #
+b110 $
+0&
+#25
+1!

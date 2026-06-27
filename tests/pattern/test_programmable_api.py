@@ -3,7 +3,7 @@ import pytest
 
 from helpers import bool_wf as _bool_wf
 from helpers import wf as _wf
-from wavekit import Channel, Signal, Waveform
+from wavekit import Channel, Waveform
 from wavekit.pattern import MatchStatus, Pattern, PatternError
 
 
@@ -85,7 +85,7 @@ def test_program_waveform_axes_must_be_aligned():
         np.array([10, 20, 30]),
         np.array([10, 11, 12]),
         np.array([100, 110, 120]),
-        signal=Signal('', '', 8, None, False),
+        width=8,
     )
 
     async def tx(ctx):

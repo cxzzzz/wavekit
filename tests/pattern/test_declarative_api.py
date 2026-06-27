@@ -5,7 +5,7 @@ import pytest
 
 from helpers import bool_wf as _bool_wf
 from helpers import wf as _wf
-from wavekit import Signal, Waveform
+from wavekit import Waveform
 from wavekit.pattern import MatchResult, MatchStatus, Pattern
 
 # ---------------------------------------------------------------------------
@@ -276,7 +276,6 @@ class TestMatchResult:
                 samples,
                 start.clock.copy(),
                 start.time.copy(),
-                signal=Signal('', '', None, None, False),
             ),
         }
         return MatchResult(start, end, duration, status, captures)

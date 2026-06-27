@@ -1,14 +1,14 @@
 import numpy as np
 import pytest
 
-from wavekit import Signal, Waveform
+from wavekit import Waveform
 
 
 def build_waveform(values, width, signed=False):
     value = np.array(values)
     clock = np.arange(len(value))
     time = clock * 10
-    return Waveform(value, clock, time, signal=Signal('', '', width, None, signed))
+    return Waveform(value, clock, time, width=width, signed=signed)
 
 
 # ==========================================
@@ -18,9 +18,9 @@ def build_waveform(values, width, signed=False):
 
 def test_metadata_and_copy():
     wave = build_waveform([1, 2, 3], width=8, signed=False)
-    assert str(wave) == "Waveform(Signal(name='', full_name='', width=8, signed=False, range=None))"
-    wave.name = 'tb.u0.sig'
-    assert wave.name == 'tb.u0.sig'
+    assert wave.width == 8
+    assert wave.signed is False
+    assert wave.signal is None
 
     record = wave.data
     assert len(record) == 3
@@ -247,7 +247,8 @@ def test_mask_with_waveform():
         value=mask_vals,
         clock=wave.clock,
         time=wave.time,
-        signal=Signal('', '', 1, None, False),
+        width=1,
+        signed=False,
     )
     masked = wave.mask(mask_wave)
     assert np.all(masked.value == np.array([2, 4]))
@@ -402,40 +403,18 @@ def test_signed_conversion():
 
 def test_signal_synchronization():
     wave = build_waveform([1, 2, 3], width=8, signed=False)
-    wave.name = 'test_sig'
 
-    # Check initial state
+    # width and signed are now direct fields; signal is None for built waveforms
     assert wave.width == 8
-    assert wave.signal.width == 8
-    assert wave.name == 'test_sig'
-    assert wave.signal.full_name == 'test_sig'
+    assert wave.signed is False
+    assert wave.signal is None
 
     # Modify via Waveform property
     wave.width = 16
     assert wave.width == 16
-    assert wave.signal.width == 16
 
-    wave.name = 'new_name'
-    assert wave.name == 'new_name'
-    assert wave.signal.full_name == 'new_name'
-
-    # Modify via Signal object
-    wave.signal.width = 32
-    assert wave.width == 32
-    assert wave.signal.width == 32
-
-    wave.signal.full_name = 'final_name'
-    assert wave.name == 'final_name'
-    assert wave.signal.full_name == 'final_name'
-
-    # Check signed synchronization
     wave.signed = True
     assert wave.signed is True
-    assert wave.signal.signed is True
-
-    wave.signal.signed = False
-    assert wave.signed is False
-    assert wave.signal.signed is False
 
 
 # ==========================================
@@ -519,7 +498,7 @@ def test_relative_pad_value_string():
     value = np.array(['a', 'b', 'c', 'd'], dtype=object)
     clock = np.arange(len(value))
     time = clock * 10
-    wave = Waveform(value, clock, time, signal=Signal('', '', None, None, False))
+    wave = Waveform(value, clock, time, width=None, signed=False)
 
     result = wave.relative(1, pad='value', pad_value='X')
     assert np.all(result.value == np.array(['b', 'c', 'd', 'X'], dtype=object))
@@ -636,10 +615,10 @@ def test_rising_edge_with_ahead():
 
 
 def test_relative_preserves_metadata():
-    """Test that relative() preserves signal metadata."""
+    """Test that relative() preserves width metadata."""
     wave = build_waveform([1, 2, 3, 4, 5], width=8)
-    wave.name = 'test_sig'
 
     result = wave.ahead()
     assert result.width == 8
-    assert result.name == 'test_sig'
+    # Operations return waveforms with signal=None
+    assert result.signal is None

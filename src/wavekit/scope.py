@@ -9,11 +9,49 @@ from typing import Any, TypeVar
 
 from .readers.pattern_parser import (
     PatternMap,
-    split_by_range_expr,
 )
 from .signal import Signal, SignalCompositeType
 
 T = TypeVar('T')
+
+_FINAL_RANGE_RE = re.compile(r'\[(\d+)(?::(\d+))?\]$')
+
+
+def split_trailing_range(path: str) -> tuple[str, str, tuple[int, int] | None]:
+    """Split one final numeric bracket group as a bit range.
+
+    Returns ``(base, suffix, range)`` where *base* is *path* without the
+    trailing bracket, *suffix* is the raw bracket text, and *range* is
+    ``(high, low)`` or ``None`` when no trailing bracket exists.
+    """
+    match = _FINAL_RANGE_RE.search(path)
+    if match is None:
+        return path, '', None
+    high = int(match.group(1))
+    low = int(match.group(2)) if match.group(2) is not None else high
+    return path[: match.start()], match.group(0), (high, low)
+
+
+def map_range_to_offsets(
+    path: str,
+    width: int,
+    native_range: tuple[int, int] | None,
+    requested_range: tuple[int, int] | None,
+) -> tuple[int, int]:
+    """Map requested bit coordinates to zero-based stored bit offsets."""
+    native_high, native_low = native_range if native_range is not None else (width - 1, 0)
+    if native_high < native_low:
+        raise ValueError(f'ascending native range [{native_high}:{native_low}] is not supported')
+
+    high, low = requested_range if requested_range is not None else (native_high, native_low)
+    if high < low:
+        raise ValueError(f"reversed range [{high}:{low}] is not supported for signal '{path}'")
+    if high > native_high or low < native_low:
+        raise ValueError(
+            f'bit range [{high}:{low}] out of native range [{native_high}:{native_low}] '
+            f"for signal '{path}'"
+        )
+    return high - native_low, low - native_low
 
 
 class Scope:
@@ -84,12 +122,6 @@ class Scope:
         raise NotImplementedError()
 
 
-def _prepend_scope_name(value: Any, scope_name: str) -> Any:
-    if isinstance(value, Signal):
-        return dataclasses.replace(value, full_name=f'{scope_name}.{value.full_name}')
-    return value
-
-
 def _traverse_scope_tree(
     scope: Scope,
     descendant_scope_pattern_list: list[PatternMap],
@@ -145,11 +177,11 @@ def _traverse_scope_tree(
                 for lk, lv in leaf_fn(scope, remaining).items():
                     key = (scope.name,) + lk
                     assert key not in res
-                    res[key] = _prepend_scope_name(lv, scope.name)
+                    res[key] = lv
 
                 for child_scope in scope.child_scope_list:
                     for ck, cv in _traverse_scope_tree(child_scope, remaining, leaf_fn).items():
-                        res[(scope.name,) + ck] = _prepend_scope_name(cv, scope.name)
+                        res[(scope.name,) + ck] = cv
             else:
                 for child_scope in module_scopes:
                     for ck, cv in _traverse_scope_tree(
@@ -160,7 +192,7 @@ def _traverse_scope_tree(
                             raise ValueError('parent scope is None')
                         parent_name = parent_scope.full_name(scope)
                         key = (f'{parent_name}.{ck[0]}',) + ck[1:]
-                        res[key] = _prepend_scope_name(cv, parent_name)
+                        res[key] = cv
         else:
             # Exact or regex match against current scope name
             matched = False
@@ -182,14 +214,14 @@ def _traverse_scope_tree(
                     key = new_k + lk
                     if key in res:
                         raise Exception(f'pattern {p} match more than one result')
-                    res[key] = _prepend_scope_name(lv, scope.name)
+                    res[key] = lv
 
                 for child_scope in scope.child_scope_list:
                     for ck, cv in _traverse_scope_tree(child_scope, remaining, leaf_fn).items():
                         key = new_k + ck
                         if key in res:
                             raise Exception(f'pattern {p} match more than one result')
-                        res[key] = _prepend_scope_name(cv, scope.name)
+                        res[key] = cv
     return res
 
 
@@ -230,46 +262,72 @@ def match_signals(
         if not pattern_list:
             return {}
 
-        def resolve_leaf(sig: Signal, sig_bare: str, range_suffix: str) -> Signal:
-            if range_suffix:
-                # Extract (high, low) from the innermost bracket of range_suffix,
-                # e.g. "[7:0]" → (7, 0), "[3]" → (3, 3).
-                m = re.search(r'\[(\d+)(?::(\d+))?\]$', range_suffix)
-                assert m is not None
-                h = int(m.group(1))
-                low = int(m.group(2)) if m.group(2) is not None else h
-                new_range: tuple[int, int] | None = (h, low)
-            else:
-                new_range = sig.range
+        def resolve_leaf(sig: Signal, requested_range: tuple[int, int] | None) -> Signal:
+            width = sig.width
+            if requested_range is not None:
+                high, low = requested_range
+                width = high - low + 1
             return dataclasses.replace(
                 sig,
-                full_name=f'{sig_bare}{range_suffix}' if range_suffix else sig.name,
-                range=new_range,
+                width=width,
+                range=requested_range,
             )
 
         res: dict[tuple[Any, ...], Signal] = {}
         for sig in signals:
-            sig_bare, _ = split_by_range_expr(sig.name)
             for k, p in pattern_list[0].items():
                 if p[0] == '@':
-                    name_regex, range_suffix = split_by_range_expr(p[1:])
-                    if match := re.fullmatch(name_regex, sig.name):
-                        assert len(k) == 0
-                        key = (match.groups(),)
-                        if len(pattern_list) == 1:
-                            assert (
-                                key not in res
-                            ), f'pattern {name_regex} matches more than one signal'
-                            res[key] = resolve_leaf(sig, sig_bare, range_suffix)
-                        elif sig.member_list is not None:
+                    # Regex pattern: try exact match first, then split trailing range
+                    if match := re.fullmatch(p[1:], sig.name):
+                        range_suffix = ''
+                        requested_range = None
+                    else:
+                        name_regex, range_suffix, requested_range = split_trailing_range(p[1:])
+                        if match := re.fullmatch(name_regex, sig.name):
+                            pass
+                        else:
+                            if (
+                                sig.composite_type == SignalCompositeType.ARRAY
+                                and sig.member_list is not None
+                            ):
+                                for ck, cv in _match_signals_in_list(
+                                    sig.member_list, pattern_list
+                                ).items():
+                                    res[k + ck] = cv
+                            continue
+                    assert len(k) == 0
+                    key = (match.groups(),)
+                    if sig.composite_type == SignalCompositeType.ARRAY and range_suffix:
+                        if sig.member_list is not None:
                             for ck, cv in _match_signals_in_list(
-                                sig.member_list, pattern_list[1:]
+                                sig.member_list, pattern_list
                             ).items():
-                                res[key + ck] = _prepend_scope_name(cv, sig.name)
+                                res[key + ck] = cv
+                    elif len(pattern_list) == 1:
+                        assert key not in res, f'pattern {p[1:]} matches more than one signal'
+                        res[key] = resolve_leaf(sig, requested_range)
+                    elif sig.member_list is not None:
+                        for ck, cv in _match_signals_in_list(
+                            sig.member_list, pattern_list[1:]
+                        ).items():
+                            res[key + ck] = cv
                 else:
-                    p_bare, range_suffix = split_by_range_expr(p)
-                    if p_bare != sig_bare:
-                        continue
+                    # Exact pattern: try exact match first, then split trailing range
+                    if p == sig.name:
+                        range_suffix = ''
+                        requested_range = None
+                    else:
+                        p_bare, range_suffix, requested_range = split_trailing_range(p)
+                        if p_bare != sig.name:
+                            if (
+                                sig.composite_type == SignalCompositeType.ARRAY
+                                and sig.member_list is not None
+                            ):
+                                for ck, cv in _match_signals_in_list(
+                                    sig.member_list, pattern_list
+                                ).items():
+                                    res[k + ck] = cv
+                            continue
                     key = k
                     if sig.composite_type == SignalCompositeType.ARRAY and range_suffix:
                         if sig.member_list is not None:
@@ -279,12 +337,12 @@ def match_signals(
                                 res[key + ck] = cv
                     elif len(pattern_list) == 1:
                         assert key not in res
-                        res[key] = resolve_leaf(sig, sig_bare, range_suffix)
+                        res[key] = resolve_leaf(sig, requested_range)
                     elif sig.member_list is not None:
                         for ck, cv in _match_signals_in_list(
                             sig.member_list, pattern_list[1:]
                         ).items():
-                            res[key + ck] = _prepend_scope_name(cv, sig.name)
+                            res[key + ck] = cv
                     break
         return res
 

@@ -23,37 +23,27 @@ class SignalCompositeType(Enum):
 class Signal:
     """Metadata descriptor for a single hardware signal.
 
-    Stores the signal's local name, full hierarchical path, bit-width,
-    declared bit-range, and signedness.  For composite signals (structs,
-    unions, arrays) the ``composite_type`` and ``member_list`` fields carry
-    the internal structure.
+    Stores the signal's bare local name, parent scope path, bit-width, and
+    requested/view bit range.  ``full_name`` is derived from those fields so a
+    native whole signal and a requested bit-sliced view share one consistent
+    representation.
 
     Attributes
     ----------
     name:
-        Local signal identifier as it appears within its parent scope,
-        matching the form used in the waveform file.  May include a range
-        suffix when the file stores the signal with one, e.g. ``"data[7:0]"``
-        or ``"mem[3][7:0]"``.  Scalar signals have no suffix, e.g. ``"clk"``.
-        Invariant: ``full_name == parent_scope_path + "." + name``.
-    full_name:
-        Complete hierarchical signal path, e.g. ``"tb.dut.data[7:0]"`` or
-        ``"tb.dut.mem[3][7:0]"``.  Equal to ``parent_scope_path + "." + name``.
-        Pass this directly to :meth:`~wavekit.readers.base.Reader.load_waveform`.
+        Bare local signal identifier inside ``parent_path``.  For VCD/FST this
+        does not include the native value bit range; earlier array/index groups
+        that are part of the identifier remain, e.g. ``"mem[3]"``.
+    parent_path:
+        Complete parent scope path.  Empty for anonymous/internal waveforms.
     width:
         Bit-width of the signal, e.g. ``8`` for ``[7:0]``.  ``None`` if not
         yet resolved.
     range:
-        The innermost (last) bit-range of the signal as a ``(high, low)``
-        integer tuple.  For a plain vector ``data[7:0]`` this is ``(7, 0)``;
-        for a multi-dimensional signal ``mem[3][7:0]`` this is ``(7, 0)``
-        (the ``[3]`` dimension index is encoded in ``name``/``full_name`` only).
-        For a single-bit index ``[n]`` this is ``(n, n)``.
-        ``None`` if the signal is scalar, composite, or the format does not
-        expose range information.
-    signed:
-        Whether the signal value should be interpreted as a two's-complement
-        signed integer.  Defaults to ``False``.
+        Requested/view bit range as ``(high, low)`` for non-composite signals.
+        ``None`` means the whole native signal.  For composite arrays, backends
+        may still use ``range`` for array bounds; callers must check
+        ``composite_type`` before interpreting it as bit coordinates.
     composite_type:
         ``None`` for leaf (non-composite) signals.  For composite signals
         (struct, union, array, …) this holds the :class:`SignalCompositeType`
@@ -70,18 +60,24 @@ class Signal:
     """
 
     name: str
-    full_name: str
+    parent_path: str
     width: int | None
     range: tuple[int, int] | None
-    signed: bool = False
     composite_type: SignalCompositeType | None = None
+
+    @property
+    def full_name(self) -> str:
+        base = self.name if self.parent_path == '' else f'{self.parent_path}.{self.name}'
+        if self.range is None or self.composite_type is not None:
+            return base
+        high, low = self.range
+        if high == low:
+            return f'{base}[{high}]'
+        return f'{base}[{high}:{low}]'
 
     @cached_property
     def member_list(self) -> list[Signal] | None:
         return None
 
     def __str__(self) -> str:
-        return (
-            f"Signal(name='{self.name}', full_name='{self.full_name}', "
-            f'width={self.width}, signed={self.signed}, range={self.range})'
-        )
+        return f"Signal(full_name='{self.full_name}', width={self.width})"

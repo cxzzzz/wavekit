@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from wavekit import Signal, Waveform
+from wavekit import Waveform
 
 
 def wf(values, width=1, signed=False):
@@ -10,7 +10,7 @@ def wf(values, width=1, signed=False):
     value = np.asarray(values, dtype=np.int64)
     clock = np.arange(len(value), dtype=np.int64)
     time = clock * 10
-    return Waveform(value, clock, time, signal=Signal('', '', width, None, signed))
+    return Waveform(value, clock, time, width=width, signed=signed)
 
 
 def bool_wf(values):

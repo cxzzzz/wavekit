@@ -64,7 +64,7 @@ class FsdbSignal(Signal):
             raise ValueError(f"Unknown NPI composite type value: {ct_raw} for signal '{full_name}'")
         return cls(
             name=npi_sig.name(),
-            full_name=full_name,
+            parent_path=full_name[: -(len(npi_sig.name()) + 1)] if '.' in full_name else '',
             width=npi_sig.width(),
             range=npi_sig.range(),
             composite_type=composite_type,
@@ -191,14 +191,14 @@ class FsdbReader(Reader):
 
     def _load_value_changes(
         self,
-        path: str,
+        signal: Signal,
         value_mapping: dict[str, int],
         begin_time: int | None = None,
         end_time: int | None = None,
     ) -> tuple[np.ndarray, int]:
         """Load mapped FSDB value changes through the NPI reader."""
         # FSDB/NPI resolves any trailing bit range and reports the effective width.
-        npi_signal = self.file_handle.get_signal(path)
+        npi_signal = self.file_handle.get_signal(signal.full_name)
         c = value_mapping
         key = (c['0'], c['1'], c['x'], c['z'])
         mode = _MAPPING_TO_FSDB_MODE[key]

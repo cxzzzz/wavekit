@@ -7,10 +7,9 @@ from dataclasses import dataclass, field
 import numpy as np
 import pylibfst
 
-from ...scope import Scope
+from ...scope import Scope, map_range_to_offsets
 from ...signal import Signal
 from ..base import Reader
-from ..pattern_parser import split_by_range_expr
 
 
 @dataclass
@@ -18,6 +17,8 @@ class FstSignal(Signal):
     """FST-backed signal descriptor carrying the native FST handle."""
 
     handle: int = field(default=0, repr=False, compare=False)
+    native_range: tuple[int, int] | None = field(default=None, compare=False)
+    native_width: int | None = field(default=None, compare=False)
 
 
 class FstScope(Scope):
@@ -52,17 +53,8 @@ class FstReader(Reader):
     def _normalize_name(name: str) -> str:
         return re.sub(r'\s+(?=\[)', '', name)
 
-    @staticmethod
-    def _range_from_name(name: str) -> tuple[int, int] | None:
-        _, range_suffix = split_by_range_expr(name)
-        match = re.search(r'\[(\d+)(?::(\d+))?\]$', range_suffix)
-        if match is None:
-            return None
-        high = int(match.group(1))
-        low = int(match.group(2)) if match.group(2) is not None else high
-        return high, low
-
     def _build_scope_tree(self) -> list[FstScope]:
+        native_range_re = re.compile(r'\[(\d+):(\d+)\]$')
         top_scopes: list[FstScope] = []
         scope_by_name: dict[str, FstScope] = {}
 
@@ -89,70 +81,55 @@ class FstReader(Reader):
                 parent = scope
 
             signal_name = path_parts[-1]
+            width = int(raw_signal.length)
+            if m := native_range_re.search(signal_name):
+                high, low = int(m.group(1)), int(m.group(2))
+                if abs(high - low) + 1 != width:
+                    raise ValueError(
+                        f'native range [{high}:{low}] does not match width {width} '
+                        f"for signal '{full_name}'"
+                    )
+                native_range = (high, low)
+                bare_signal_name = signal_name[: m.start()]
+            else:
+                if width != 1:
+                    raise ValueError(f"width {width} mismatch for scalar signal '{full_name}'")
+                native_range = None
+                bare_signal_name = signal_name
+
             signal = FstSignal(
-                name=signal_name,
-                full_name=full_name,
-                width=int(raw_signal.length),
-                range=self._range_from_name(signal_name),
-                signed=False,
+                name=bare_signal_name,
+                parent_path='.'.join(path_parts[:-1]),
+                width=width,
+                range=native_range,
                 handle=int(raw_signal.handle),
+                native_range=native_range,
+                native_width=width,
             )
             assert parent is not None
             parent.signal_list.append(signal)
+            self._signal_by_name[signal.full_name] = signal
             self._signal_by_name[full_name] = signal
 
         return top_scopes
 
-    def _resolve_signal(self, signal: Signal | str) -> tuple[FstSignal, str]:
-        signal_path = signal.full_name if isinstance(signal, Signal) else signal
-        # Exact dumped reference first, so Verilator multidimensional leaves
-        # like packed_arr[0][2:0] are not treated as a base plus sub-range.
-        if signal_path in self._signal_by_name:
-            bare_signal_path = signal_path
-            range_suffix = ''
-        else:
-            bare_signal_path, range_suffix = split_by_range_expr(signal_path)
-        lookup_path = bare_signal_path
-
-        if lookup_path not in self._signal_by_name:
-            pattern = re.compile(rf'^{re.escape(lookup_path)}\[\d+(?::\d+)?\]$')
-            matches = [name for name in self._signal_by_name if pattern.fullmatch(name)]
-            if len(matches) == 1:
-                lookup_path = matches[0]
-            elif len(matches) > 1:
-                raise ValueError(f'pattern {lookup_path} matches more than one signal')
-
-        if lookup_path not in self._signal_by_name:
-            raise ValueError(f"signal '{signal_path}' not found")
-        return self._signal_by_name[lookup_path], range_suffix
-
     def _load_value_changes(
         self,
-        path: str,
+        signal: Signal,
         value_mapping: dict[str, int],
         begin_time: int | None = None,
         end_time: int | None = None,
     ) -> tuple[np.ndarray, int]:
         """Load mapped FST value changes with optional trailing range selection."""
-        fst_signal, range_suffix = self._resolve_signal(path)
-        width = fst_signal.width or 1
-
-        high = width - 1
-        low = 0
-        if range_suffix:
-            range_match = re.fullmatch(r'\[(\d+)(?::(\d+))?\]', range_suffix)
-            if range_match is None:
-                raise ValueError(f"unsupported range access for signal '{path}': {range_suffix}")
-            high = int(range_match.group(1))
-            low = int(range_match.group(2)) if range_match.group(2) is not None else high
-            if high < low:
-                raise ValueError(
-                    f"reversed range {range_suffix} is not supported for signal '{path}'"
-                )
-            if high >= width:
-                raise ValueError(
-                    f"bit index {high} out of range for signal '{path}' with width {width}"
-                )
+        fst_signal = self._resolve_signal(signal)
+        assert isinstance(fst_signal, FstSignal)
+        width = fst_signal.native_width or fst_signal.width or 1
+        high, low = map_range_to_offsets(
+            fst_signal.full_name,
+            width,
+            fst_signal.native_range,
+            fst_signal.range,
+        )
 
         def decoder(raw: str, high: int, low: int) -> int:
             raw = raw[width - 1 - high : width - low]

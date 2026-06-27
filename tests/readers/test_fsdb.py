@@ -225,7 +225,7 @@ def test_fsdb_reader_load_waveform_without_range(fsdb_runtime):
     with FsdbReader(str(fsdb_runtime)) as reader:
         data = reader.load_waveform('simple_tb.dut.data_o', clock='simple_tb.clk')
 
-    assert data.name == 'simple_tb.dut.data_o'
+    assert data.signal.full_name == 'simple_tb.dut.data_o'
     assert data.width == 4
     assert data.signed is False
     assert len(data.value) > 0
@@ -277,7 +277,7 @@ def test_fsdb_reader_load_unknown_mask_include_flags(fsdb_runtime):
         )
         values = reader.load_waveform('simple_tb.bus[3:0]', clock='simple_tb.clk', end_cycle=6)
 
-    assert both.name == 'unknown_mask(simple_tb.bus[3:0])'
+    assert both.signal.full_name == 'simple_tb.bus[3:0]'
     assert both.width == 4
     assert both.signed is False
     assert np.array_equal(
@@ -310,8 +310,8 @@ def test_fsdb_reader_load_unknown_mask_range_and_matched(fsdb_runtime):
     assert low.width == 2
     assert np.array_equal(low.value, full.value & 0x3)
     assert set(masks) == set(values) == {('0',), ('1',)}
-    assert masks[('0',)].name == 'unknown_mask(simple_tb.data_0[3:0])'
-    assert masks[('1',)].name == 'unknown_mask(simple_tb.data_1[3:0])'
+    assert masks[('0',)].signal.full_name == 'simple_tb.data_0[3:0]'
+    assert masks[('1',)].signal.full_name == 'simple_tb.data_1[3:0]'
 
 
 def test_fsdb_reader_unknown_mask_both_false_is_all_zero(fsdb_runtime):

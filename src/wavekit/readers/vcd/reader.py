@@ -2,16 +2,25 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from functools import cached_property
 
 import numpy as np
 from vcdvcd import VCDVCD
 from vcdvcd import Scope as VcdVcdScope
 
-from ...scope import Scope
+from ...scope import Scope, map_range_to_offsets
 from ...signal import Signal
 from ..base import Reader
-from ..pattern_parser import split_by_range_expr
+
+
+@dataclass
+class VcdSignal(Signal):
+    """VCD-backed signal descriptor carrying the dumped reference name."""
+
+    ref: str = field(default='', repr=False, compare=False)
+    native_range: tuple[int, int] | None = field(default=None, compare=False)
+    native_width: int | None = field(default=None, compare=False)
 
 
 class VcdScope(Scope):
@@ -28,19 +37,39 @@ class VcdScope(Scope):
 
     @cached_property
     def signal_list(self) -> Sequence[Signal]:
+        native_range_re = re.compile(r'\[(\d+):(\d+)\]$')
         full_scope_name = self.full_name()
         signals = []
         for k, v in self.vcdvcd_scope.subElements.items():
             if isinstance(v, str):
                 signal_path = f'{full_scope_name}.{k}'
                 width = int(self.reader.file_handle[signal_path].size)
+                if m := native_range_re.search(k):
+                    high, low = int(m.group(1)), int(m.group(2))
+                    if abs(high - low) + 1 != width:
+                        raise ValueError(
+                            f'native range [{high}:{low}] does not match width {width} '
+                            f"for signal '{signal_path}'"
+                        )
+                    native_range = (high, low)
+                    bare_name = k[: m.start()]
+                else:
+                    if width != 1:
+                        raise ValueError(
+                            f"width {width} mismatch for scalar signal '{signal_path}'"
+                        )
+                    native_range = None
+                    bare_name = k
+
                 signals.append(
-                    Signal(
-                        name=k,
-                        full_name=signal_path,
+                    VcdSignal(
+                        name=bare_name,
+                        parent_path=full_scope_name,
                         width=width,
-                        range=None,
-                        signed=False,
+                        range=native_range,
+                        ref=signal_path,
+                        native_range=native_range,
+                        native_width=width,
                     )
                 )
         return signals
@@ -76,80 +105,25 @@ class VcdReader(Reader):
 
     def _load_value_changes(
         self,
-        path: str,
+        signal: Signal,
         value_mapping: dict[str, int],
         begin_time: int | None = None,
         end_time: int | None = None,
     ) -> tuple[np.ndarray, int]:
         """Load mapped VCD value changes with optional trailing range selection."""
 
-        def resolve_signal_path(path: str) -> tuple[str, str]:
-            # Exact dumped reference first, so Verilator leaves with multiple
-            # bracket groups (for example packed_arr[0][2:0]) are not mistaken
-            # for aggregate paths plus a trailing requested range.
-            if path in self.file_handle.references_to_ids:
-                return path, ''
-
-            bare_signal_path, range_suffix = split_by_range_expr(path)
-
-            # Bare/base signal exact lookup after splitting a trailing requested
-            # range, for ordinary range selection such as data[1:0] from data.
-            if bare_signal_path in self.file_handle.references_to_ids:
-                return bare_signal_path, range_suffix
-
-            # File-side range lookup for dumps that store the vector range in
-            # the reference name, resolving a requested base like data to the
-            # unique dumped reference data[7:0].
-            pattern = re.compile(rf'^{re.escape(bare_signal_path)}\[\d+(?::\d+)?\]$')
-            matches = [
-                ref for ref in self.file_handle.references_to_ids.keys() if pattern.fullmatch(ref)
-            ]
-            if len(matches) == 1:
-                return matches[0], range_suffix
-            if len(matches) > 1:
-                raise ValueError(f'pattern {bare_signal_path} matches more than one signal')
-
-            # Preserve VCD-style not-found behavior when no exact, bare, or
-            # file-side range reference resolves.
-            raise KeyError(bare_signal_path)
-
-        lookup_path, range_suffix = resolve_signal_path(path)
+        vcd_signal = self._resolve_signal(signal)
+        assert isinstance(vcd_signal, VcdSignal)
+        lookup_path = vcd_signal.ref
 
         signal_handle = self.file_handle[lookup_path]
-        width = int(signal_handle.size)
-        _, file_range_suffix = split_by_range_expr(lookup_path)
-
-        # Check file-range compatibility for sub-range access
-        if range_suffix and file_range_suffix:
-            file_range_match = re.fullmatch(r'\[(\d+)(?::(\d+))?\]', file_range_suffix)
-            if file_range_match is not None:
-                file_low = (
-                    int(file_range_match.group(2))
-                    if file_range_match.group(2) is not None
-                    else int(file_range_match.group(1))
-                )
-            if file_low != 0:
-                raise ValueError(
-                    f"sub-range access for signal '{lookup_path}' is only supported "
-                    'when the stored signal range starts at bit 0'
-                )
-
-        high = width - 1
-        low = 0
-        if range_suffix:
-            range_match = re.fullmatch(r'\[(\d+)(?::(\d+))?\]', range_suffix)
-            if range_match is None:
-                raise ValueError(f"unsupported range access for signal '{path}': {range_suffix}")
-            high = int(range_match.group(1))
-            low = int(range_match.group(2)) if range_match.group(2) is not None else high
-            if high < low:
-                raise ValueError(
-                    f"reversed range {range_suffix} is not supported for signal '{path}'"
-                )
-            if high >= width:
-                raise ValueError(
-                    f"bit index {high} out of range for signal '{path}' with width {width}"
-                )
+        width = vcd_signal.native_width or int(signal_handle.size)
+        high, low = map_range_to_offsets(
+            vcd_signal.full_name,
+            width,
+            vcd_signal.native_range,
+            vcd_signal.range,
+        )
 
         def decode(raw: str, high: int, low: int) -> int:
             decoded = 0

@@ -145,11 +145,12 @@ class Reader:
             *end_cycle*) are provided simultaneously.
         """
         self._validate_xz_value(xz_value)
-        signal_path = signal.full_name if isinstance(signal, Signal) else signal
+        resolved_signal = self._resolve_signal(signal)
+        resolved_clock = self._resolve_signal(clock)
         value_mapping = {'0': 0, '1': 1, 'x': xz_value, 'z': xz_value}
         wf = self._sample_on_clock(
-            signal,
-            clock,
+            resolved_signal,
+            resolved_clock,
             value_mapping=value_mapping,
             signed=signed,
             sample_on_posedge=sample_on_posedge,
@@ -158,13 +159,9 @@ class Reader:
             begin_cycle=begin_cycle,
             end_cycle=end_cycle,
         )
-        wf.signal = Signal(
-            name=signal_path.rsplit('.', 1)[-1],
-            full_name=signal_path,
-            width=wf.width,
-            range=None,
-            signed=signed,
-        )
+        wf.signal = resolved_signal
+        wf.width = wf.width
+        wf.signed = signed
         return wf
 
     def load_unknown_mask(
@@ -211,7 +208,8 @@ class Reader:
         Waveform:
             Unsigned mask waveform named ``unknown_mask(<signal>)``.
         """
-        signal_path = signal.full_name if isinstance(signal, Signal) else signal
+        resolved_signal = self._resolve_signal(signal)
+        resolved_clock = self._resolve_signal(clock)
 
         value_mapping = {
             '0': 0,
@@ -220,8 +218,8 @@ class Reader:
             'z': 1 if include_z else 0,
         }
         wf = self._sample_on_clock(
-            signal,
-            clock,
+            resolved_signal,
+            resolved_clock,
             value_mapping=value_mapping,
             signed=False,
             sample_on_posedge=sample_on_posedge,
@@ -230,13 +228,8 @@ class Reader:
             begin_cycle=begin_cycle,
             end_cycle=end_cycle,
         )
-        wf.signal = Signal(
-            name=f'unknown_mask_{signal_path.rsplit(".", 1)[-1]}',
-            full_name=f'unknown_mask({signal_path})',
-            width=wf.width,
-            range=None,
-            signed=False,
-        )
+        wf.signal = resolved_signal
+        wf.signed = False
         return wf
 
     @abstractmethod
@@ -256,7 +249,6 @@ class Reader:
         width: int | None,
         signed: bool,
         sample_on_posedge: bool = False,
-        signal: str = '',
         clock_offset: int = 0,
     ) -> Waveform:
         value, clock, time = value_change_to_value_array(
@@ -270,19 +262,14 @@ class Reader:
             value=value,
             clock=clock,
             time=time,
-            signal=Signal(
-                name=signal.rsplit('.', 1)[-1],
-                full_name=signal,
-                width=width,
-                range=None,
-                signed=signed,
-            ),
+            width=width,
+            signed=signed,
         )
 
     @abstractmethod
     def _load_value_changes(
         self,
-        path: str,
+        signal: Signal,
         value_mapping: dict[str, int],
         begin_time: int | None = None,
         end_time: int | None = None,
@@ -296,8 +283,9 @@ class Reader:
 
         Parameters
         ----------
-        path:
-            Full signal path (may include a range suffix).
+        signal:
+            Resolved signal descriptor. Backend-specific subclasses may carry
+            native handles or dumped references required for loading.
         value_mapping:
             Character-to-bit mapping, e.g. ``{'0': 0, '1': 1, 'x': 0, 'z': 0}``.
         begin_time:
@@ -308,8 +296,8 @@ class Reader:
 
     def _sample_on_clock(
         self,
-        signal: Signal | str,
-        clock: Signal | str,
+        signal: Signal,
+        clock: Signal,
         value_mapping: dict[str, int],
         signed: bool,
         sample_on_posedge: bool,
@@ -329,12 +317,9 @@ class Reader:
         if end_time is not None and end_cycle is not None:
             raise ValueError('end_time and end_cycle are mutually exclusive')
 
-        signal_path = signal.full_name if isinstance(signal, Signal) else signal
-        clock_path = clock.full_name if isinstance(clock, Signal) else clock
-
         # Load clock value changes for absolute cycle computation
         clock_mapping = {'0': 0, '1': 1, 'x': 0, 'z': 0}
-        all_clock_changes, _ = self._load_value_changes(clock_path, clock_mapping)
+        all_clock_changes, _ = self._load_value_changes(clock, clock_mapping)
 
         # Find sampling edge timestamps
         sample_value = 1 if sample_on_posedge else 0
@@ -377,14 +362,14 @@ class Reader:
 
         # Load signal value changes (backend handles range suffix internally)
         signal_value_change, width = self._load_value_changes(
-            signal_path,
+            signal,
             value_mapping,
             begin_time=begin_time,
             end_time=end_time,
         )
 
         if len(signal_value_change) == 0:
-            raise ValueError(f"signal '{signal_path}' has no value changes")
+            raise ValueError(f"signal '{signal.full_name}' has no value changes")
 
         # Convert to Waveform via sampling and trim
         result = self._value_change_to_waveform(
@@ -393,7 +378,6 @@ class Reader:
             width=width,
             signed=signed,
             sample_on_posedge=sample_on_posedge,
-            signal='',
             clock_offset=clock_offset,
         )
 
@@ -612,9 +596,9 @@ class Reader:
 
         if len(matched_clocks) == 1:
             # Broadcast: single clock shared by all matched signals
-            clock_full_name = next(iter(matched_clocks.values())).full_name
+            clock_signal = next(iter(matched_clocks.values()))
             return {
-                k: self.load_waveform(sig.full_name, clock_full_name, **load_kwargs)
+                k: self.load_waveform(sig, clock_signal, **load_kwargs)
                 for k, sig in matched_signals.items()
             }
         else:
@@ -625,7 +609,7 @@ class Reader:
                     f'which do not match signal pattern keys {sorted(matched_signals.keys())}'
                 )
             return {
-                k: self.load_waveform(sig.full_name, matched_clocks[k].full_name, **load_kwargs)
+                k: self.load_waveform(sig, matched_clocks[k], **load_kwargs)
                 for k, sig in matched_signals.items()
             }
 
@@ -691,9 +675,9 @@ class Reader:
         )
 
         if len(matched_clocks) == 1:
-            clock_full_name = next(iter(matched_clocks.values())).full_name
+            clock_signal = next(iter(matched_clocks.values()))
             return {
-                k: self.load_unknown_mask(sig.full_name, clock_full_name, **load_kwargs)
+                k: self.load_unknown_mask(sig, clock_signal, **load_kwargs)
                 for k, sig in matched_signals.items()
             }
         else:
@@ -703,7 +687,7 @@ class Reader:
                     f'which do not match signal pattern keys {sorted(matched_signals.keys())}'
                 )
             return {
-                k: self.load_unknown_mask(sig.full_name, matched_clocks[k].full_name, **load_kwargs)
+                k: self.load_unknown_mask(sig, matched_clocks[k], **load_kwargs)
                 for k, sig in matched_signals.items()
             }
 
@@ -711,6 +695,16 @@ class Reader:
     def _validate_xz_value(xz_value: int) -> None:
         if xz_value not in (0, 1):
             raise ValueError('xz_value must be 0 or 1')
+
+    def _resolve_signal(self, signal: Signal | str) -> Signal:
+        if isinstance(signal, Signal):
+            return signal
+        matched = self.get_matched_signals(signal)
+        if len(matched) == 0:
+            raise ValueError(f"signal '{signal}' not found")
+        if len(matched) > 1:
+            raise ValueError(f"signal '{signal}' matches more than one signal")
+        return matched[()]
 
     @abstractmethod
     def close(self):
@@ -788,9 +782,7 @@ class Reader:
                         f" use mode='zip'. Matched: {[sig.full_name for sig in matched.values()]}"
                     )
             ns: dict[str, Any] = {
-                placeholder: self.load_waveform(
-                    next(iter(matched.values())).full_name, **load_kwargs
-                )
+                placeholder: self.load_waveform(next(iter(matched.values())), **load_kwargs)
                 for placeholder, _, matched in matched_per_path
             }
             try:
@@ -823,9 +815,7 @@ class Reader:
 
             # Pre-load broadcast waveforms (single-match paths)
             broadcast_ns: dict[str, Waveform] = {
-                placeholder: self.load_waveform(
-                    next(iter(matched.values())).full_name, **load_kwargs
-                )
+                placeholder: self.load_waveform(next(iter(matched.values())), **load_kwargs)
                 for placeholder, _, matched in single_paths
             }
 
@@ -840,7 +830,7 @@ class Reader:
             for key in zip_keys:
                 ns = dict(broadcast_ns)
                 for placeholder, _, matched in multi_paths:
-                    ns[placeholder] = self.load_waveform(matched[key].full_name, **load_kwargs)
+                    ns[placeholder] = self.load_waveform(matched[key], **load_kwargs)
                 try:
                     result[key] = eval(code, {'__builtins__': {}}, ns)  # noqa: S307
                 except Exception as exc:
