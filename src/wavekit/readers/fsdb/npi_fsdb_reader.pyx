@@ -503,7 +503,9 @@ cdef class NpiFsdbSignal:
             if ct == <int>npiFsdbSigCtArray:
                 return (left_range, right_range)
             return None
-        return None
+        if left_range == 0 and right_range == 0:
+            return None
+        return (left_range, right_range)
 
     def member_list(self) -> list:
         """Return direct member NpiFsdbSignal objects for composite signals."""

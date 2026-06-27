@@ -49,6 +49,22 @@ def test_fst_reader_native_range_metadata(nonzero_fst_path):
     assert signals['arr_elem[10][0]'].width == 1
     assert signals['arr_elem[10][0]'].range is None
     assert signals['arr_elem[10][0]'].native_range is None
+    assert signals['zero_range'].full_name == 'TOP.tb.zero_range[0:0]'
+    assert signals['zero_range'].range == (0, 0)
+    assert signals['zero_range'].native_range == (0, 0)
+    assert signals['zero_range'].width == 1
+
+
+def test_fst_reader_scalar_bit_select(nonzero_fst_path):
+    with FstReader(str(nonzero_fst_path)) as reader:
+        clk = reader.load_waveform('TOP.tb.clk', clock='TOP.tb.clk', begin_cycle=0, end_cycle=3)
+        clk_bit0 = reader.load_waveform(
+            'TOP.tb.clk[0]', clock='TOP.tb.clk', begin_cycle=0, end_cycle=3
+        )
+
+    assert clk.width == 1
+    assert clk_bit0.width == 1
+    assert np.array_equal(clk_bit0.value, clk.value)
 
 
 def test_fst_reader_single_bracket_array_element_load(nonzero_fst_path):

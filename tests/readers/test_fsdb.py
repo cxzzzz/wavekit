@@ -46,6 +46,8 @@ def test_fsdb_reader_top_scope_list(fsdb_runtime):
             'bus',
             'data_0',
             'data_1',
+            'nonzero_vec',
+            'zero_range_vec',
             'pkt',
             'packed_arr',
             'unpacked_arr',
@@ -101,6 +103,38 @@ def test_fsdb_reader_top_scope_list(fsdb_runtime):
         assert (
             pkt_packed_arr_members['pkt_packed_arr[0]'].composite_type == SignalCompositeType.STRUCT
         )
+
+        assert tb_signals['nonzero_vec'].width == 4
+        assert tb_signals['nonzero_vec'].range == (7, 4)
+        assert tb_signals['nonzero_vec'].full_name == 'simple_tb.nonzero_vec[7:4]'
+        assert tb_signals['data_i'].range == (3, 0)
+        assert tb_signals['data_i'].full_name == 'simple_tb.data_i[3:0]'
+        assert tb_signals['clk'].range is None
+        assert tb_signals['clk'].full_name == 'simple_tb.clk'
+
+
+def test_fsdb_reader_scalar_bit_select(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        clk = reader.load_waveform('simple_tb.clk', clock='simple_tb.clk', end_cycle=6)
+        clk_bit0 = reader.load_waveform('simple_tb.clk[0]', clock='simple_tb.clk', end_cycle=6)
+
+    assert clk.width == 1
+    assert clk_bit0.width == 1
+    assert np.array_equal(clk_bit0.value, clk.value)
+
+
+def test_fsdb_reader_nonzero_range_subrange(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        full = reader.load_waveform(
+            'simple_tb.nonzero_vec[7:4]', clock='simple_tb.clk', end_cycle=6
+        )
+        view = reader.load_waveform(
+            'simple_tb.nonzero_vec[6:5]', clock='simple_tb.clk', end_cycle=6
+        )
+
+    assert full.width == 4
+    assert view.width == 2
+    assert np.array_equal(view.value, (full.value >> 1) & 0x3)
 
 
 def test_fsdb_reader_packed_struct_whole_and_fields(fsdb_runtime):

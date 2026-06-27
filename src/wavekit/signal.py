@@ -71,8 +71,6 @@ class Signal:
         if self.range is None or self.composite_type is not None:
             return base
         high, low = self.range
-        if high == low:
-            return f'{base}[{high}]'
         return f'{base}[{high}:{low}]'
 
     @cached_property
