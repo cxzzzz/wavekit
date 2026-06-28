@@ -6,111 +6,106 @@ import pytest
 from wavekit import FsdbReader, Waveform, has_fsdb_support
 from wavekit.signal import SignalCompositeType
 
+# ------------------------------------------------------------------
+# Fixtures
+# ------------------------------------------------------------------
+
 
 @pytest.fixture(scope='module')
-def fsdb_path():
+def simple_fsdb_path():
     path = Path(__file__).resolve().parent / 'fixtures' / 'fsdb' / 'simple.fsdb'
     if not path.exists():
         pytest.skip(
-            'simple.fsdb fixture is unavailable; run ' 'tests/readers/fixtures/fsdb/build_fsdb.sh'
+            'simple.fsdb fixture is unavailable; run tests/readers/fixtures/fsdb/build_fsdb.sh'
         )
     return path
 
 
 @pytest.fixture(scope='module')
-def fsdb_runtime(fsdb_path):
+def compare_fsdb_path():
+    path = Path(__file__).resolve().parent / 'fixtures' / 'fsdb' / 'compare.fsdb'
+    if not path.exists():
+        pytest.skip('compare.fsdb fixture is unavailable')
+    return path
+
+
+@pytest.fixture(scope='module')
+def compare_xz_fsdb_path():
+    path = Path(__file__).resolve().parent / 'fixtures' / 'fsdb' / 'compare_xz.fsdb'
+    if not path.exists():
+        pytest.skip('compare_xz.fsdb fixture is unavailable')
+    return path
+
+
+@pytest.fixture(scope='module')
+def fsdb_runtime(simple_fsdb_path):
     if not has_fsdb_support():
         pytest.skip('FSDB tests require the Verdi NPI runtime')
-    return fsdb_path
+    return simple_fsdb_path
+
+
+@pytest.fixture(scope='module')
+def compare_fsdb(compare_fsdb_path):
+    if not has_fsdb_support():
+        pytest.skip('FSDB tests require the Verdi NPI runtime')
+    return compare_fsdb_path
+
+
+@pytest.fixture(scope='module')
+def compare_xz_fsdb(compare_xz_fsdb_path):
+    if not has_fsdb_support():
+        pytest.skip('FSDB tests require the Verdi NPI runtime')
+    return compare_xz_fsdb_path
+
+
+# ------------------------------------------------------------------
+# Exports / hierarchy
+# ------------------------------------------------------------------
 
 
 def test_fsdb_reader_exported(fsdb_runtime):
     assert FsdbReader.__name__ == 'FsdbReader'
 
 
-def test_fsdb_reader_top_scope_list(fsdb_runtime):
-    with FsdbReader(str(fsdb_runtime)) as reader:
+def test_fsdb_reader_top_scope_list(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
         top = reader.top_scope_list()
         tb = top[0]
         dut = next(scope for scope in tb.child_scope_list if scope.name == 'dut')
 
-        assert tb.name == 'simple_tb'
+        assert tb.name == 'compare_tb'
         assert dut.name == 'dut'
-        tb_signals = {sig.name: sig for sig in tb.signal_list}
-        dut_signals = {sig.name: sig for sig in dut.signal_list}
-        assert set(tb_signals) >= {
-            'clk',
-            'rst_n',
-            'valid',
-            'data_i',
-            'bus',
-            'data_0',
-            'data_1',
-            'nonzero_vec',
-            'zero_range_vec',
-            'pkt',
-            'packed_arr',
-            'unpacked_arr',
-            'pkt_arr',
-            'pkt_packed_arr',
-        }
-        assert set(dut_signals) >= {
-            'clk',
-            'rst_n',
-            'valid',
-            'data_i',
-            'data_o',
-            'overflow',
-        }
-        for signals, names in (
-            (tb_signals, ['data_i', 'bus', 'data_0', 'data_1']),
-            (dut_signals, ['data_i', 'data_o']),
-        ):
-            for name in names:
-                assert signals[name].width == 4
+        # fsdb_file is a VCS artifact signal; clk/rst_n are the real top-level signals
+        assert {sig.name for sig in tb.signal_list} >= {'clk', 'rst_n'}
+        assert {sig.name for sig in dut.signal_list} >= {'clk', 'rst_n', 'counter', 'status'}
 
-        assert tb_signals['pkt'].width == 4
-        assert tb_signals['pkt'].composite_type == SignalCompositeType.STRUCT
-        pkt_members = {sig.name: sig for sig in tb_signals['pkt'].member_list or []}
-        assert set(pkt_members) == {'valid', 'data'}
-        assert pkt_members['valid'].width == 1
-        assert pkt_members['data'].width == 3
+        child_names = {scope.name for scope in dut.child_scope_list}
+        assert {'unit_a', 'unit_b'} <= child_names
 
-        packed_members = {sig.name: sig for sig in tb_signals['packed_arr'].member_list or []}
-        assert tb_signals['packed_arr'].width == 33
-        assert tb_signals['packed_arr'].composite_type == SignalCompositeType.ARRAY
-        assert len(packed_members) == 11
-        assert packed_members['packed_arr[0]'].width == 3
+        unit_a = next(scope for scope in dut.child_scope_list if scope.name == 'unit_a')
+        unit_a_signals = {sig.name for sig in unit_a.signal_list}
+        assert {'data', 'nonzero_data', 'zero_range', 'bus', 'data_0', 'data_1'} <= unit_a_signals
+        unit_a_children = {scope.name for scope in unit_a.child_scope_list}
+        assert {'gen_blk[0]', 'gen_blk[1]', 'gen_blk[2]'} <= unit_a_children
 
-        unpacked_members = {sig.name: sig for sig in tb_signals['unpacked_arr'].member_list or []}
-        assert tb_signals['unpacked_arr'].width == 33
-        assert tb_signals['unpacked_arr'].composite_type == SignalCompositeType.ARRAY
-        assert set(unpacked_members) == {'unpacked_arr[0]', 'unpacked_arr[1]', 'unpacked_arr[2]'}
-        assert unpacked_members['unpacked_arr[0]'].width == 11
 
-        pkt_arr_members = {sig.name: sig for sig in tb_signals['pkt_arr'].member_list or []}
-        assert tb_signals['pkt_arr'].width == 8
-        assert tb_signals['pkt_arr'].composite_type == SignalCompositeType.ARRAY
-        assert set(pkt_arr_members) == {'pkt_arr[0]', 'pkt_arr[1]'}
-        assert pkt_arr_members['pkt_arr[0]'].composite_type == SignalCompositeType.STRUCT
+# ------------------------------------------------------------------
+# Basic load / range metadata (simple.fsdb)
+# ------------------------------------------------------------------
 
-        pkt_packed_arr_members = {
-            sig.name: sig for sig in tb_signals['pkt_packed_arr'].member_list or []
-        }
-        assert tb_signals['pkt_packed_arr'].width == 8
-        assert tb_signals['pkt_packed_arr'].composite_type == SignalCompositeType.ARRAY
-        assert set(pkt_packed_arr_members) == {'pkt_packed_arr[0]', 'pkt_packed_arr[1]'}
-        assert (
-            pkt_packed_arr_members['pkt_packed_arr[0]'].composite_type == SignalCompositeType.STRUCT
-        )
 
-        assert tb_signals['nonzero_vec'].width == 4
-        assert tb_signals['nonzero_vec'].range == (7, 4)
-        assert tb_signals['nonzero_vec'].full_name == 'simple_tb.nonzero_vec[7:4]'
-        assert tb_signals['data_i'].range == (3, 0)
-        assert tb_signals['data_i'].full_name == 'simple_tb.data_i[3:0]'
-        assert tb_signals['clk'].range is None
-        assert tb_signals['clk'].full_name == 'simple_tb.clk'
+def test_fsdb_reader_native_range_metadata(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        tb = reader.top_scope_list()[0]
+        signals = {sig.name: sig for sig in tb.signal_list}
+
+    assert signals['nonzero_vec'].width == 4
+    assert signals['nonzero_vec'].range == (7, 4)
+    assert signals['nonzero_vec'].full_name == 'simple_tb.nonzero_vec[7:4]'
+    assert signals['data_i'].range == (3, 0)
+    assert signals['data_i'].full_name == 'simple_tb.data_i[3:0]'
+    assert signals['clk'].range is None
+    assert signals['clk'].full_name == 'simple_tb.clk'
 
 
 def test_fsdb_reader_scalar_bit_select(fsdb_runtime):
@@ -135,6 +130,425 @@ def test_fsdb_reader_nonzero_range_subrange(fsdb_runtime):
     assert full.width == 4
     assert view.width == 2
     assert np.array_equal(view.value, (full.value >> 1) & 0x3)
+
+
+def test_fsdb_reader_nonzero_native_range_loads(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        full = reader.load_waveform(
+            'compare_tb.dut.unit_a.nonzero_data[7:4]', clock='compare_tb.clk'
+        )
+        base = reader.load_waveform('compare_tb.dut.unit_a.nonzero_data', clock='compare_tb.clk')
+        view = reader.load_waveform(
+            'compare_tb.dut.unit_a.nonzero_data[6:5]', clock='compare_tb.clk'
+        )
+        matched = reader.get_matched_signals('compare_tb.dut.unit_a.nonzero_data[6:5]')[()]
+        masks = reader.load_matched_unknown_masks(
+            'compare_tb.dut.unit_a.nonzero_data[6:5]', 'compare_tb.clk'
+        )
+
+    assert full.signal.range == (7, 4)
+    assert np.array_equal(base.value, full.value)
+    assert view.width == 2
+    assert view.signal.range == (6, 5)
+    assert matched.name == 'nonzero_data'
+    assert matched.full_name == 'compare_tb.dut.unit_a.nonzero_data[6:5]'
+    assert matched.width == 2
+    assert matched.range == (6, 5)
+    assert masks[()].width == 2
+    assert np.array_equal(masks[()].value, np.zeros(len(masks[()].value), dtype=np.uint64))
+
+
+# ------------------------------------------------------------------
+# Signed / signal-object / name metadata (compare.fsdb)
+# ------------------------------------------------------------------
+
+
+def test_fsdb_reader_load_waveform(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        w = reader.load_waveform(
+            'compare_tb.dut.unit_a.data[7:0]',
+            clock='compare_tb.clk',
+            signed=True,
+            sample_on_posedge=False,
+        )
+
+    assert w.signal.full_name == 'compare_tb.dut.unit_a.data[7:0]'
+    assert w.width == 8
+    assert w.signed is True
+    assert len(w.value) > 0
+
+
+def test_fsdb_load_waveform_signed(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        w = reader.load_waveform(
+            'compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk', signed=True
+        )
+    assert w.signal.full_name == 'compare_tb.dut.unit_a.data[7:0]'
+    assert w.signed is True
+    assert w.width == 8
+
+
+def test_fsdb_load_waveform_signed_default(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        w = reader.load_waveform('compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk')
+    assert w.signal.full_name == 'compare_tb.dut.unit_a.data[7:0]'
+    assert w.signed is False
+
+
+def test_fsdb_load_waveform_signal_object(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        sig = reader.get_matched_signals('compare_tb.dut.unit_a.data[7:0]')[()]
+        w = reader.load_waveform(sig, clock='compare_tb.clk', signed=True)
+    assert w.signal.full_name == 'compare_tb.dut.unit_a.data[7:0]'
+    assert w.signed is True
+
+
+def test_fsdb_load_waveform_subrange_name(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        w = reader.load_waveform('simple_tb.dut.data_o[1:0]', clock='simple_tb.clk')
+    assert w.signal.full_name == 'simple_tb.dut.data_o[1:0]'
+    assert w.width == 2
+
+
+def test_fsdb_reader_load_waveform_without_range(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        data = reader.load_waveform('simple_tb.dut.data_o', clock='simple_tb.clk')
+
+    assert data.signal.full_name == 'simple_tb.dut.data_o'
+    assert data.width == 4
+    assert data.signed is False
+    assert len(data.value) > 0
+    assert np.array_equal(data.clock[:5], np.arange(5, dtype=np.uint64))
+
+
+def test_fsdb_reader_subrange_load(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        full = reader.load_waveform('simple_tb.dut.data_o[3:0]', clock='simple_tb.clk')
+        low_bits = reader.load_waveform('simple_tb.dut.data_o[1:0]', clock='simple_tb.clk')
+        matched_low_bits = reader.load_matched_waveforms(
+            'simple_tb.dut.data_o[1:0]', 'simple_tb.clk'
+        )[()]
+
+    assert low_bits.width == 2
+    assert matched_low_bits.width == 2
+    assert np.array_equal(low_bits.value, full.value & 0x3)
+    assert np.array_equal(matched_low_bits.value, low_bits.value)
+
+
+def test_fsdb_reader_midrange_load(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        full = reader.load_waveform('simple_tb.dut.data_o[3:0]', clock='simple_tb.clk')
+        high_bits = reader.load_waveform('simple_tb.dut.data_o[3:2]', clock='simple_tb.clk')
+
+    assert high_bits.width == 2
+    assert np.array_equal(high_bits.value, (full.value >> 2) & 0x3)
+
+
+def test_fsdb_reader_single_bracket_array_element_load(compare_fsdb):
+    # FSDB exposes generate-block leaves as scope + signal (not composite array elements).
+    # gen_blk[i].gen_sig is a 4-bit leaf signal under a gen_blk[i] scope.
+    with FsdbReader(str(compare_fsdb)) as reader:
+        g0 = reader.load_waveform(
+            'compare_tb.dut.unit_a.gen_blk[0].gen_sig[3:0]', clock='compare_tb.clk'
+        )
+        g1 = reader.load_waveform(
+            'compare_tb.dut.unit_a.gen_blk[1].gen_sig[3:0]', clock='compare_tb.clk'
+        )
+
+    assert g0.width == 4
+    assert g1.width == 4
+    assert g0.signal.full_name == 'compare_tb.dut.unit_a.gen_blk[0].gen_sig[3:0]'
+    assert g1.signal.full_name == 'compare_tb.dut.unit_a.gen_blk[1].gen_sig[3:0]'
+
+
+# ------------------------------------------------------------------
+# Pattern matching (brace / regex / range)
+# ------------------------------------------------------------------
+
+
+def test_fsdb_load_matched_waveforms_brace_expansion(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        waves = reader.load_matched_waveforms(
+            'compare_tb.dut.unit_{a,b}.data[7:0]', 'compare_tb.clk'
+        )
+
+    assert set(waves.keys()) == {('a',), ('b',)}
+    assert {wave.signal.full_name for wave in waves.values()} == {
+        'compare_tb.dut.unit_a.data[7:0]',
+        'compare_tb.dut.unit_b.data[7:0]',
+    }
+    assert all(wave.width == 8 for wave in waves.values())
+
+
+def test_fsdb_reader_load_matched_waveforms_regex(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        waves = reader.load_matched_waveforms(
+            r'compare_tb.dut.@(unit_a|unit_b).data[7:0]', 'compare_tb.clk'
+        )
+
+    assert len(waves) == 2
+    assert {k[0][0] for k in waves} == {'unit_a', 'unit_b'}
+    assert all(wave.width == 8 for wave in waves.values())
+
+
+def test_fsdb_reader_load_matched_waveforms_regex_key_conflict(fsdb_runtime):
+    # @regex without a capture group: all matches map to the same key -> conflict
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        with pytest.raises(Exception):
+            reader.load_matched_waveforms(r'simple_tb.dut.@[a-z]+', 'simple_tb.clk')
+
+
+def test_fsdb_load_matched_waveforms_uses_signal_range(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        waves = reader.load_matched_waveforms('compare_tb.dut.unit_a.data', 'compare_tb.clk')
+
+    assert list(waves.keys()) == [()]
+    wave = waves[()]
+    assert wave.signal.full_name == 'compare_tb.dut.unit_a.data'
+    assert wave.width == 8
+
+
+def test_fsdb_reader_load_matched_waveforms(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        waves = reader.load_matched_waveforms(
+            'simple_tb.dut.{data_o[3:0],overflow}', 'simple_tb.clk'
+        )
+
+    assert set(waves) == {('data_o[3:0]',), ('overflow',)}
+    assert waves[('data_o[3:0]',)].width == 4
+    assert waves[('overflow',)].width == 1
+
+
+def test_fsdb_reader_clock_pattern_error(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        with pytest.raises(Exception):
+            reader.load_matched_waveforms('simple_tb.dut.data_o[3:0]', 'simple_tb.no_clock')
+
+
+def test_fsdb_reader_clock_pattern_key_mismatch_error(fsdb_runtime):
+    # clock brace expansion yields different keys than the signal pattern
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        with pytest.raises(Exception, match='do not match signal pattern keys'):
+            reader.load_matched_waveforms(
+                'simple_tb.dut.{data_o[3:0],overflow}',  # keys: data_o[3:0], overflow
+                'simple_tb.{clk,rst_n}',  # keys: clk, rst_n — mismatch
+            )
+
+
+def test_fsdb_reader_load_waveform_no_match_raises(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        with pytest.raises(ValueError, match="signal 'compare_tb.dut.unit_a.nope' not found"):
+            reader.load_waveform('compare_tb.dut.unit_a.nope', clock='compare_tb.clk')
+
+
+# ------------------------------------------------------------------
+# FSDB-specific: $ / $$ module-name matching (compare.fsdb)
+# ------------------------------------------------------------------
+
+
+def test_fsdb_reader_dollar_module_name_matching(compare_fsdb):
+    # $ matches a direct-child scope by module/definition name.
+    # compare_dut instantiates two compare_unit modules (unit_a, unit_b).
+    with FsdbReader(str(compare_fsdb)) as reader:
+        matched = reader.get_matched_signals('compare_tb.dut.$compare_unit.data[7:0]')
+
+    assert {k[0] for k in matched} == {'unit_a', 'unit_b'}
+    assert {s.full_name for s in matched.values()} == {
+        'compare_tb.dut.unit_a.data[7:0]',
+        'compare_tb.dut.unit_b.data[7:0]',
+    }
+
+
+def test_fsdb_reader_dollar_dollar_module_name_matching(compare_fsdb):
+    # $$ matches any-depth descendant scope by module/definition name.
+    with FsdbReader(str(compare_fsdb)) as reader:
+        matched = reader.get_matched_signals('compare_tb.$$compare_unit.data[7:0]')
+
+    assert {k[0] for k in matched} == {'dut.unit_a', 'dut.unit_b'}
+
+
+# ------------------------------------------------------------------
+# Unknown-mask tests (compare_xz.fsdb — real X/Z states)
+# ------------------------------------------------------------------
+
+
+def test_fsdb_reader_load_unknown_mask_include_flags(compare_xz_fsdb):
+    with FsdbReader(str(compare_xz_fsdb)) as reader:
+        both = reader.load_unknown_mask('compare_xz_tb.bus[3:0]', clock='compare_xz_tb.clk')
+        x_only = reader.load_unknown_mask(
+            'compare_xz_tb.bus[3:0]', clock='compare_xz_tb.clk', include_z=False
+        )
+        z_only = reader.load_unknown_mask(
+            'compare_xz_tb.bus[3:0]', clock='compare_xz_tb.clk', include_x=False
+        )
+        values = reader.load_waveform(
+            'compare_xz_tb.bus[3:0]', clock='compare_xz_tb.clk', xz_value=0
+        )
+
+    assert both.signal.full_name == 'compare_xz_tb.bus[3:0]'
+    assert both.width == 4
+    assert both.signed is False
+    assert np.array_equal(both.value, np.array([0, 15, 15, 2, 5, 0], dtype=np.uint64))
+    assert np.array_equal(x_only.value, np.array([0, 15, 0, 2, 1, 0], dtype=np.uint64))
+    assert np.array_equal(z_only.value, np.array([0, 0, 15, 0, 4, 0], dtype=np.uint64))
+    assert np.array_equal(both.clock, values.clock)
+    assert np.array_equal(both.time, values.time)
+
+
+def test_fsdb_reader_load_unknown_mask_range_selection(compare_xz_fsdb):
+    with FsdbReader(str(compare_xz_fsdb)) as reader:
+        full = reader.load_unknown_mask('compare_xz_tb.bus[3:0]', clock='compare_xz_tb.clk')
+        mid = reader.load_unknown_mask('compare_xz_tb.bus[3:2]', clock='compare_xz_tb.clk')
+        low = reader.load_unknown_mask('compare_xz_tb.bus[1:0]', clock='compare_xz_tb.clk')
+
+    assert mid.width == 2
+    assert mid.signal.full_name == 'compare_xz_tb.bus[3:2]'
+    assert np.array_equal(mid.value, (full.value >> 2) & 0x3)
+    assert low.width == 2
+    assert low.signal.full_name == 'compare_xz_tb.bus[1:0]'
+    assert np.array_equal(low.value, full.value & 0x3)
+
+
+def test_fsdb_load_unknown_mask_name_signed(compare_xz_fsdb):
+    with FsdbReader(str(compare_xz_fsdb)) as reader:
+        w = reader.load_unknown_mask('compare_xz_tb.bus[3:0]', clock='compare_xz_tb.clk')
+    assert w.signal.full_name == 'compare_xz_tb.bus[3:0]'
+    assert w.signed is False
+
+
+def test_fsdb_load_unknown_mask_signal_object_name(compare_xz_fsdb):
+    with FsdbReader(str(compare_xz_fsdb)) as reader:
+        sig = reader.get_matched_signals('compare_xz_tb.bus[3:0]')[()]
+        w = reader.load_unknown_mask(sig, clock='compare_xz_tb.clk')
+    assert w.signal.full_name == 'compare_xz_tb.bus[3:0]'
+    assert w.signed is False
+
+
+def test_fsdb_reader_load_unknown_mask_fully_known_is_zero(compare_xz_fsdb):
+    with FsdbReader(str(compare_xz_fsdb)) as reader:
+        # data_0 is fully known at cycle 0 (mask bit pattern all zero there)
+        mask = reader.load_unknown_mask(
+            'compare_xz_tb.data_0[3:0]', clock='compare_xz_tb.clk', begin_cycle=0, end_cycle=1
+        )
+
+    assert np.array_equal(mask.value, np.array([0], dtype=np.uint64))
+
+
+def test_fsdb_reader_load_unknown_mask_both_false_is_all_zero(compare_xz_fsdb):
+    with FsdbReader(str(compare_xz_fsdb)) as reader:
+        mask = reader.load_unknown_mask(
+            'compare_xz_tb.bus[3:0]',
+            clock='compare_xz_tb.clk',
+            include_x=False,
+            include_z=False,
+        )
+
+    assert mask.signal.full_name == 'compare_xz_tb.bus[3:0]'
+    assert mask.width == 4
+    assert np.array_equal(mask.value, np.zeros(len(mask.value), dtype=np.uint64))
+
+
+def test_fsdb_load_matched_unknown_masks_name(compare_xz_fsdb):
+    with FsdbReader(str(compare_xz_fsdb)) as reader:
+        masks = reader.load_matched_unknown_masks(
+            'compare_xz_tb.data_{0,1}[3:0]', 'compare_xz_tb.clk'
+        )
+    assert masks[('0',)].signal.full_name == 'compare_xz_tb.data_0[3:0]'
+    assert masks[('1',)].signal.full_name == 'compare_xz_tb.data_1[3:0]'
+    assert masks[('0',)].signed is False
+    assert masks[('1',)].signed is False
+
+
+def test_fsdb_reader_load_matched_unknown_masks(compare_xz_fsdb):
+    with FsdbReader(str(compare_xz_fsdb)) as reader:
+        masks = reader.load_matched_unknown_masks(
+            'compare_xz_tb.data_{0,1}[3:0]', 'compare_xz_tb.clk'
+        )
+        values = reader.load_matched_waveforms(
+            'compare_xz_tb.data_{0,1}[3:0]', 'compare_xz_tb.clk', xz_value=0
+        )
+
+    assert set(masks) == set(values) == {('0',), ('1',)}
+    assert masks[('0',)].signal.full_name == 'compare_xz_tb.data_0[3:0]'
+    assert masks[('1',)].signal.full_name == 'compare_xz_tb.data_1[3:0]'
+    # data_0 has X bits at cycles 2 (bit 3) and 3 (bit 0); data_1 has X/Z bits at cycles 1,3
+    assert np.any(masks[('0',)].value != 0)
+    assert np.any(masks[('1',)].value != 0)
+
+
+def test_fsdb_reader_matched_unknown_mask_both_false_is_all_zero(compare_xz_fsdb):
+    with FsdbReader(str(compare_xz_fsdb)) as reader:
+        masks = reader.load_matched_unknown_masks(
+            'compare_xz_tb.data_{0,1}[3:0]',
+            'compare_xz_tb.clk',
+            include_x=False,
+            include_z=False,
+        )
+
+    assert set(masks) == {('0',), ('1',)}
+    assert np.array_equal(masks[('0',)].value, np.zeros(len(masks[('0',)].value), dtype=np.uint64))
+    assert np.array_equal(masks[('1',)].value, np.zeros(len(masks[('1',)].value), dtype=np.uint64))
+
+
+def test_fsdb_reader_rejects_invalid_xz_value(compare_xz_fsdb):
+    with FsdbReader(str(compare_xz_fsdb)) as reader:
+        with pytest.raises(ValueError, match='xz_value must be 0 or 1'):
+            reader.load_waveform('compare_xz_tb.bus[3:0]', clock='compare_xz_tb.clk', xz_value=2)
+        with pytest.raises(ValueError, match='xz_value must be 0 or 1'):
+            reader.load_matched_waveforms('compare_xz_tb.bus[3:0]', 'compare_xz_tb.clk', xz_value=2)
+        with pytest.raises(ValueError, match='xz_value must be 0 or 1'):
+            reader.eval('compare_xz_tb.bus[3:0] + 1', clock='compare_xz_tb.clk', xz_value=2)
+
+
+# ------------------------------------------------------------------
+# FSDB-specific: composite signal whole-load + member_list (simple.fsdb)
+# ------------------------------------------------------------------
+
+
+def test_fsdb_reader_composite_metadata(fsdb_runtime):
+    # member_list is a lazy NPI handle property that requires an open reader.
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        tb = reader.top_scope_list()[0]
+        signals = {sig.name: sig for sig in tb.signal_list}
+
+        assert signals['pkt'].width == 4
+        assert signals['pkt'].composite_type == SignalCompositeType.STRUCT
+        pkt_members = {sig.name: sig for sig in signals['pkt'].member_list or []}
+        assert set(pkt_members) == {'valid', 'data'}
+        assert pkt_members['valid'].width == 1
+        assert pkt_members['data'].width == 3
+
+        assert signals['packed_arr'].width == 33
+        assert signals['packed_arr'].composite_type == SignalCompositeType.ARRAY
+        packed_members = {sig.name: sig for sig in signals['packed_arr'].member_list or []}
+        assert len(packed_members) == 11
+        assert packed_members['packed_arr[0]'].width == 3
+
+        assert signals['unpacked_arr'].width == 33
+        assert signals['unpacked_arr'].composite_type == SignalCompositeType.ARRAY
+        unpacked_members = {sig.name: sig for sig in signals['unpacked_arr'].member_list or []}
+        assert set(unpacked_members) == {
+            'unpacked_arr[0]',
+            'unpacked_arr[1]',
+            'unpacked_arr[2]',
+        }
+        assert unpacked_members['unpacked_arr[0]'].width == 11
+
+        assert signals['pkt_arr'].width == 8
+        assert signals['pkt_arr'].composite_type == SignalCompositeType.ARRAY
+        pkt_arr_members = {sig.name: sig for sig in signals['pkt_arr'].member_list or []}
+        assert set(pkt_arr_members) == {'pkt_arr[0]', 'pkt_arr[1]'}
+        assert pkt_arr_members['pkt_arr[0]'].composite_type == SignalCompositeType.STRUCT
+
+        assert signals['pkt_packed_arr'].width == 8
+        assert signals['pkt_packed_arr'].composite_type == SignalCompositeType.ARRAY
+        pkt_packed_arr_members = {
+            sig.name: sig for sig in signals['pkt_packed_arr'].member_list or []
+        }
+        assert set(pkt_packed_arr_members) == {'pkt_packed_arr[0]', 'pkt_packed_arr[1]'}
+        assert (
+            pkt_packed_arr_members['pkt_packed_arr[0]'].composite_type == SignalCompositeType.STRUCT
+        )
 
 
 def test_fsdb_reader_packed_struct_whole_and_fields(fsdb_runtime):
@@ -255,138 +669,102 @@ def test_fsdb_reader_packed_struct_array_whole_and_fields(fsdb_runtime):
     assert np.array_equal(pkt_arr.value, pkt_arr_0.value | (pkt_arr_1.value << 4))
 
 
-def test_fsdb_reader_load_waveform_without_range(fsdb_runtime):
-    with FsdbReader(str(fsdb_runtime)) as reader:
-        data = reader.load_waveform('simple_tb.dut.data_o', clock='simple_tb.clk')
-
-    assert data.signal.full_name == 'simple_tb.dut.data_o'
-    assert data.width == 4
-    assert data.signed is False
-    assert len(data.value) > 0
-    assert np.array_equal(data.clock[:5], np.arange(5, dtype=np.uint64))
+# ------------------------------------------------------------------
+# eval integration tests (compare.fsdb)
+# ------------------------------------------------------------------
 
 
-def test_fsdb_reader_begin_end_time_and_cycle_match(fsdb_runtime):
-    with FsdbReader(str(fsdb_runtime)) as reader:
-        full = reader.load_waveform('simple_tb.dut.data_o[3:0]', clock='simple_tb.clk')
-        by_time = reader.load_waveform(
-            'simple_tb.dut.data_o[3:0]',
-            clock='simple_tb.clk',
-            begin_time=int(full.time[2]),
-            end_time=int(full.time[5]),
-        )
-        by_cycle = reader.load_waveform(
-            'simple_tb.dut.data_o[3:0]',
-            clock='simple_tb.clk',
-            begin_cycle=2,
-            end_cycle=5,
-        )
-
-    assert np.array_equal(by_time.value, by_cycle.value)
-    assert np.array_equal(by_time.time, by_cycle.time)
-    assert np.array_equal(by_time.clock, by_cycle.clock)
-    assert np.array_equal(by_cycle.clock, np.arange(2, 5, dtype=np.uint64))
-
-
-def test_fsdb_reader_subrange_load(fsdb_runtime):
-    with FsdbReader(str(fsdb_runtime)) as reader:
-        full = reader.load_waveform('simple_tb.dut.data_o[3:0]', clock='simple_tb.clk')
-        low_bits = reader.load_waveform('simple_tb.dut.data_o[1:0]', clock='simple_tb.clk')
-        high_bits = reader.load_waveform('simple_tb.dut.data_o[3:2]', clock='simple_tb.clk')
-
-    assert low_bits.width == 2
-    assert high_bits.width == 2
-    assert np.array_equal(low_bits.value, full.value & 0x3)
-    assert np.array_equal(high_bits.value, (full.value >> 2) & 0x3)
-
-
-def test_fsdb_reader_load_unknown_mask_include_flags(fsdb_runtime):
-    with FsdbReader(str(fsdb_runtime)) as reader:
-        both = reader.load_unknown_mask('simple_tb.bus[3:0]', clock='simple_tb.clk', end_cycle=6)
-        x_only = reader.load_unknown_mask(
-            'simple_tb.bus[3:0]', clock='simple_tb.clk', include_z=False, end_cycle=6
-        )
-        z_only = reader.load_unknown_mask(
-            'simple_tb.bus[3:0]', clock='simple_tb.clk', include_x=False, end_cycle=6
-        )
-        values = reader.load_waveform('simple_tb.bus[3:0]', clock='simple_tb.clk', end_cycle=6)
-
-    assert both.signal.full_name == 'simple_tb.bus[3:0]'
-    assert both.width == 4
-    assert both.signed is False
-    assert np.array_equal(
-        both.value,
-        np.array([0, 0, 0b1111, 0b1111, 0b0010, 0b0101], dtype=np.uint64),
-    )
-    assert np.array_equal(
-        x_only.value,
-        np.array([0, 0, 0b1111, 0, 0b0010, 0b0001], dtype=np.uint64),
-    )
-    assert np.array_equal(
-        z_only.value,
-        np.array([0, 0, 0, 0b1111, 0, 0b0100], dtype=np.uint64),
-    )
-    assert np.array_equal(both.clock, values.clock)
-    assert np.array_equal(both.time, values.time)
-
-
-def test_fsdb_reader_load_unknown_mask_range_and_matched(fsdb_runtime):
-    with FsdbReader(str(fsdb_runtime)) as reader:
-        full = reader.load_unknown_mask('simple_tb.bus[3:0]', clock='simple_tb.clk', end_cycle=6)
-        low = reader.load_unknown_mask('simple_tb.bus[1:0]', clock='simple_tb.clk', end_cycle=6)
-        masks = reader.load_matched_unknown_masks(
-            'simple_tb.data_{0,1}[3:0]', 'simple_tb.clk', end_cycle=6
-        )
-        values = reader.load_matched_waveforms(
-            'simple_tb.data_{0,1}[3:0]', 'simple_tb.clk', end_cycle=6
-        )
-
-    assert low.width == 2
-    assert np.array_equal(low.value, full.value & 0x3)
-    assert set(masks) == set(values) == {('0',), ('1',)}
-    assert masks[('0',)].signal.full_name == 'simple_tb.data_0[3:0]'
-    assert masks[('1',)].signal.full_name == 'simple_tb.data_1[3:0]'
-
-
-def test_fsdb_reader_unknown_mask_both_false_is_all_zero(fsdb_runtime):
-    with FsdbReader(str(fsdb_runtime)) as reader:
-        mask = reader.load_unknown_mask(
-            'simple_tb.bus[3:0]',
-            clock='simple_tb.clk',
-            include_x=False,
-            include_z=False,
-            end_cycle=6,
-        )
-
-    assert np.array_equal(mask.value, np.zeros(6, dtype=np.uint64))
-
-
-def test_fsdb_reader_load_matched_waveforms(fsdb_runtime):
-    with FsdbReader(str(fsdb_runtime)) as reader:
-        waves = reader.load_matched_waveforms(
-            'simple_tb.dut.{data_o[3:0],overflow}', 'simple_tb.clk'
-        )
-
-    assert set(waves) == {('data_o[3:0]',), ('overflow',)}
-    assert waves[('data_o[3:0]',)].width == 4
-    assert waves[('overflow',)].width == 1
-
-
-def test_fsdb_reader_eval_smoke(fsdb_runtime):
-    with FsdbReader(str(fsdb_runtime)) as reader:
-        result = reader.eval('simple_tb.dut.data_o[3:0] + 1', clock='simple_tb.clk')
-        bit_slice = reader.eval('simple_tb.dut.data_o[3:0][1:0]', clock='simple_tb.clk')
+def test_fsdb_eval_smoke(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        result = reader.eval('compare_tb.dut.unit_a.data[7:0] + 1', clock='compare_tb.clk')
+        bit_slice = reader.eval('compare_tb.dut.unit_a.data[7:0][1:0]', clock='compare_tb.clk')
 
     assert isinstance(result, Waveform)
-    assert result.width == 5
+    assert result.width == 9  # addition increases width by 1
     assert isinstance(bit_slice, Waveform)
     assert bit_slice.width == 2
 
 
-def test_fsdb_reader_load_waveform_no_match_raises(fsdb_runtime):
-    with FsdbReader(str(fsdb_runtime)) as reader:
-        with pytest.raises(ValueError, match="signal 'simple_tb.nope' not found"):
-            reader.load_waveform('simple_tb.nope', clock='simple_tb.clk')
+def test_fsdb_eval_no_match_raises(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        with pytest.raises(ValueError, match='matched no signals'):
+            reader.eval('compare_tb.dut.unit_a.nonexistent', clock='compare_tb.clk')
+
+
+def test_fsdb_eval_error_on_multi_match(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        with pytest.raises(ValueError, match="mode='single'"):
+            reader.eval(
+                'compare_tb.dut.unit_{a,b}.data[7:0]',
+                clock='compare_tb.clk',
+                mode='single',
+            )
+
+
+def test_fsdb_eval_zip_mode_brace_expansion(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        result = reader.eval(
+            'compare_tb.dut.unit_{a,b}.data[7:0] + 1',
+            clock='compare_tb.clk',
+            mode='zip',
+        )
+    assert isinstance(result, dict)
+    assert set(result.keys()) == {('a',), ('b',)}
+    assert all(isinstance(w, Waveform) for w in result.values())
+
+
+def test_fsdb_eval_zip_mode_broadcast(compare_fsdb):
+    # unit_a.data matches 1 signal (broadcast), unit_{a,b}.data matches 2
+    with FsdbReader(str(compare_fsdb)) as reader:
+        result = reader.eval(
+            'compare_tb.dut.unit_{a,b}.data[7:0] + compare_tb.dut.unit_a.data[7:0]',
+            clock='compare_tb.clk',
+            mode='zip',
+        )
+    assert isinstance(result, dict)
+    assert len(result) == 2
+
+
+# ------------------------------------------------------------------
+# begin_time / end_time / begin_cycle / end_cycle tests (compare.fsdb)
+# ------------------------------------------------------------------
+
+
+def test_fsdb_load_waveform_begin_end_time(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        full = reader.load_waveform('compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk')
+        windowed = reader.load_waveform(
+            'compare_tb.dut.unit_a.data[7:0]',
+            clock='compare_tb.clk',
+            begin_time=100,
+            end_time=200,
+        )
+
+    # Windowed result should be a strict subset of the full waveform
+    assert len(windowed.value) == 10
+    assert windowed.time[0] == 100
+    assert windowed.time[-1] == 190
+    # Clock values are absolute: cycle 10 is at time 100 (period=10)
+    assert windowed.clock[0] == 10
+    assert windowed.clock[-1] == 19
+    # Values should match the corresponding slice of the full waveform
+    assert np.array_equal(windowed.value, full.value[10:20])
+
+
+def test_fsdb_load_waveform_begin_end_cycle(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        full = reader.load_waveform('compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk')
+        windowed = reader.load_waveform(
+            'compare_tb.dut.unit_a.data[7:0]',
+            clock='compare_tb.clk',
+            begin_cycle=10,
+            end_cycle=20,
+        )
+
+    assert len(windowed.value) == 10
+    assert windowed.clock[0] == 10
+    assert windowed.clock[-1] == 19
+    assert np.array_equal(windowed.value, full.value[10:20])
 
 
 def test_fsdb_reader_mutually_exclusive_errors(fsdb_runtime):
@@ -399,3 +777,28 @@ def test_fsdb_reader_mutually_exclusive_errors(fsdb_runtime):
             reader.load_waveform(
                 'simple_tb.dut.data_o[3:0]', clock='simple_tb.clk', end_time=10, end_cycle=1
             )
+
+
+# ------------------------------------------------------------------
+# cycle_slice helpers
+# ------------------------------------------------------------------
+
+
+def test_fsdb_cycle_slice(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        full = reader.load_waveform('compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk')
+
+    sliced = full.cycle_slice(10, 20)
+    assert len(sliced.value) == 10
+    assert sliced.clock[0] == 10
+    assert sliced.clock[-1] == 19
+    assert np.array_equal(sliced.value, full.value[10:20])
+
+
+def test_fsdb_cycle_slice_include_end(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        full = reader.load_waveform('compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk')
+
+    sliced = full.cycle_slice(10, 20, include_end=True)
+    assert len(sliced.value) == 11
+    assert sliced.clock[-1] == 20

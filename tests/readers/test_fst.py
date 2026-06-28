@@ -5,6 +5,10 @@ import pytest
 
 from wavekit import FstReader, Waveform
 
+# ------------------------------------------------------------------
+# Fixtures
+# ------------------------------------------------------------------
+
 
 @pytest.fixture()
 def fst_path():
@@ -14,8 +18,14 @@ def fst_path():
     return path
 
 
-def test_fst_reader_exported():
-    assert FstReader.__name__ == 'FstReader'
+@pytest.fixture()
+def compare_fst_path():
+    return Path(__file__).resolve().parent / 'fixtures' / 'fst' / 'compare.fst'
+
+
+@pytest.fixture()
+def compare_xz_fst_path():
+    return Path(__file__).resolve().parent / 'fixtures' / 'fst' / 'compare_xz.fst'
 
 
 @pytest.fixture()
@@ -32,6 +42,41 @@ def nonzero_fst_path():
     if not path.exists():
         pytest.skip('nonzero_ranges.fst fixture is unavailable')
     return path
+
+
+# ------------------------------------------------------------------
+# Exports / hierarchy
+# ------------------------------------------------------------------
+
+
+def test_fst_reader_exported():
+    assert FstReader.__name__ == 'FstReader'
+
+
+def test_fst_reader_top_scope_list(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        top = reader.top_scope_list()
+        tb = top[0]
+        dut = next(scope for scope in tb.child_scope_list if scope.name == 'dut')
+
+        assert tb.name == 'compare_tb'
+        assert dut.name == 'dut'
+        assert {sig.name for sig in tb.signal_list} == {'clk', 'rst_n'}
+        assert {sig.name for sig in dut.signal_list} >= {'clk', 'rst_n', 'counter', 'status'}
+
+        child_names = {scope.name for scope in dut.child_scope_list}
+        assert {'unit_a', 'unit_b'} <= child_names
+
+        unit_a = next(scope for scope in dut.child_scope_list if scope.name == 'unit_a')
+        unit_a_signals = {sig.name for sig in unit_a.signal_list}
+        assert {'data', 'nonzero_data', 'zero_range', 'bus', 'data_0', 'data_1'} <= unit_a_signals
+        unit_a_children = {scope.name for scope in unit_a.child_scope_list}
+        assert {'pkt', 'u', 'gen_blk[0]', 'gen_blk[1]', 'gen_blk[2]'} <= unit_a_children
+
+
+# ------------------------------------------------------------------
+# Basic load / range metadata (nonzero_ranges.fst)
+# ------------------------------------------------------------------
 
 
 def test_fst_reader_native_range_metadata(nonzero_fst_path):
@@ -111,31 +156,56 @@ def test_fst_reader_nonzero_native_range_loads(nonzero_fst_path):
     assert np.array_equal(masks[()].value, np.zeros(3, dtype=np.uint64))
 
 
-def test_fst_reader_top_scope_list_normalizes_names_and_preserves_aliases(fst_path):
+# ------------------------------------------------------------------
+# Signed / signal-object / name metadata (compare.fst)
+# ------------------------------------------------------------------
+
+
+def test_fst_reader_load_waveform(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        w = reader.load_waveform(
+            'compare_tb.dut.unit_a.data[7:0]',
+            clock='compare_tb.clk',
+            signed=True,
+            sample_on_posedge=False,
+        )
+
+    assert w.signal.full_name == 'compare_tb.dut.unit_a.data[7:0]'
+    assert w.width == 8
+    assert w.signed is True
+    assert len(w.value) > 0
+
+
+def test_fst_load_waveform_signed(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        w = reader.load_waveform(
+            'compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk', signed=True
+        )
+    assert w.signal.full_name == 'compare_tb.dut.unit_a.data[7:0]'
+    assert w.signed is True
+    assert w.width == 8
+
+
+def test_fst_load_waveform_signed_default(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        w = reader.load_waveform('compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk')
+    assert w.signal.full_name == 'compare_tb.dut.unit_a.data[7:0]'
+    assert w.signed is False
+
+
+def test_fst_load_waveform_signal_object(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        sig = reader.get_matched_signals('compare_tb.dut.unit_a.data[7:0]')[()]
+        w = reader.load_waveform(sig, clock='compare_tb.clk', signed=True)
+    assert w.signal.full_name == 'compare_tb.dut.unit_a.data[7:0]'
+    assert w.signed is True
+
+
+def test_fst_load_waveform_subrange_name(fst_path):
     with FstReader(str(fst_path)) as reader:
-        top = reader.top_scope_list()
-        tb = top[0]
-        dut = tb.child_scope_list[0]
-
-        assert tb.name == 'tb'
-        assert dut.name == 'dut'
-        assert {sig.name for sig in tb.signal_list} >= {'clk', 'reset', 'overflow'}
-        assert {sig.name for sig in dut.signal_list} >= {
-            'clk',
-            'reset',
-            'overflow',
-            'counter',
-        }
-
-        tb_clk = next(sig for sig in tb.signal_list if sig.name == 'clk')
-        dut_clk = next(sig for sig in dut.signal_list if sig.name == 'clk')
-        assert tb_clk.handle == dut_clk.handle
-
-
-def test_fst_reader_module_name_matching_is_unsupported(fst_path):
-    with FstReader(str(fst_path)) as reader:
-        with pytest.raises(NotImplementedError):
-            reader.get_matched_signals('tb.$dut.counter[3:0]')
+        w = reader.load_waveform('tb.dut.counter[1:0]', clock='tb.clk')
+    assert w.signal.full_name == 'tb.dut.counter[1:0]'
+    assert w.width == 2
 
 
 def test_fst_reader_load_waveform_without_range(fst_path):
@@ -149,31 +219,6 @@ def test_fst_reader_load_waveform_without_range(fst_path):
     assert np.array_equal(counter.clock[:5], np.arange(5, dtype=np.uint64))
     assert np.array_equal(counter.value[:5], np.array([0, 0, 0, 0, 0], dtype=np.uint64))
     assert counter.value[5] == 1
-
-
-def test_fst_reader_begin_end_time_and_cycle_match(fst_path):
-    with FstReader(str(fst_path)) as reader:
-        by_time = reader.load_waveform(
-            'tb.dut.counter[3:0]',
-            clock='tb.clk',
-            sample_on_posedge=True,
-            begin_time=130,
-            end_time=230,
-        )
-        by_cycle = reader.load_waveform(
-            'tb.dut.counter[3:0]',
-            clock='tb.clk',
-            sample_on_posedge=True,
-            begin_cycle=6,
-            end_cycle=11,
-        )
-
-    assert np.array_equal(by_time.value, by_cycle.value)
-    assert np.array_equal(by_time.time, by_cycle.time)
-    assert np.array_equal(by_time.clock, by_cycle.clock)
-    assert by_time.time[0] == 130
-    assert by_time.time[-1] == 210
-    assert np.array_equal(by_cycle.clock, np.arange(6, 11, dtype=np.uint64))
 
 
 def test_fst_reader_subrange_load(fst_path):
@@ -197,90 +242,234 @@ def test_fst_reader_midrange_load(fst_path):
     assert np.any(high_bits.value == 0)
 
 
-def test_fst_reader_load_unknown_mask_include_flags(unknown_fst_path):
-    with FstReader(str(unknown_fst_path)) as reader:
-        both = reader.load_unknown_mask(
-            'TOP.tb.bus[3:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
-        )
-        x_only = reader.load_unknown_mask(
-            'TOP.tb.bus[3:0]',
-            clock='TOP.tb.clk',
-            include_z=False,
-            begin_cycle=1,
-            end_cycle=6,
-        )
-        z_only = reader.load_unknown_mask(
-            'TOP.tb.bus[3:0]',
-            clock='TOP.tb.clk',
-            include_x=False,
-            begin_cycle=1,
-            end_cycle=6,
-        )
-        values = reader.load_waveform(
-            'TOP.tb.bus[3:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+# ------------------------------------------------------------------
+# Pattern matching (brace / regex / range)
+# ------------------------------------------------------------------
+
+
+def test_fst_load_matched_waveforms_brace_expansion(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        waves = reader.load_matched_waveforms(
+            'compare_tb.dut.unit_{a,b}.data[7:0]', 'compare_tb.clk'
         )
 
-    assert both.signal.full_name == 'TOP.tb.bus[3:0]'
+    assert set(waves.keys()) == {('a',), ('b',)}
+    assert {wave.signal.full_name for wave in waves.values()} == {
+        'compare_tb.dut.unit_a.data[7:0]',
+        'compare_tb.dut.unit_b.data[7:0]',
+    }
+    assert all(wave.width == 8 for wave in waves.values())
+
+
+def test_fst_load_matched_waveforms_regex(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        waves = reader.load_matched_waveforms(
+            r'compare_tb.dut.@(unit_a|unit_b).data[7:0]', 'compare_tb.clk'
+        )
+
+    assert len(waves) == 2
+    assert {k[0][0] for k in waves} == {'unit_a', 'unit_b'}
+    assert all(wave.width == 8 for wave in waves.values())
+
+
+def test_fst_reader_load_matched_waveforms_regex(fst_path):
+    with FstReader(str(fst_path)) as reader:
+        waves = reader.load_matched_waveforms(r'tb.dut.@(counter|overflow)', 'tb.clk')
+
+    assert {key[0][0] for key in waves} == {'counter', 'overflow'}
+    assert {wave.width for wave in waves.values()} == {1, 4}
+
+
+def test_fst_reader_load_matched_waveforms_regex_key_conflict(fst_path):
+    # @regex without a capture group: all matches map to the same key -> conflict
+    with FstReader(str(fst_path)) as reader:
+        with pytest.raises(Exception):
+            reader.load_matched_waveforms(r'tb.dut.@[a-z]+', 'tb.clk')
+
+
+def test_fst_load_matched_waveforms_uses_signal_range(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        waves = reader.load_matched_waveforms('compare_tb.dut.unit_a.data', 'compare_tb.clk')
+
+    assert list(waves.keys()) == [()]
+    wave = waves[()]
+    assert wave.signal.full_name == 'compare_tb.dut.unit_a.data'
+    assert wave.width == 8
+
+
+def test_fst_reader_load_matched_waveforms(fst_path):
+    with FstReader(str(fst_path)) as reader:
+        waves = reader.load_matched_waveforms('tb.dut.{counter,overflow}', 'tb.clk')
+
+    assert set(waves.keys()) == {('counter',), ('overflow',)}
+    assert waves[('counter',)].width == 4
+    assert waves[('overflow',)].width == 1
+
+
+def test_fst_reader_module_name_matching_is_unsupported(fst_path):
+    with FstReader(str(fst_path)) as reader:
+        with pytest.raises(NotImplementedError):
+            reader.get_matched_signals('tb.$dut.counter[3:0]')
+
+
+def test_fst_reader_clock_pattern_error(fst_path):
+    with FstReader(str(fst_path)) as reader:
+        with pytest.raises(Exception):
+            reader.load_matched_waveforms('tb.dut.counter[3:0]', 'tb.no_clock')
+
+
+def test_fst_reader_clock_pattern_key_mismatch_error(fst_path):
+    # clock brace expansion yields different keys than the signal pattern
+    with FstReader(str(fst_path)) as reader:
+        with pytest.raises(Exception, match='do not match signal pattern keys'):
+            reader.load_matched_waveforms(
+                'tb.dut.{counter,overflow}',  # keys: {('counter',), ('overflow',)}
+                'tb.{clk,reset}',  # keys: {('clk',), ('reset',)} — mismatch
+            )
+
+
+def test_fst_reader_load_waveform_no_match_raises(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        with pytest.raises(ValueError, match="signal 'compare_tb.dut.unit_a.nope' not found"):
+            reader.load_waveform('compare_tb.dut.unit_a.nope', clock='compare_tb.clk')
+
+
+# ------------------------------------------------------------------
+# Unknown-mask tests (compare_xz.fst — real X/Z states)
+# ------------------------------------------------------------------
+
+
+def test_fst_reader_load_unknown_mask_include_flags(compare_xz_fst_path):
+    with FstReader(str(compare_xz_fst_path)) as reader:
+        both = reader.load_unknown_mask('compare_xz_tb.bus[3:0]', clock='compare_xz_tb.clk')
+        x_only = reader.load_unknown_mask(
+            'compare_xz_tb.bus[3:0]', clock='compare_xz_tb.clk', include_z=False
+        )
+        z_only = reader.load_unknown_mask(
+            'compare_xz_tb.bus[3:0]', clock='compare_xz_tb.clk', include_x=False
+        )
+        values = reader.load_waveform(
+            'compare_xz_tb.bus[3:0]', clock='compare_xz_tb.clk', xz_value=0
+        )
+
+    assert both.signal.full_name == 'compare_xz_tb.bus[3:0]'
     assert both.width == 4
     assert both.signed is False
-    assert np.array_equal(both.value, np.zeros(5, dtype=np.uint64))
-    assert np.array_equal(x_only.value, np.zeros(5, dtype=np.uint64))
-    assert np.array_equal(z_only.value, np.zeros(5, dtype=np.uint64))
+    assert np.array_equal(both.value, np.array([0, 15, 15, 2, 5, 0], dtype=np.uint64))
+    assert np.array_equal(x_only.value, np.array([0, 15, 0, 2, 1, 0], dtype=np.uint64))
+    assert np.array_equal(z_only.value, np.array([0, 0, 15, 0, 4, 0], dtype=np.uint64))
     assert np.array_equal(both.clock, values.clock)
     assert np.array_equal(both.time, values.time)
 
 
-def test_fst_reader_load_unknown_mask_range_and_matched(unknown_fst_path):
-    with FstReader(str(unknown_fst_path)) as reader:
-        full = reader.load_unknown_mask(
-            'TOP.tb.bus[3:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
-        )
-        mid = reader.load_unknown_mask(
-            'TOP.tb.bus[3:2]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
-        )
-        low = reader.load_unknown_mask(
-            'TOP.tb.bus[1:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
-        )
-        masks = reader.load_matched_unknown_masks(
-            'TOP.tb.data_{0,1}[3:0]', 'TOP.tb.clk', begin_cycle=1, end_cycle=6
-        )
-        values = reader.load_matched_waveforms(
-            'TOP.tb.data_{0,1}[3:0]', 'TOP.tb.clk', begin_cycle=1, end_cycle=6
-        )
+def test_fst_reader_load_unknown_mask_range_selection(compare_xz_fst_path):
+    with FstReader(str(compare_xz_fst_path)) as reader:
+        full = reader.load_unknown_mask('compare_xz_tb.bus[3:0]', clock='compare_xz_tb.clk')
+        mid = reader.load_unknown_mask('compare_xz_tb.bus[3:2]', clock='compare_xz_tb.clk')
+        low = reader.load_unknown_mask('compare_xz_tb.bus[1:0]', clock='compare_xz_tb.clk')
 
     assert mid.width == 2
-    assert mid.signal.full_name == 'TOP.tb.bus[3:2]'
+    assert mid.signal.full_name == 'compare_xz_tb.bus[3:2]'
     assert np.array_equal(mid.value, (full.value >> 2) & 0x3)
     assert low.width == 2
-    assert low.signal.full_name == 'TOP.tb.bus[1:0]'
-    assert np.array_equal(low.value, np.zeros(5, dtype=np.uint64))
-    assert set(masks) == set(values) == {('0',), ('1',)}
-    assert masks[('0',)].signal.full_name == 'TOP.tb.data_0[3:0]'
-    assert masks[('1',)].signal.full_name == 'TOP.tb.data_1[3:0]'
+    assert low.signal.full_name == 'compare_xz_tb.bus[1:0]'
+    assert np.array_equal(low.value, full.value & 0x3)
 
 
-def test_fst_reader_unknown_mask_both_false_is_all_zero(unknown_fst_path):
-    with FstReader(str(unknown_fst_path)) as reader:
-        both = reader.load_unknown_mask(
-            'TOP.tb.bus[3:0]',
-            clock='TOP.tb.clk',
+def test_fst_load_unknown_mask_name_signed(compare_xz_fst_path):
+    with FstReader(str(compare_xz_fst_path)) as reader:
+        w = reader.load_unknown_mask('compare_xz_tb.bus[3:0]', clock='compare_xz_tb.clk')
+    assert w.signal.full_name == 'compare_xz_tb.bus[3:0]'
+    assert w.signed is False
+
+
+def test_fst_load_unknown_mask_signal_object_name(compare_xz_fst_path):
+    with FstReader(str(compare_xz_fst_path)) as reader:
+        sig = reader.get_matched_signals('compare_xz_tb.bus[3:0]')[()]
+        w = reader.load_unknown_mask(sig, clock='compare_xz_tb.clk')
+    assert w.signal.full_name == 'compare_xz_tb.bus[3:0]'
+    assert w.signed is False
+
+
+def test_fst_reader_load_unknown_mask_fully_known_is_zero(compare_xz_fst_path):
+    with FstReader(str(compare_xz_fst_path)) as reader:
+        # data_0 is fully known at cycle 0 (mask bit pattern all zero there)
+        mask = reader.load_unknown_mask(
+            'compare_xz_tb.data_0[3:0]', clock='compare_xz_tb.clk', begin_cycle=0, end_cycle=1
+        )
+
+    assert np.array_equal(mask.value, np.array([0], dtype=np.uint64))
+
+
+def test_fst_reader_load_unknown_mask_both_false_is_all_zero(compare_xz_fst_path):
+    with FstReader(str(compare_xz_fst_path)) as reader:
+        mask = reader.load_unknown_mask(
+            'compare_xz_tb.bus[3:0]',
+            clock='compare_xz_tb.clk',
             include_x=False,
             include_z=False,
-            begin_cycle=1,
-            end_cycle=6,
         )
+
+    assert mask.signal.full_name == 'compare_xz_tb.bus[3:0]'
+    assert mask.width == 4
+    assert np.array_equal(mask.value, np.zeros(len(mask.value), dtype=np.uint64))
+
+
+def test_fst_load_matched_unknown_masks_name(compare_xz_fst_path):
+    with FstReader(str(compare_xz_fst_path)) as reader:
         masks = reader.load_matched_unknown_masks(
-            'TOP.tb.data_{0,1}[3:0]',
-            'TOP.tb.clk',
-            include_x=False,
-            include_z=False,
-            begin_cycle=1,
-            end_cycle=6,
+            'compare_xz_tb.data_{0,1}[3:0]', 'compare_xz_tb.clk'
+        )
+    assert masks[('0',)].signal.full_name == 'compare_xz_tb.data_0[3:0]'
+    assert masks[('1',)].signal.full_name == 'compare_xz_tb.data_1[3:0]'
+    assert masks[('0',)].signed is False
+    assert masks[('1',)].signed is False
+
+
+def test_fst_reader_load_matched_unknown_masks(compare_xz_fst_path):
+    with FstReader(str(compare_xz_fst_path)) as reader:
+        masks = reader.load_matched_unknown_masks(
+            'compare_xz_tb.data_{0,1}[3:0]', 'compare_xz_tb.clk'
+        )
+        values = reader.load_matched_waveforms(
+            'compare_xz_tb.data_{0,1}[3:0]', 'compare_xz_tb.clk', xz_value=0
         )
 
-    assert np.array_equal(both.value, np.zeros(5, dtype=np.uint64))
-    assert np.array_equal(masks[('0',)].value, np.zeros(5, dtype=np.uint64))
-    assert np.array_equal(masks[('1',)].value, np.zeros(5, dtype=np.uint64))
+    assert set(masks) == set(values) == {('0',), ('1',)}
+    assert masks[('0',)].signal.full_name == 'compare_xz_tb.data_0[3:0]'
+    assert masks[('1',)].signal.full_name == 'compare_xz_tb.data_1[3:0]'
+    # data_0 has X bits at cycles 2 (bit 3) and 3 (bit 0); data_1 has X/Z bits at cycles 1,3
+    assert np.any(masks[('0',)].value != 0)
+    assert np.any(masks[('1',)].value != 0)
+
+
+def test_fst_reader_matched_unknown_mask_both_false_is_all_zero(compare_xz_fst_path):
+    with FstReader(str(compare_xz_fst_path)) as reader:
+        masks = reader.load_matched_unknown_masks(
+            'compare_xz_tb.data_{0,1}[3:0]',
+            'compare_xz_tb.clk',
+            include_x=False,
+            include_z=False,
+        )
+
+    assert set(masks) == {('0',), ('1',)}
+    assert np.array_equal(masks[('0',)].value, np.zeros(len(masks[('0',)].value), dtype=np.uint64))
+    assert np.array_equal(masks[('1',)].value, np.zeros(len(masks[('1',)].value), dtype=np.uint64))
+
+
+def test_fst_reader_rejects_invalid_xz_value(compare_xz_fst_path):
+    with FstReader(str(compare_xz_fst_path)) as reader:
+        with pytest.raises(ValueError, match='xz_value must be 0 or 1'):
+            reader.load_waveform('compare_xz_tb.bus[3:0]', clock='compare_xz_tb.clk', xz_value=2)
+        with pytest.raises(ValueError, match='xz_value must be 0 or 1'):
+            reader.load_matched_waveforms('compare_xz_tb.bus[3:0]', 'compare_xz_tb.clk', xz_value=2)
+        with pytest.raises(ValueError, match='xz_value must be 0 or 1'):
+            reader.eval('compare_xz_tb.bus[3:0] + 1', clock='compare_xz_tb.clk', xz_value=2)
+
+
+# ------------------------------------------------------------------
+# Verilator composite scope reads (unknown_states.fst — backend-specific)
+# ------------------------------------------------------------------
 
 
 def test_fst_reader_verilator_composites_expose_structs_as_scopes(unknown_fst_path):
@@ -400,58 +589,102 @@ def test_fst_reader_verilator_whole_aggregate_reads_fail(unknown_fst_path):
                 reader.load_waveform(signal, clock='TOP.tb.clk')
 
 
-def test_fst_reader_rejects_invalid_xz_value(unknown_fst_path):
-    with FstReader(str(unknown_fst_path)) as reader:
-        with pytest.raises(ValueError, match='xz_value must be 0 or 1'):
-            reader.load_waveform('TOP.tb.bus[3:0]', clock='TOP.tb.clk', xz_value=2)
-        with pytest.raises(ValueError, match='xz_value must be 0 or 1'):
-            reader.load_matched_waveforms('TOP.tb.bus[3:0]', 'TOP.tb.clk', xz_value=2)
-        with pytest.raises(ValueError, match='xz_value must be 0 or 1'):
-            reader.eval('TOP.tb.bus[3:0] + 1', clock='TOP.tb.clk', xz_value=2)
+# ------------------------------------------------------------------
+# eval integration tests
+# ------------------------------------------------------------------
 
 
-def test_fst_reader_load_matched_waveforms(fst_path):
-    with FstReader(str(fst_path)) as reader:
-        waves = reader.load_matched_waveforms('tb.dut.{counter,overflow}', 'tb.clk')
-
-    assert set(waves.keys()) == {('counter',), ('overflow',)}
-    assert waves[('counter',)].width == 4
-    assert waves[('overflow',)].width == 1
-
-
-def test_fst_reader_load_matched_waveforms_regex(fst_path):
-    with FstReader(str(fst_path)) as reader:
-        waves = reader.load_matched_waveforms(r'tb.dut.@(counter|overflow)', 'tb.clk')
-
-    assert {key[0][0] for key in waves} == {'counter', 'overflow'}
-    assert {wave.width for wave in waves.values()} == {1, 4}
-
-
-def test_fst_reader_load_matched_waveforms_uses_signal_range(fst_path):
-    with FstReader(str(fst_path)) as reader:
-        waves = reader.load_matched_waveforms('tb.dut.counter', 'tb.clk')
-
-    assert list(waves.keys()) == [()]
-    wave = waves[()]
-    assert wave.signal.full_name == 'tb.dut.counter'
-    assert wave.width == 4
-
-
-def test_fst_reader_eval_smoke(fst_path):
-    with FstReader(str(fst_path)) as reader:
-        result = reader.eval('tb.dut.counter[3:0] + 1', clock='tb.clk')
-        bit_slice = reader.eval('tb.dut.counter[3:0][1:0]', clock='tb.clk')
+def test_fst_eval_smoke(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        result = reader.eval('compare_tb.dut.unit_a.data[7:0] + 1', clock='compare_tb.clk')
+        bit_slice = reader.eval('compare_tb.dut.unit_a.data[7:0][1:0]', clock='compare_tb.clk')
 
     assert isinstance(result, Waveform)
-    assert result.width == 5
+    assert result.width == 9  # addition increases width by 1
     assert isinstance(bit_slice, Waveform)
     assert bit_slice.width == 2
 
 
-def test_fst_reader_load_waveform_no_match_raises(fst_path):
-    with FstReader(str(fst_path)) as reader:
-        with pytest.raises(ValueError, match="signal 'tb.dut.nope' not found"):
-            reader.load_waveform('tb.dut.nope', clock='tb.clk')
+def test_fst_eval_no_match_raises(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        with pytest.raises(ValueError, match='matched no signals'):
+            reader.eval('compare_tb.dut.unit_a.nonexistent', clock='compare_tb.clk')
+
+
+def test_fst_eval_error_on_multi_match(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        with pytest.raises(ValueError, match="mode='single'"):
+            reader.eval(
+                'compare_tb.dut.unit_{a,b}.data[7:0]',
+                clock='compare_tb.clk',
+                mode='single',
+            )
+
+
+def test_fst_eval_zip_mode_brace_expansion(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        result = reader.eval(
+            'compare_tb.dut.unit_{a,b}.data[7:0] + 1',
+            clock='compare_tb.clk',
+            mode='zip',
+        )
+    assert isinstance(result, dict)
+    assert set(result.keys()) == {('a',), ('b',)}
+    assert all(isinstance(w, Waveform) for w in result.values())
+
+
+def test_fst_eval_zip_mode_broadcast(compare_fst_path):
+    # unit_a.data matches 1 signal (broadcast), unit_{a,b}.data matches 2
+    with FstReader(str(compare_fst_path)) as reader:
+        result = reader.eval(
+            'compare_tb.dut.unit_{a,b}.data[7:0] + compare_tb.dut.unit_a.data[7:0]',
+            clock='compare_tb.clk',
+            mode='zip',
+        )
+    assert isinstance(result, dict)
+    assert len(result) == 2
+
+
+# ------------------------------------------------------------------
+# begin_time / end_time / begin_cycle / end_cycle tests (compare.fst)
+# ------------------------------------------------------------------
+
+
+def test_fst_load_waveform_begin_end_time(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        full = reader.load_waveform('compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk')
+        windowed = reader.load_waveform(
+            'compare_tb.dut.unit_a.data[7:0]',
+            clock='compare_tb.clk',
+            begin_time=100,
+            end_time=200,
+        )
+
+    # Windowed result should be a strict subset of the full waveform
+    assert len(windowed.value) == 10
+    assert windowed.time[0] == 100
+    assert windowed.time[-1] == 190
+    # Clock values are absolute: cycle 10 is at time 100 (period=10)
+    assert windowed.clock[0] == 10
+    assert windowed.clock[-1] == 19
+    # Values should match the corresponding slice of the full waveform
+    assert np.array_equal(windowed.value, full.value[10:20])
+
+
+def test_fst_load_waveform_begin_end_cycle(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        full = reader.load_waveform('compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk')
+        windowed = reader.load_waveform(
+            'compare_tb.dut.unit_a.data[7:0]',
+            clock='compare_tb.clk',
+            begin_cycle=10,
+            end_cycle=20,
+        )
+
+    assert len(windowed.value) == 10
+    assert windowed.clock[0] == 10
+    assert windowed.clock[-1] == 19
+    assert np.array_equal(windowed.value, full.value[10:20])
 
 
 def test_fst_reader_mutually_exclusive_errors(fst_path):
@@ -460,3 +693,28 @@ def test_fst_reader_mutually_exclusive_errors(fst_path):
             reader.load_waveform('tb.dut.counter[3:0]', clock='tb.clk', begin_time=0, begin_cycle=0)
         with pytest.raises(ValueError, match='mutually exclusive'):
             reader.load_waveform('tb.dut.counter[3:0]', clock='tb.clk', end_time=10, end_cycle=1)
+
+
+# ------------------------------------------------------------------
+# cycle_slice helpers
+# ------------------------------------------------------------------
+
+
+def test_fst_cycle_slice(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        full = reader.load_waveform('compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk')
+
+    sliced = full.cycle_slice(10, 20)
+    assert len(sliced.value) == 10
+    assert sliced.clock[0] == 10
+    assert sliced.clock[-1] == 19
+    assert np.array_equal(sliced.value, full.value[10:20])
+
+
+def test_fst_cycle_slice_include_end(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        full = reader.load_waveform('compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk')
+
+    sliced = full.cycle_slice(10, 20, include_end=True)
+    assert len(sliced.value) == 11
+    assert sliced.clock[-1] == 20
