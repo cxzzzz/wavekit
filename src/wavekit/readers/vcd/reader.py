@@ -35,27 +35,29 @@ class VcdScope(Scope):
         def signal_list() -> list[Signal]:
             range_re = re.compile(r'\[(\d+):(\d+)\]$')
             full_scope_name = self.full_name
-            signals = []
+            signals: list[Signal] = []
             for k, v in self.vcdvcd_scope.subElements.items():
                 if isinstance(v, str):
                     signal_path = f'{full_scope_name}.{k}'
                     width = int(self.reader.file_handle[signal_path].size)
+                    signal_range: Range | None
                     if m := range_re.search(k):
-                        range = Range(int(m.group(1)), int(m.group(2)))
-                        assert (
-                            abs(range.start - range.end) + 1 == width
-                        ), f"range {range} does not match width {width} for signal '{signal_path}'"
+                        signal_range = Range(int(m.group(1)), int(m.group(2)))
+                        assert abs(signal_range.start - signal_range.end) + 1 == width, (
+                            f'range {signal_range} does not match width {width} '
+                            f"for signal '{signal_path}'"
+                        )
                         bare_name = k[: m.start()]
                     else:
-                        range = None if width == 1 else Range(width - 1, 0)
+                        signal_range = None if width == 1 else Range(width - 1, 0)
                         bare_name = k
 
                     signals.append(
                         VcdSignal(
                             base_name=bare_name,
                             parent=self,
-                            range=range,
-                            native_range=range,
+                            range=signal_range,
+                            native_range=signal_range,
                             _ref=signal_path,
                         )
                     )
@@ -68,7 +70,10 @@ class VcdScope(Scope):
                 if isinstance(v, VcdVcdScope)
             ]
 
-        return tuple(scope_list() + signal_list())
+        children: list[Node] = []
+        children.extend(scope_list())
+        children.extend(signal_list())
+        return tuple(children)
 
 
 class VcdReader(Reader[VcdSignal]):
@@ -113,18 +118,17 @@ class VcdReader(Reader[VcdSignal]):
         signal_handle = self.file_handle[lookup_path]
         native_width = signal.native_width
 
-        if signal.native_range is None:
-            raw_start, raw_stop = 0, 1
-        else:
+        native_range = signal.native_range or Range(0, 0)
+        selected_range = signal.range or native_range
 
-            def hdl_index_to_raw_offset(index: int) -> int:
-                if signal.native_range.end >= signal.native_range.start:
-                    return index - signal.native_range.start
-                return signal.native_range.start - index
+        def hdl_index_to_raw_offset(index: int) -> int:
+            if native_range.end >= native_range.start:
+                return index - native_range.start
+            return native_range.start - index
 
-            start_pos = hdl_index_to_raw_offset(signal.range.start)
-            end_pos = hdl_index_to_raw_offset(signal.range.end)
-            raw_start, raw_stop = start_pos, end_pos + 1
+        start_pos = hdl_index_to_raw_offset(selected_range.start)
+        end_pos = hdl_index_to_raw_offset(selected_range.end)
+        raw_start, raw_stop = start_pos, end_pos + 1
 
         def decode(raw: str) -> int:
             raw = raw.lower()

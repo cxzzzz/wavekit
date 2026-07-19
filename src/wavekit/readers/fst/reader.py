@@ -80,6 +80,7 @@ class FstReader(Reader[FstSignal]):
 
                 signal_name = path_parts[-1]
                 width = int(raw_signal.length)
+                signal_range: Range | None
                 if match := range_re.search(signal_name):
                     signal_range = Range(int(match.group(1)), int(match.group(2)))
                     if abs(signal_range.start - signal_range.end) + 1 != width:
@@ -126,18 +127,17 @@ class FstReader(Reader[FstSignal]):
 
         assert signal.composite_type is None
 
-        if signal.native_range is None:
-            raw_start, raw_stop = 0, 1
-        else:
+        native_range = signal.native_range or Range(0, 0)
+        selected_range = signal.range or native_range
 
-            def hdl_index_to_raw_offset(index: int) -> int:
-                if signal.native_range.end >= signal.native_range.start:
-                    return index - signal.native_range.start
-                return signal.native_range.start - index
+        def hdl_index_to_raw_offset(index: int) -> int:
+            if native_range.end >= native_range.start:
+                return index - native_range.start
+            return native_range.start - index
 
-            start_pos = hdl_index_to_raw_offset(signal.range.start)
-            end_pos = hdl_index_to_raw_offset(signal.range.end)
-            raw_start, raw_stop = start_pos, end_pos + 1
+        start_pos = hdl_index_to_raw_offset(selected_range.start)
+        end_pos = hdl_index_to_raw_offset(selected_range.end)
+        raw_start, raw_stop = start_pos, end_pos + 1
 
         def decode(raw: str) -> int:
             raw = raw.lower()
