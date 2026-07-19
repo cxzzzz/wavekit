@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from wavekit import (
+    ExactCapture,
     FsdbReader,
     Scope,
     Signal,
@@ -11,7 +12,7 @@ from wavekit import (
     Waveform,
     has_fsdb_support,
 )
-from wavekit.readers.hierarchy import Range
+from wavekit.readers.range import Range
 
 
 def _scopes(node):
@@ -91,9 +92,9 @@ def test_fsdb_reader_exported(fsdb_runtime):
     assert FsdbReader.__name__ == 'FsdbReader'
 
 
-def test_fsdb_reader_top_scope_list(compare_fsdb):
+def test_fsdb_reader_top_scopes(compare_fsdb):
     with FsdbReader(str(compare_fsdb)) as reader:
-        top = reader.top_scope_list()
+        top = reader.top_scopes
         tb = top[0]
         dut = next(scope for scope in _scopes(tb) if scope.name == 'dut')
 
@@ -120,7 +121,7 @@ def test_fsdb_reader_top_scope_list(compare_fsdb):
 
 def test_fsdb_reader_native_range_metadata(fsdb_runtime):
     with FsdbReader(str(fsdb_runtime)) as reader:
-        tb = reader.top_scope_list()[0]
+        tb = reader.top_scopes[0]
         signals = {sig.base_name: sig for sig in _signals(tb)}
 
     assert signals['nonzero_vec'].width == 4
@@ -180,6 +181,141 @@ def test_fsdb_reader_nonzero_native_range_loads(compare_fsdb):
     assert matched.range == Range(6, 5)
     assert masks[()].width == 2
     assert np.array_equal(masks[()].value, np.zeros(len(masks[()].value), dtype=np.uint64))
+
+
+def test_fsdb_reader_packed_range_directions(compare_fsdb):
+    """Exercise ascending and descending nonzero packed ranges from real dumps."""
+    with FsdbReader(str(compare_fsdb)) as reader:
+        asc_zero_signal = reader.get_matched_signals('compare_tb.dut.unit_a.asc_zero')[()]
+        asc_nonzero_signal = reader.get_matched_signals('compare_tb.dut.unit_a.asc_nonzero')[()]
+        desc_nonzero_signal = reader.get_matched_signals('compare_tb.dut.unit_a.desc_nonzero')[()]
+
+        asc_zero = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_zero', clock='compare_tb.clk', begin_cycle=1, end_cycle=4
+        )
+        asc_nonzero = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_nonzero',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        desc_nonzero = reader.load_waveform(
+            'compare_tb.dut.unit_a.desc_nonzero',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+
+        asc_zero_left = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_zero[0:1]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        asc_zero_right = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_zero[2:3]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        asc_nonzero_left = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_nonzero[1:2]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        asc_nonzero_right = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_nonzero[2:3]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        desc_nonzero_left = reader.load_waveform(
+            'compare_tb.dut.unit_a.desc_nonzero[3:2]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        desc_nonzero_right = reader.load_waveform(
+            'compare_tb.dut.unit_a.desc_nonzero[2:1]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+
+        asc_zero_msb = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_zero[0]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        asc_zero_lsb = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_zero[3]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        asc_nonzero_msb = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_nonzero[1]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        asc_nonzero_lsb = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_nonzero[3]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        desc_nonzero_msb = reader.load_waveform(
+            'compare_tb.dut.unit_a.desc_nonzero[3]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        desc_nonzero_lsb = reader.load_waveform(
+            'compare_tb.dut.unit_a.desc_nonzero[1]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        matched = reader.load_matched_waveforms(
+            'compare_tb.dut.unit_{a,b}.asc_nonzero[1:2]',
+            'compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+
+    assert (asc_zero_signal.native_range.start, asc_zero_signal.native_range.end) == (0, 3)
+    assert (asc_nonzero_signal.native_range.start, asc_nonzero_signal.native_range.end) == (1, 3)
+    assert (desc_nonzero_signal.native_range.start, desc_nonzero_signal.native_range.end) == (3, 1)
+    assert asc_zero_signal.full_name == 'compare_tb.dut.unit_a.asc_zero[0:3]'
+    assert asc_nonzero_signal.full_name == 'compare_tb.dut.unit_a.asc_nonzero[1:3]'
+    assert desc_nonzero_signal.full_name == 'compare_tb.dut.unit_a.desc_nonzero[3:1]'
+
+    assert np.array_equal(asc_zero.value, np.array([0b1100, 0b0011, 0b1100], dtype=np.uint64))
+    assert np.array_equal(asc_nonzero.value, np.array([0b110, 0b001, 0b110], dtype=np.uint64))
+    assert np.array_equal(desc_nonzero.value, asc_nonzero.value)
+
+    assert np.array_equal(asc_zero_left.value, np.array([0b11, 0b00, 0b11], dtype=np.uint64))
+    assert np.array_equal(asc_zero_right.value, np.array([0b00, 0b11, 0b00], dtype=np.uint64))
+    assert np.array_equal(asc_nonzero_left.value, asc_zero_left.value)
+    assert np.array_equal(desc_nonzero_left.value, asc_zero_left.value)
+    assert np.array_equal(asc_nonzero_right.value, np.array([0b10, 0b01, 0b10], dtype=np.uint64))
+    assert np.array_equal(desc_nonzero_right.value, asc_nonzero_right.value)
+
+    assert np.array_equal(asc_zero_msb.value, np.array([1, 0, 1], dtype=np.uint64))
+    assert np.array_equal(asc_zero_lsb.value, np.array([0, 1, 0], dtype=np.uint64))
+    assert np.array_equal(asc_nonzero_msb.value, asc_zero_msb.value)
+    assert np.array_equal(desc_nonzero_msb.value, asc_zero_msb.value)
+    assert np.array_equal(asc_nonzero_lsb.value, asc_zero_lsb.value)
+    assert np.array_equal(desc_nonzero_lsb.value, asc_zero_lsb.value)
+
+    assert _capture_groups(matched) == {('a',), ('b',)}
+    assert np.array_equal(_by_group(matched, 'a').value, asc_nonzero_left.value)
+    assert np.array_equal(
+        _by_group(matched, 'b').value, np.array([0b00, 0b11, 0b00], dtype=np.uint64)
+    )
 
 
 # ------------------------------------------------------------------
@@ -307,7 +443,7 @@ def test_fsdb_load_matched_waveforms_brace_expansion(compare_fsdb):
 def test_fsdb_reader_load_matched_waveforms_regex(compare_fsdb):
     with FsdbReader(str(compare_fsdb)) as reader:
         waves = reader.load_matched_waveforms(
-            r'compare_tb.dut.@(unit_a|unit_b).data[7:0]', 'compare_tb.clk'
+            r'compare_tb.dut./(unit_a|unit_b)/.data[7:0]', 'compare_tb.clk'
         )
 
     assert len(waves) == 2
@@ -343,13 +479,13 @@ def test_fsdb_reader_load_matched_waveforms(fsdb_runtime):
     assert _by_group(waves, 'overflow').width == 1
 
 
-def test_fsdb_reader_clock_pattern_error(fsdb_runtime):
+def test_fsdb_reader_clock_path_error(fsdb_runtime):
     with FsdbReader(str(fsdb_runtime)) as reader:
         with pytest.raises(Exception):
             reader.load_matched_waveforms('simple_tb.dut.data_o[3:0]', 'simple_tb.no_clock')
 
 
-def test_fsdb_reader_clock_pattern_key_mismatch_error(fsdb_runtime):
+def test_fsdb_reader_clock_path_key_mismatch_error(fsdb_runtime):
     # clock brace expansion yields different keys than the signal pattern
     with FsdbReader(str(fsdb_runtime)) as reader:
         with pytest.raises(Exception, match='no clock key is a prefix'):
@@ -376,7 +512,10 @@ def test_fsdb_reader_dollar_module_name_matching(compare_fsdb):
     with FsdbReader(str(compare_fsdb)) as reader:
         matched = reader.get_matched_signals('compare_tb.dut.$compare_unit.data[7:0]')
 
-    assert {k[0] for k in matched} == {'unit_a', 'unit_b'}
+    captures = {key[0] for key in matched}
+    assert all(isinstance(capture, ExactCapture) for capture in captures)
+    assert {capture.path for capture in captures} == {'unit_a', 'unit_b'}
+    assert {capture.definition for capture in captures} == {'compare_unit'}
     assert {s.full_name for s in matched.values()} == {
         'compare_tb.dut.unit_a.data[7:0]',
         'compare_tb.dut.unit_b.data[7:0]',
@@ -388,7 +527,10 @@ def test_fsdb_reader_dollar_dollar_module_name_matching(compare_fsdb):
     with FsdbReader(str(compare_fsdb)) as reader:
         matched = reader.get_matched_signals('compare_tb.$$compare_unit.data[7:0]')
 
-    assert {k[0] for k in matched} == {'dut.unit_a', 'dut.unit_b'}
+    captures = {key[0] for key in matched}
+    assert all(isinstance(capture, ExactCapture) for capture in captures)
+    assert {capture.path for capture in captures} == {'dut.unit_a', 'dut.unit_b'}
+    assert {capture.definition for capture in captures} == {'compare_unit'}
 
 
 # ------------------------------------------------------------------
@@ -536,7 +678,7 @@ def test_fsdb_reader_rejects_invalid_xz_value(compare_xz_fsdb):
 def test_fsdb_reader_composite_metadata(fsdb_runtime):
     # Composite children are loaded lazily from NPI and require an open reader.
     with FsdbReader(str(fsdb_runtime)) as reader:
-        tb = reader.top_scope_list()[0]
+        tb = reader.top_scopes[0]
         signals = {sig.base_name: sig for sig in _signals(tb)}
 
         assert signals['pkt'].width == 4
@@ -575,6 +717,31 @@ def test_fsdb_reader_composite_metadata(fsdb_runtime):
         assert (
             pkt_packed_arr_members['pkt_packed_arr[0]'].composite_type == SignalCompositeType.STRUCT
         )
+
+
+def test_fsdb_reader_array_matching_prefers_elements_then_range_views(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        packed_element = reader.get_matched_signals('simple_tb.packed_arr[0]')[()]
+        packed_range = reader.get_matched_signals('simple_tb.packed_arr[2:1]')[()]
+        unpacked_element = reader.get_matched_signals('simple_tb.unpacked_arr[0]')[()]
+        element_range = reader.get_matched_signals('simple_tb.unpacked_arr[0][8:7]')[()]
+        struct_element = reader.get_matched_signals('simple_tb.pkt_arr[0]')[()]
+        struct_member = reader.get_matched_signals('simple_tb.pkt_arr[0].valid')[()]
+
+        with pytest.raises(ValueError, match='cannot be followed'):
+            reader.get_matched_signals('simple_tb.pkt_arr[1:0].valid')
+
+    assert packed_element.base_name == 'packed_arr[0]'
+    assert packed_element.range == Range(2, 0)
+    assert packed_range.base_name == 'packed_arr'
+    assert packed_range.range == Range(2, 1)
+    assert unpacked_element.base_name == 'unpacked_arr[0]'
+    assert unpacked_element.range == Range(10, 0)
+    assert element_range.base_name == 'unpacked_arr[0]'
+    assert element_range.range == Range(8, 7)
+    assert struct_element.base_name == 'pkt_arr[0]'
+    assert struct_element.composite_type == SignalCompositeType.STRUCT
+    assert struct_member.full_name == 'simple_tb.pkt_arr[0].valid'
 
 
 def test_fsdb_reader_packed_struct_whole_and_fields(fsdb_runtime):

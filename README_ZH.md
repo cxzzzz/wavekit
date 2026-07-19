@@ -41,17 +41,16 @@ pip install wavekit
 from wavekit import VcdReader
 
 with VcdReader("jtag.vcd") as f:
-    # 大括号展开：同时加载 J_state 和 J_next
-    # 返回：{ ('state',): Waveform, ('next',): Waveform }
+    # key 中是 BraceCapture，其 groups 分别为 ("state",) / ("next",)。
     waves = f.load_matched_waveforms(
         "tb.u0.J_{state,next}[3:0]",
-        clock_pattern="tb.tck",
+        clock_path="tb.tck",
     )
 
-    # 正则模式（@ 前缀）：捕获组作为字典键
+    # /regex/ 是正式正则语法，捕获组保存在 RegexCapture.groups 中。
     waves = f.load_matched_waveforms(
-        r"tb.u0.@J_([a-z]+)",
-        clock_pattern="tb.tck",
+        r"tb.u0./J_([a-z]+)/",
+        clock_path="tb.tck",
     )
 ```
 
@@ -112,8 +111,7 @@ with VcdReader("fifo_tb.vcd") as f:
         clock="fifo_tb.clk",
     )
 
-    # zip 模式：大括号模式按 key 逐组展开，每组求值一次
-    # 返回：{ (0,): Waveform, (1,): Waveform, (2,): Waveform, (3,): Waveform }
+    # zip 模式：大括号模式按类型化 CaptureKey 逐组展开，每组求值一次
     occupancies = f.eval(
         "tb.fifo_{0..3}.w_ptr[2:0] - tb.fifo_{0..3}.r_ptr[2:0]",
         clock="tb.clk",
@@ -238,11 +236,17 @@ records = Pattern(read_burst, timeout=64).collect()
 | `VcdReader(file)` / `FstReader(file)` / `FsdbReader(file)` | 打开波形文件。建议作为上下文管理器使用。`FsdbReader` 需要 Verdi 运行时环境（通过 `WAVEKIT_NPI_LIB`、`VERDI_HOME` 或 `LD_LIBRARY_PATH` 配置）。 |
 | `reader.load_waveform(signal, clock, ...)` | 加载单个信号，按时钟边沿采样，返回 `Waveform`。 |
 | `reader.load_unknown_mask(signal, clock, ...)` | **实验性**。加载 X/Z 位存在性为无符号掩码 `Waveform`。 |
-| `reader.load_matched_waveforms(pattern, clock_pattern, ...)` | 按模式批量加载信号，返回 `dict[tuple, Waveform]`。 |
-| `reader.load_matched_unknown_masks(pattern, clock_pattern, ...)` | **实验性**。按模式批量加载 X/Z 掩码，返回 `dict[tuple, Waveform]`。 |
+| `reader.load_matched_waveforms(signal_path, clock_path, ...)` | 批量加载匹配信号，返回 `dict[CaptureKey, Waveform]`。 |
+| `reader.load_matched_unknown_masks(signal_path, clock_path, ...)` | **实验性**。批量加载匹配信号的 X/Z 掩码，返回 `dict[CaptureKey, Waveform]`。 |
 | `reader.eval(expr, clock, mode='single'\|'zip', ...)` | 对包含信号路径的算术表达式直接求值。 |
-| `reader.get_matched_signals(pattern)` | 将模式解析为信号路径列表，不加载数据。 |
-| `reader.top_scope_list()` | 返回信号层级的根 `Scope` 节点。 |
+| `reader.get_matched_signals(path)` | 将查询解析为 `Signal` 对象，不加载数据。 |
+| `reader.get_matched_scopes(path)` | 将查询解析为 `Scope` 对象。 |
+| `reader.top_scopes` | 根 `Scope` 节点组成的不可变 tuple。 |
+| `has_fsdb_support()` | 检查当前是否可以使用 Verdi FSDB 运行时。 |
+
+匹配与层级查询 API 使用 `CaptureKey = tuple[Capture, ...]`。普通精确路径段不会进入 key，因此纯精确查询使用 `()`；`BraceCapture` / `RegexCapture` 通过 `.groups` 提供捕获值，`WildcardCapture` 保存匹配 `.path`，FSDB 模块匹配通过带 `.definition` 的 `ExactCapture` 保留语义。
+
+`Node` 是不可变的 `Scope` / `Signal` 基类，提供 `.parent`、不可变 `.children`、`.base_name`、`.name` 和 `.full_name`。`Signal` 还提供 `.range`、`.native_range`、`.width`、`.native_width`、`.is_leaf` 与 `.composite_type`；`Range(start, end)` 保留 HDL 范围方向。
 
 **信号路径支持的模式语法**：
 
@@ -251,7 +255,9 @@ records = Pattern(read_burst, timeout=64).collect()
 | `{a,b,c}` | `sig_{read,write}` | 枚举命名变体 |
 | `{N..M}` | `fifo_{0..3}.ptr` | 整数范围 |
 | `{N..M..step}` | `lane_{0..6..2}` | 带步长的范围 |
-| `@<regex>` | `@([a-z]+)_valid` | 正则匹配，捕获组作为字典键 |
+| `/<regex>/` | `/([a-z]+)_valid/` | 正式正则语法，保留捕获组 |
+| `@<regex>` | `@([a-z]+)_valid` | 兼容旧代码的正则语法 |
+| `*` / `**` | `tb.*.valid` / `tb.**.valid` | 单层 / 递归通配 |
 | `$ModName` | `tb.$fifo_unit.ptr` | 按模块名匹配直接子层级（仅 FSDB） |
 | `$$ModName` | `tb.$$fifo_unit.ptr` | 按模块名匹配任意深度后代（仅 FSDB） |
 

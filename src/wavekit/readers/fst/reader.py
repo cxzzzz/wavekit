@@ -9,7 +9,8 @@ import numpy as np
 import pylibfst
 
 from ..base import Reader
-from ..hierarchy import Node, Range, Scope, Signal
+from ..hierarchy import Node, Scope, Signal
+from ..range import Range
 
 
 @dataclass(frozen=True, eq=False)

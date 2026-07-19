@@ -1,8 +1,4 @@
-#   -------------------------------------------------------------
-#   Copyright (c) Microsoft Corporation. All rights reserved.
-#   Licensed under the MIT License. See LICENSE in project root for information.
-#   -------------------------------------------------------------
-"""Python Package Template"""
+"""Clock-synchronised analysis for VCD, FST, and FSDB waveforms."""
 
 from __future__ import annotations
 
@@ -20,7 +16,6 @@ from .pattern import Pattern as Pattern
 from .pattern import PatternError as PatternError
 from .readers.fst.reader import FstReader as FstReader
 from .readers.hierarchy import Node as Node
-from .readers.hierarchy import Range as Range
 from .readers.hierarchy import Scope as Scope
 from .readers.hierarchy import Signal as Signal
 from .readers.hierarchy import SignalCompositeType as SignalCompositeType
@@ -30,6 +25,7 @@ from .readers.matcher import CaptureKey as CaptureKey
 from .readers.matcher import ExactCapture as ExactCapture
 from .readers.matcher import RegexCapture as RegexCapture
 from .readers.matcher import WildcardCapture as WildcardCapture
+from .readers.range import Range as Range
 from .readers.vcd.reader import VcdReader as VcdReader
 from .waveform import Waveform as Waveform
 

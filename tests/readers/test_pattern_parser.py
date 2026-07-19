@@ -3,6 +3,7 @@
 import pytest
 
 from wavekit.readers.matcher import BraceMatcher, ExactMatcher, RegexMatcher, parse_query_path
+from wavekit.readers.range import Range
 
 
 def test_matcher_parser_splits_hierarchy_and_range():
@@ -11,7 +12,7 @@ def test_matcher_parser_splits_hierarchy_and_range():
     assert len(steps) == 3
     assert all(isinstance(step.matcher, ExactMatcher) for step in steps)
     assert steps[-1].matcher.name == 'J_state'
-    assert steps[-1].matcher.range == (3, 0)
+    assert steps[-1].matcher.range == Range(3, 0)
 
 
 def test_matcher_parser_preserves_regex_hierarchy_content():

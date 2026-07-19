@@ -5,7 +5,7 @@ import pytest
 
 from wavekit import Scope, Signal, VcdReader, Waveform
 from wavekit.readers.base import Reader  # noqa: F401  # used in test_vcd_value_change_to_waveform_*
-from wavekit.readers.hierarchy import Range
+from wavekit.readers.range import Range
 
 
 def _scopes(node):
@@ -63,9 +63,9 @@ def test_vcd_reader_exported():
     assert VcdReader.__name__ == 'VcdReader'
 
 
-def test_vcd_reader_top_scope_list(compare_vcd_path):
+def test_vcd_reader_top_scopes(compare_vcd_path):
     with VcdReader(str(compare_vcd_path)) as reader:
-        top = reader.top_scope_list()
+        top = reader.top_scopes
         tb = top[0]
         dut = next(scope for scope in _scopes(tb) if scope.name == 'dut')
 
@@ -82,6 +82,19 @@ def test_vcd_reader_top_scope_list(compare_vcd_path):
         assert {'data', 'nonzero_data', 'zero_range', 'bus', 'data_0', 'data_1'} <= unit_a_signals
         unit_a_children = {scope.name for scope in _scopes(unit_a)}
         assert {'pkt', 'u', 'gen_blk[0]', 'gen_blk[1]', 'gen_blk[2]'} <= unit_a_children
+
+
+def test_vcd_node_and_reader_match_keys_are_consistent(compare_vcd_path):
+    with VcdReader(str(compare_vcd_path)) as reader:
+        root = reader.top_scopes[0]
+        exact_from_node = root.get_matched_signals('dut.unit_a.data[7:0]')
+        exact_from_reader = reader.get_matched_signals('dut.unit_a.data[7:0]', root_scope=root)
+        brace_from_node = root.get_matched_signals('dut.unit_{a,b}.data[7:0]')
+        brace_from_reader = reader.get_matched_signals('dut.unit_{a,b}.data[7:0]', root_scope=root)
+
+    assert exact_from_node.keys() == exact_from_reader.keys() == {()}
+    assert brace_from_node.keys() == brace_from_reader.keys()
+    assert _capture_groups(brace_from_node) == {('a',), ('b',)}
 
 
 # ------------------------------------------------------------------
@@ -140,7 +153,7 @@ def test_vcd_reader_midrange_load(vcd_path):
 
 def test_vcd_reader_native_range_metadata(nonzero_vcd_path):
     with VcdReader(str(nonzero_vcd_path)) as reader:
-        tb = _scopes(reader.top_scope_list()[0])[0]
+        tb = _scopes(reader.top_scopes[0])[0]
         signals = {sig.base_name: sig for sig in _signals(tb)}
 
     assert signals['packed_vec'].full_name == 'TOP.tb.packed_vec[3:0]'
@@ -409,7 +422,7 @@ def test_vcd_load_matched_waveforms_brace_expansion(compare_vcd_path):
 def test_vcd_load_matched_waveforms_regex(compare_vcd_path):
     with VcdReader(str(compare_vcd_path)) as reader:
         waves = reader.load_matched_waveforms(
-            r'compare_tb.dut.@(unit_a|unit_b).data[7:0]', 'compare_tb.clk'
+            r'compare_tb.dut./(unit_a|unit_b)/.data[7:0]', 'compare_tb.clk'
         )
 
     assert len(waves) == 2
@@ -482,13 +495,13 @@ def test_vcd_reader_module_name_matching_is_unsupported(vcd_path):
             reader.get_matched_signals('tb.$u0.J_state[3:0]')
 
 
-def test_vcd_reader_clock_pattern_error(vcd_path):
+def test_vcd_reader_clock_path_error(vcd_path):
     vcd_reader = VcdReader(str(vcd_path))
     with pytest.raises(Exception):
         vcd_reader.load_matched_waveforms('tb.u0.J_state[3:0]', 'tb.no_clock')
 
 
-def test_vcd_reader_clock_pattern_key_mismatch_error(vcd_path):
+def test_vcd_reader_clock_path_key_mismatch_error(vcd_path):
     # clock brace expansion yields different keys than the signal pattern
     vcd_reader = VcdReader(str(vcd_path))
     with pytest.raises(Exception, match='no clock key is a prefix'):
@@ -638,7 +651,7 @@ def test_vcd_reader_matched_unknown_mask_both_false_is_all_zero(compare_xz_vcd_p
 
 def test_vcd_reader_verilator_composites_expose_structs_as_scopes(unknown_vcd_path):
     with VcdReader(str(unknown_vcd_path)) as reader:
-        top = reader.top_scope_list()[0]
+        top = reader.top_scopes[0]
         tb = _scopes(top)[0]
         signals = {sig.base_name: sig for sig in _signals(tb)}
         children = {scope.name: scope for scope in _scopes(tb)}

@@ -7,6 +7,16 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Changed
+- Replace the legacy `scope.py`, `signal.py`, and `pattern_parser.py` modules with
+  immutable hierarchy types and the unified query matcher.
+- Standardize matched-reader results on typed `CaptureKey` tuples and remove
+  ordinary exact-name captures from public keys.
+- Expose immutable reader roots through `Reader.top_scopes` and use
+  `signal_path` / `clock_path` for matched loading APIs.
+- Add canonical `/regex/` query syntax while retaining `@regex` as a compatibility
+  spelling.
+
 ## 0.7.0a1 - 2026-06-19
 
 ### Added

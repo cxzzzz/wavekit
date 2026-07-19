@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from wavekit import FstReader, Scope, Signal, Waveform
-from wavekit.readers.hierarchy import Range
+from wavekit.readers.range import Range
 
 
 def _scopes(node):
@@ -71,9 +71,9 @@ def test_fst_reader_exported():
     assert FstReader.__name__ == 'FstReader'
 
 
-def test_fst_reader_top_scope_list(compare_fst_path):
+def test_fst_reader_top_scopes(compare_fst_path):
     with FstReader(str(compare_fst_path)) as reader:
-        top = reader.top_scope_list()
+        top = reader.top_scopes
         tb = top[0]
         dut = next(scope for scope in _scopes(tb) if scope.name == 'dut')
 
@@ -99,7 +99,7 @@ def test_fst_reader_top_scope_list(compare_fst_path):
 
 def test_fst_reader_native_range_metadata(nonzero_fst_path):
     with FstReader(str(nonzero_fst_path)) as reader:
-        tb = _scopes(reader.top_scope_list()[0])[0]
+        tb = _scopes(reader.top_scopes[0])[0]
         signals = {sig.base_name: sig for sig in _signals(tb)}
 
     assert signals['packed_vec'].full_name == 'TOP.tb.packed_vec[3:0]'
@@ -417,7 +417,7 @@ def test_fst_load_matched_waveforms_brace_expansion(compare_fst_path):
 def test_fst_load_matched_waveforms_regex(compare_fst_path):
     with FstReader(str(compare_fst_path)) as reader:
         waves = reader.load_matched_waveforms(
-            r'compare_tb.dut.@(unit_a|unit_b).data[7:0]', 'compare_tb.clk'
+            r'compare_tb.dut./(unit_a|unit_b)/.data[7:0]', 'compare_tb.clk'
         )
 
     assert len(waves) == 2
@@ -465,13 +465,13 @@ def test_fst_reader_module_name_matching_is_unsupported(fst_path):
             reader.get_matched_signals('tb.$dut.counter[3:0]')
 
 
-def test_fst_reader_clock_pattern_error(fst_path):
+def test_fst_reader_clock_path_error(fst_path):
     with FstReader(str(fst_path)) as reader:
         with pytest.raises(Exception):
             reader.load_matched_waveforms('tb.dut.counter[3:0]', 'tb.no_clock')
 
 
-def test_fst_reader_clock_pattern_key_mismatch_error(fst_path):
+def test_fst_reader_clock_path_key_mismatch_error(fst_path):
     # clock brace expansion yields different keys than the signal pattern
     with FstReader(str(fst_path)) as reader:
         with pytest.raises(Exception, match='no clock key is a prefix'):
@@ -631,7 +631,7 @@ def test_fst_reader_rejects_invalid_xz_value(compare_xz_fst_path):
 
 def test_fst_reader_verilator_composites_expose_structs_as_scopes(unknown_fst_path):
     with FstReader(str(unknown_fst_path)) as reader:
-        top = reader.top_scope_list()[0]
+        top = reader.top_scopes[0]
         tb = _scopes(top)[0]
         signals = {sig.base_name: sig for sig in _signals(tb)}
         children = {scope.name: scope for scope in _scopes(tb)}

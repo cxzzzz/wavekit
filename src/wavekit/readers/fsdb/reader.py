@@ -8,7 +8,8 @@ from typing import Any
 import numpy as np
 
 from ..base import Reader
-from ..hierarchy import Node, Range, Scope, Signal, SignalCompositeType
+from ..hierarchy import Node, Scope, Signal, SignalCompositeType
+from ..range import Range
 from .npi_fsdb_reader import (
     NPI_FSDB_CT_ARRAY,
     NPI_FSDB_CT_RECORD,
@@ -69,6 +70,11 @@ class FsdbSignal(Signal):
             _npi_signal=npi_signal,
         )
 
+    @property
+    def definition(self) -> None:
+        """Return no definition name; the FSDB API does not expose signal typedef names."""
+        return None
+
     @cached_property
     def children(self) -> tuple[Node, ...]:
         if self.composite_type is None:
@@ -101,7 +107,7 @@ class FsdbScope(Scope):
         return scopes + signals
 
     @cached_property
-    def def_name(self) -> str | None:
+    def definition(self) -> str | None:
         """Return the module definition name, if this scope is a module."""
         return self._npi_scope.def_name()
 

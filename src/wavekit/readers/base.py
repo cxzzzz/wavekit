@@ -10,11 +10,10 @@ import numpy as np
 from ..waveform import Waveform
 from .expr_parser import extract_wave_paths
 from .hierarchy import Node, Scope, Signal
-from .matcher import CaptureKey, ExactCapture
+from .matcher import CaptureKey
 from .value_change import value_change_to_value_array
 
 SignalT = TypeVar('SignalT', bound=Signal)
-NodeT = TypeVar('NodeT', bound=Node)
 
 
 @dataclass(frozen=True, eq=False)
@@ -37,7 +36,8 @@ class Reader(Generic[SignalT]):
     """Abstract base class for waveform file readers.
 
     Concrete subclasses (:class:`~wavekit.VcdReader`,
-    :class:`~wavekit.FsdbReader`) implement the file-format-specific I/O;
+    :class:`~wavekit.FstReader`, and :class:`~wavekit.FsdbReader`) implement
+    the file-format-specific I/O;
     all high-level analysis APIs are provided here.
 
     Supports the context-manager protocol::
@@ -70,12 +70,17 @@ class Reader(Generic[SignalT]):
     * ``{a,b,c}``     — matches ``a``, ``b``, or ``c``; captures each as a key.
     * ``{0..7}``       — integer range 0 to 7 inclusive; step defaults to 1.
     * ``{0..7..2}``    — integer range with explicit step (0, 2, 4, 6).
-    * ``@<regex>``     — prefix a path component with ``@`` to use a Python
-      regex instead of exact matching; capture groups ``(...)`` become tuple
-      elements in the result key.
+    * ``/<regex>/``     — use a Python regex instead of exact matching; capture
+      groups ``(...)`` are retained in a :class:`~wavekit.RegexCapture` key.
+    * ``@<regex>``      — legacy-compatible regex spelling accepted by the parser.
+    * ``*`` / ``**``    — match one hierarchy level or recursively match levels;
+      matches are retained as :class:`~wavekit.WildcardCapture` keys.
+    * ``$<module>`` / ``$$<module>`` — match direct or recursive FSDB module
+      definitions; module captures are retained as :class:`~wavekit.ExactCapture`.
 
-    All pattern expansions produce ``dict[CaptureKey, Signal]`` where the tuple key
-    encodes the captured values and the value is the full signal path.
+    All pattern expansions produce ``dict[CaptureKey, Signal]``. Ordinary exact-name
+    components are omitted from keys; binding matchers retain typed ``Capture`` objects,
+    and each value is the matched :class:`~wavekit.Signal` object.
     """
 
     def __init__(self):
@@ -252,10 +257,6 @@ class Reader(Generic[SignalT]):
         """Return the real top-level scopes in the waveform hierarchy."""
         pass
 
-    def top_scope_list(self) -> list[Scope]:
-        """Return the real top-level scopes as a list for compatibility."""
-        return list(self.top_scopes)
-
     @staticmethod
     def _value_change_to_waveform(
         value_change: np.ndarray,
@@ -396,26 +397,6 @@ class Reader(Generic[SignalT]):
 
         return result
 
-    @staticmethod
-    def _public_matches(
-        matches: dict[CaptureKey, NodeT],
-    ) -> dict[CaptureKey, NodeT]:
-        """Project internal traversal captures to public reader result keys."""
-        results: dict[CaptureKey, NodeT] = {}
-        for captures, node in matches.items():
-            key = tuple(
-                capture
-                for capture in captures
-                if not (isinstance(capture, ExactCapture) and capture.definition is None)
-            )
-            if key in results:
-                raise ValueError(
-                    f'Query path matched more than one node for key {key!r}: '
-                    f'{results[key].full_name!r} vs {node.full_name!r}'
-                )
-            results[key] = node
-        return results
-
     def _search_root(self, root_scope: Scope | None) -> Node:
         """Return a real root or an internal search container for all top-level scopes."""
         if root_scope is not None:
@@ -454,11 +435,10 @@ class Reader(Generic[SignalT]):
         ------
         ValueError:
             If two different signals resolve to the same key, or if using
-            module matchers on a backend without ``def_name`` support (VCD/FST).
+            module matchers on a backend without ``definition`` support (VCD/FST).
         """
         search_root = self._search_root(root_scope)
-        matched = self._public_matches(search_root.get_matched_signals(path))
-        return cast(dict[CaptureKey, SignalT], matched)
+        return cast(dict[CaptureKey, SignalT], search_root.get_matched_signals(path))
 
     def get_matched_scopes(
         self,
@@ -492,19 +472,16 @@ class Reader(Generic[SignalT]):
         ------
         ValueError:
             If two different scopes resolve to the same key, or if using
-            module matchers on a backend without ``def_name`` support (VCD/FST),
+            module matchers on a backend without ``definition`` support (VCD/FST),
             or if the path contains a terminal signal bit-range suffix.
         """
         search_root = self._search_root(root_scope)
-        return cast(
-            dict[CaptureKey, Scope],
-            self._public_matches(search_root.get_matched_scopes(path)),
-        )
+        return search_root.get_matched_scopes(path)
 
     def load_matched_waveforms(
         self,
-        signal_path: str | None = None,
-        clock_path: str | None = None,
+        signal_path: str,
+        clock_path: str,
         xz_value: int = 0,
         signed: bool = False,
         sample_on_posedge: bool = False,
@@ -513,14 +490,8 @@ class Reader(Generic[SignalT]):
         begin_cycle: int | None = None,
         end_cycle: int | None = None,
         root_scope: Scope | None = None,
-        *,
-        pattern: str | None = None,
-        clock_pattern: str | None = None,
     ) -> dict[CaptureKey, Waveform]:
         """Batch-load all signals matching *signal_path*, each paired with its clock.
-
-        .. deprecated::
-           Use *signal_path* and *clock_path* instead of *pattern* and *clock_pattern*.
 
         Internally calls :meth:`get_matched_signals` for both *signal_path* and
         *clock_path*, then dispatches :meth:`load_waveform` for every match.
@@ -557,12 +528,6 @@ class Reader(Generic[SignalT]):
             of a signal key.
         """
         self._validate_xz_value(xz_value)
-        if signal_path is None:
-            signal_path = pattern  # type: ignore[assignment]
-        if clock_path is None:
-            clock_path = clock_pattern  # type: ignore[assignment]
-        if signal_path is None or clock_path is None:
-            raise TypeError('signal_path and clock_path are required')
         clock_pairing = self._resolve_clock_pairing(signal_path, clock_path, root_scope)
         matched_signals = self.get_matched_signals(signal_path, root_scope=root_scope)
         load_kwargs: dict[str, Any] = dict(
@@ -646,13 +611,13 @@ class Reader(Generic[SignalT]):
 
     def _resolve_signal(self, signal: SignalT | str) -> SignalT:
         if isinstance(signal, Signal):
-            return cast(SignalT, signal)
+            return signal
         matched = self.get_matched_signals(signal)
         if len(matched) == 0:
             raise ValueError(f"signal '{signal}' not found")
         if len(matched) > 1:
             raise ValueError(f"signal '{signal}' matches more than one signal")
-        return cast(SignalT, matched[()])
+        return matched[()]
 
     def _resolve_clock_pairing(
         self,

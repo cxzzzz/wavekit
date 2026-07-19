@@ -10,7 +10,8 @@ from vcdvcd import VCDVCD
 from vcdvcd import Scope as VcdVcdScope
 
 from ..base import Reader
-from ..hierarchy import Node, Range, Scope, Signal
+from ..hierarchy import Node, Scope, Signal
+from ..range import Range
 
 
 @dataclass(frozen=True, eq=False)

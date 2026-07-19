@@ -42,17 +42,16 @@ Use brace expansion or regular expressions to load multiple related signals in o
 from wavekit import VcdReader
 
 with VcdReader("jtag.vcd") as f:
-    # Brace expansion: load J_state and J_next in one call
-    # Returns: { ('state',): Waveform, ('next',): Waveform }
+    # Keys contain BraceCapture objects whose groups are ("state",) / ("next",).
     waves = f.load_matched_waveforms(
         "tb.u0.J_{state,next}[3:0]",
-        clock_pattern="tb.tck",
+        clock_path="tb.tck",
     )
 
-    # Regex mode (@ prefix): capture groups become dict keys
+    # /regex/ is the canonical regex syntax; groups are stored by RegexCapture.
     waves = f.load_matched_waveforms(
-        r"tb.u0.@J_([a-z]+)",
-        clock_pattern="tb.tck",
+        r"tb.u0./J_([a-z]+)/",
+        clock_path="tb.tck",
     )
 ```
 
@@ -119,8 +118,7 @@ with VcdReader("fifo_tb.vcd") as f:
         clock="fifo_tb.clk",
     )
 
-    # Zip mode: brace patterns expand per key, evaluated once per match
-    # Returns: { (0,): Waveform, (1,): Waveform, (2,): Waveform, (3,): Waveform }
+    # Zip mode: brace patterns expand per typed CaptureKey and evaluate per match.
     occupancies = f.eval(
         "tb.fifo_{0..3}.w_ptr[2:0] - tb.fifo_{0..3}.r_ptr[2:0]",
         clock="tb.clk",
@@ -248,17 +246,25 @@ Some tips for programmable patterns:
 | `VcdReader(file)` / `FstReader(file)` / `FsdbReader(file)` | Open a waveform file. Use as a context manager. `FsdbReader` requires Verdi runtime (`WAVEKIT_NPI_LIB`, `VERDI_HOME`, or `LD_LIBRARY_PATH`). |
 | `reader.load_waveform(signal, clock, ...)` | Load one signal sampled on every clock edge. Returns `Waveform`. |
 | `reader.load_unknown_mask(signal, clock, ...)` | **Experimental.** Load X/Z bit presence as an unsigned mask `Waveform`. |
-| `reader.load_matched_waveforms(pattern, clock_pattern, ...)` | Batch-load signals matching a brace/regex pattern. Returns `dict[CaptureKey, Waveform]`. |
-| `reader.load_matched_unknown_masks(pattern, clock_pattern, ...)` | **Experimental.** Batch-load X/Z masks for matched signals. Returns `dict[CaptureKey, Waveform]`. |
+| `reader.load_matched_waveforms(signal_path, clock_path, ...)` | Batch-load matching signals. Returns `dict[CaptureKey, Waveform]`. |
+| `reader.load_matched_unknown_masks(signal_path, clock_path, ...)` | **Experimental.** Batch-load X/Z masks for matched signals. Returns `dict[CaptureKey, Waveform]`. |
 | `reader.eval(expr, clock, mode='single'\|'zip', ...)` | Evaluate an arithmetic expression with embedded signal paths. |
-| `reader.get_matched_signals(pattern)` | Resolve a pattern to signal paths without loading data. |
-| `reader.top_scope_list()` | Return root `Scope` nodes of the signal hierarchy. |
+| `reader.get_matched_signals(path)` | Resolve a query to `Signal` objects without loading data. |
+| `reader.get_matched_scopes(path)` | Resolve a query to `Scope` objects. |
+| `reader.top_scopes` | Immutable tuple of root `Scope` nodes. |
+| `has_fsdb_support()` | Report whether the Verdi FSDB runtime is currently available. |
 
-Matched-reader APIs use `CaptureKey = tuple[Capture, ...]`. Exact-name path
-components are omitted; brace, regex, wildcard, and module-definition matches
-remain as typed `Capture` objects containing their matched path and groups.
-Hierarchy nodes expose immutable `.children`, `.parent`, `.base_name`, `.name`,
-and `.full_name` properties.
+Matched-reader and hierarchy query APIs use `CaptureKey = tuple[Capture, ...]`.
+Ordinary exact-name components are omitted, so an exact query uses key `()`.
+Bindings remain typed: `BraceCapture` and `RegexCapture` expose `.groups`,
+`WildcardCapture` records the matched `.path`, and FSDB module queries retain an
+`ExactCapture` with `.definition`.
+
+`Node` is the immutable base for `Scope` and `Signal`. Nodes expose `.parent`,
+immutable `.children`, local `.base_name` / `.name`, and qualified `.full_name`.
+A `Signal` additionally exposes `.range`, `.native_range`, `.width`,
+`.native_width`, `.is_leaf`, and `.composite_type`; `Range(start, end)` preserves
+HDL declaration direction.
 
 **Pattern syntax** used in signal paths:
 
@@ -267,7 +273,9 @@ and `.full_name` properties.
 | `{a,b,c}` | `sig_{read,write}` | Enumerate named variants |
 | `{N..M}` | `fifo_{0..3}.ptr` | Integer range |
 | `{N..M..step}` | `lane_{0..6..2}` | Stepped range |
-| `@<regex>` | `@([a-z]+)_valid` | Regex with capture groups |
+| `/<regex>/` | `/([a-z]+)_valid/` | Canonical regex syntax with capture groups |
+| `@<regex>` | `@([a-z]+)_valid` | Legacy-compatible regex syntax |
+| `*` / `**` | `tb.*.valid` / `tb.**.valid` | Single-level / recursive wildcard |
 | `$ModName` | `tb.$fifo_unit.ptr` | Match a direct-child scope by module/definition name (FSDB only) |
 | `$$ModName` | `tb.$$fifo_unit.ptr` | Match any-depth descendant scope by module/definition name (FSDB only) |
 

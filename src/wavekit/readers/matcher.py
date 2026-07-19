@@ -5,13 +5,13 @@ This module implements wavekit's signal/scope query-path syntax:
 * ``name`` — exact local-name match
 * ``{a,b}``, ``{0..3}``, ``{0..7..2}`` — brace expansion
 * ``*`` / ``**`` — single-level / recursive wildcard
-* ``/regex/`` or legacy ``@regex`` — regular-expression match
+* ``/regex/`` — regular-expression match; legacy ``@regex`` is also accepted
 * ``$ModName`` / ``$$ModName`` — direct / recursive module-definition match
 
 Matchers deliberately depend only on the small node surface they consume
-(``name``, ``base_name``, ``def_name``, ``composite_type``, and
-``with_range``).  The hierarchy module imports this parser, so importing the
-concrete hierarchy types here would create a cycle.
+(``base_name``, ``definition``, and ``is_range_selectable``). The hierarchy
+module imports this parser, so importing concrete hierarchy types here would
+create a cycle.
 """
 
 from __future__ import annotations
@@ -24,15 +24,15 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from .hierarchy import Node
 
-MatchTarget = Literal['name', 'definition']
-RangeSelection = tuple[int, int] | None
+from .range import Range
 
+MatchTarget = Literal['name', 'definition']
 _RANGE_BRACE = re.compile(r'\{(\d+)\.\.(\d+)(?:\.\.(\d+))?\}')
 _LIST_BRACE = re.compile(r'\{([^{}]+)\}')
 _TRAILING_RANGE = re.compile(r'(\[(\d+)(?::(\d+))?\])$')
 
 
-def split_trailing_range(segment: str) -> tuple[str, str, RangeSelection]:
+def split_trailing_range(segment: str) -> tuple[str, str, Range | None]:
     """Split a trailing ``[N]`` or ``[H:L]`` from a path segment."""
     matched = _TRAILING_RANGE.search(segment)
     if matched is None:
@@ -40,11 +40,13 @@ def split_trailing_range(segment: str) -> tuple[str, str, RangeSelection]:
     suffix = matched.group(1)
     start = int(matched.group(2))
     end = int(matched.group(3)) if matched.group(3) is not None else start
-    return segment[: matched.start()], suffix, (start, end)
+    return segment[: matched.start()], suffix, Range(start, end)
 
 
 @dataclass(frozen=True)
 class Capture:
+    """Base class for typed bindings returned in a :data:`CaptureKey`."""
+
     path: str
     definition: str | None = None
 
@@ -58,34 +60,20 @@ CaptureKey = tuple[Capture, ...]
 class Matcher:
     """Match a single hierarchy node.
 
-    A successful match returns the capture and an optional raw ``(start, end)``
-    range selection.  The hierarchy layer owns conversion to :class:`Range`
-    and validation against the matched signal's native range.
+    A successful match returns the capture and an optional :class:`Range`.
+    The hierarchy layer owns validation against the matched signal's native range.
     """
 
     target: MatchTarget
 
     @abstractmethod
-    def match(self, node: Node) -> tuple[Capture, RangeSelection] | None:
+    def match(self, node: Node) -> tuple[Capture, Range | None] | None:
         """Return the capture and optional range selection for *node*."""
-
-
-def _is_range_selectable(node: Node) -> bool:
-    """Return whether a node may accept a trailing range selector.
-
-    The concrete hierarchy keeps the authoritative validation in
-    ``Signal.with_range``.  This parser-level check only rejects scopes and
-    non-array composite signals before attempting a selection.
-    """
-    if not callable(getattr(node, 'with_range', None)):
-        return False
-    composite_type = getattr(node, 'composite_type', None)
-    return composite_type is None or getattr(composite_type, 'value', composite_type) == 'array'
 
 
 @dataclass(frozen=True)
 class ExactCapture(Capture):
-    pass
+    """Exact-name binding; only module-definition matches are public."""
 
 
 class ExactMatcher(Matcher):
@@ -96,28 +84,36 @@ class ExactMatcher(Matcher):
         self.pattern = pattern
         self.name, self.suffix, self.range = split_trailing_range(pattern)
 
-    def match(self, node: Node) -> tuple[Capture, RangeSelection] | None:
+    def match(self, node: Node) -> tuple[Capture, Range | None] | None:
+        # Definition regexes ($/regex/ and $$/regex/) match the FSDB module
+        # definition name rather than the hierarchy node name.
         if self.target == 'definition':
-            if not hasattr(node, 'def_name'):
+            if not hasattr(node, 'definition'):
                 raise ValueError(
-                    'Cannot use module matcher ($/$$) on a scope without def_name. '
-                    'VCD/FST backends do not support module def_name matching; use FSDB. '
-                    f'(scope: {node.name!r})'
+                    'Cannot use module matcher ($/$$) on a backend without definition '
+                    'matching support; use FSDB. '
+                    f'(node: {node.name!r})'
                 )
-            definition = node.def_name
+            definition = node.definition
             if self.pattern == definition:
                 return ExactCapture(path=node.name, definition=definition), None
             return None
 
-        if node.name == self.pattern:
-            return ExactCapture(path=self.pattern), None
-        if _is_range_selectable(node) and node.base_name == self.name:
+        if node.base_name == self.pattern:
+            return ExactCapture(path=node.base_name), None
+        if (
+            self.range is not None
+            and getattr(node, 'is_range_selectable', False)
+            and node.base_name == self.name
+        ):
             return ExactCapture(path=self.pattern), self.range
         return None
 
 
 @dataclass(frozen=True)
 class BraceCapture(Capture):
+    """Binding produced by brace expansion; ``groups`` stores brace values."""
+
     groups: tuple[str, ...] = ()
 
 
@@ -131,7 +127,7 @@ class BraceMatcher(Matcher):
             key: ExactMatcher(target, expanded) for key, expanded in self.expand(pattern).items()
         }
 
-    def match(self, node: Node) -> tuple[Capture, RangeSelection] | None:
+    def match(self, node: Node) -> tuple[Capture, Range | None] | None:
         for key, matcher in self.matchers.items():
             matched = matcher.match(node)
             if matched is not None:
@@ -186,7 +182,7 @@ class BraceMatcher(Matcher):
 
 @dataclass(frozen=True)
 class WildcardCapture(Capture):
-    pass
+    """Binding produced by ``*`` or ``**`` wildcard matching."""
 
 
 class WildcardMatcher(Matcher):
@@ -195,13 +191,15 @@ class WildcardMatcher(Matcher):
     def __init__(self, target: MatchTarget):
         self.target = target
 
-    def match(self, node: Node) -> tuple[Capture, RangeSelection] | None:
+    def match(self, node: Node) -> tuple[Capture, Range | None] | None:
         assert self.target != 'definition'
         return WildcardCapture(path=node.name), None
 
 
 @dataclass(frozen=True)
 class RegexCapture(Capture):
+    """Binding produced by regex matching; ``groups`` stores regex groups."""
+
     groups: tuple[str, ...] = ()
 
 
@@ -214,20 +212,22 @@ class RegexMatcher(Matcher):
         regex, self.suffix, self.range = split_trailing_range(pattern)
         self.regex = re.compile(regex)
 
-    def match(self, node: Node) -> tuple[Capture, RangeSelection] | None:
+    def match(self, node: Node) -> tuple[Capture, Range | None] | None:
+        # Definition regexes ($/regex/ and $$/regex/) match the FSDB module
+        # definition name rather than the hierarchy node name.
         if self.target == 'definition':
-            if not hasattr(node, 'def_name'):
+            if not hasattr(node, 'definition'):
                 raise ValueError(
-                    'Cannot use module matcher ($/$$) on a scope without def_name. '
-                    'VCD/FST backends do not support module def_name matching; use FSDB. '
-                    f'(scope: {node.name!r})'
+                    'Cannot use module matcher ($/$$) on a backend without definition '
+                    'matching support; use FSDB. '
+                    f'(node: {node.name!r})'
                 )
             if self.range is not None:
                 raise ValueError(
                     f'Range selector {self.suffix!r} is not allowed on definition matchers: '
                     f'{self.pattern!r}'
                 )
-            definition = node.def_name
+            definition = node.definition
             if definition is not None and (matched := self.regex.fullmatch(definition)):
                 return (
                     RegexCapture(
@@ -239,16 +239,34 @@ class RegexMatcher(Matcher):
                 )
             return None
 
+        # No trailing selection was parsed outside the regex literal. First
+        # try a direct match against the real local base name.
         if self.range is None:
-            if matched := self.regex.fullmatch(node.name):
-                return RegexCapture(path=node.name, groups=matched.groups()), None
+            if matched := self.regex.fullmatch(node.base_name):
+                return RegexCapture(path=node.base_name, groups=matched.groups()), None
+            # Compatibility case: the regex itself may contain a native range,
+            # for example /(counter\[3:0\]|overflow)/. Match the displayed
+            # name and return the node's existing range as the selection.
+            if (
+                getattr(node, 'is_range_selectable', False)
+                and (selected_range := getattr(node, 'range', None)) is not None
+                and (matched := self.regex.fullmatch(node.name))
+            ):
+                return RegexCapture(path=node.name, groups=matched.groups()), selected_range
             return None
 
-        if node.name.endswith(self.suffix) and (
-            matched := self.regex.fullmatch(node.name[: -len(self.suffix)])
+        # A parsed trailing suffix may already be part of a real ARRAY member's
+        # base name, e.g. /arr/[0] matching the concrete child arr[0]. Treat it
+        # as a direct node match rather than a range view of the ARRAY parent.
+        if node.base_name.endswith(self.suffix) and (
+            matched := self.regex.fullmatch(node.base_name[: -len(self.suffix)])
         ):
-            return RegexCapture(path=node.name, groups=matched.groups()), None
-        if _is_range_selectable(node) and (matched := self.regex.fullmatch(node.base_name)):
+            return RegexCapture(path=node.base_name, groups=matched.groups()), None
+        # Otherwise the parsed suffix is a range selection on the current
+        # signal, e.g. /data/[7:0] matching base_name == 'data'.
+        if getattr(node, 'is_range_selectable', False) and (
+            matched := self.regex.fullmatch(node.base_name)
+        ):
             return RegexCapture(
                 path=f'{node.base_name}{self.suffix}', groups=matched.groups()
             ), self.range

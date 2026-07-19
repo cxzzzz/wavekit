@@ -34,7 +34,7 @@ print(valid_data.value)                # numpy array of integer values
 
 ## Reader — loading signals
 
-### `VcdReader(file: str)` / `FsdbReader(file: str)`
+### `VcdReader(file: str)` / `FstReader(file: str)` / `FsdbReader(file: str)`
 
 Open a waveform file.  Use as a context manager (`with`) to ensure the file is
 closed.  `FsdbReader` requires the Verdi runtime library (`libNPI.so`):
@@ -65,15 +65,15 @@ Load one signal, sampled on every clock edge.
 
 ---
 
-### `reader.load_matched_waveforms(pattern, clock_pattern, ...) -> dict[CaptureKey, Waveform]`
+### `reader.load_matched_waveforms(signal_path, clock_path, ...) -> dict[CaptureKey, Waveform]`
 
 Batch-load all signals matching a pattern. Returns a dict keyed by tuples of
 `Capture` objects. Ordinary exact-name path components are omitted from keys;
 brace, regex, wildcard, and module-definition matches are retained.
 
 **Clock assignment:**
-- If `clock_pattern` matches **one** signal -> that clock is shared by all.
-- If `clock_pattern` matches **multiple** signals -> keys must match signal keys
+- If `clock_path` matches **one** signal -> that clock is shared by all.
+- If `clock_path` matches **multiple** signals -> keys must match signal keys
   exactly (per-signal clock).
 
 ```python
@@ -106,17 +106,22 @@ mask = r.load_unknown_mask("tb.dut.data[7:0]", clock="tb.clk")
 known_data = data.mask(mask == 0)
 ```
 
-### `reader.load_matched_unknown_masks(pattern, clock_pattern, ...) -> dict[CaptureKey, Waveform]`
+### `reader.load_matched_unknown_masks(signal_path, clock_path, ...) -> dict[CaptureKey, Waveform]`
 
 Batch-load unknown masks with the same pattern and clock assignment rules as
-`load_matched_waveforms`.  Returned keys match `get_matched_signals(pattern)`.
+`load_matched_waveforms`.  Returned keys match `get_matched_signals(signal_path)`.
 
 ---
 
-### `reader.get_matched_signals(pattern) -> dict[CaptureKey, Signal]`
+### `reader.get_matched_signals(path) -> dict[CaptureKey, Signal]`
 
-Resolve a pattern to signal paths without loading data.  Useful to inspect
-what a pattern would match before committing to a load.
+Resolve a query to `Signal` objects without loading data. Exact-name components
+are omitted from keys; binding matchers return typed `Capture` objects.
+
+### `reader.get_matched_scopes(path) -> dict[CaptureKey, Scope]`
+
+Resolve a query to `Scope` objects. The same CaptureKey rules apply; a terminal
+range selector is not valid for scope queries.
 
 ---
 
@@ -139,14 +144,14 @@ occs = r.eval(
     clock="tb.clk",
     mode="zip",
 )
-# -> { (0,): Waveform, (1,): Waveform, ... }
+# -> keys contain BraceCapture(groups=("0",)), ..., BraceCapture(groups=("3",))
 ```
 
 ---
 
-### `reader.top_scope_list() -> list[Scope]`
+### `reader.top_scopes -> tuple[Scope, ...]`
 
-Return the root `Scope` nodes of the hierarchy. Each hierarchy node has:
+Return the immutable tuple of root `Scope` nodes. Each hierarchy node has:
 - `.base_name` -- local name without a signal range
 - `.name` -- local name including the selected/native signal range
 - `.children` -- immutable tuple of direct `Scope`/`Signal` children
@@ -165,12 +170,14 @@ Used in `load_matched_waveforms`, `load_matched_unknown_masks`,
 | `{a,b,c}` | `sig_{read,write}` | `BraceCapture(groups=('read',))`, etc. |
 | `{N..M}` | `fifo_{0..3}.ptr` | `BraceCapture(groups=('0',))`, etc. |
 | `{N..M..step}` | `lane_{0..6..2}` | `BraceCapture(groups=('0',))`, etc. |
-| `@<regex>` | `@([a-z]+)_valid` | `RegexCapture(path=..., groups=...)` |
+| `/<regex>/` | `/([a-z]+)_valid/` | Canonical regex; returns `RegexCapture` |
+| `@<regex>` | `@([a-z]+)_valid` | Legacy-compatible regex spelling |
 | `$ModName` | `tb.$fifo_unit.ptr` | `ExactCapture(path=..., definition='fifo_unit')` (**FSDB only**) |
+| `*` / `**` | `tb.*.valid` / `tb.**.valid` | Single-level / recursive wildcard |
 | `$$ModName` | `tb.$$fifo_unit.ptr` | Same capture type for any-depth matches (**FSDB only**) |
 
 Multiple `{...}` in one path produce a compound tuple key, e.g.
-`u{0,1}.ch{0..1}` -> keys `('0', 0)`, `('0', 1)`, `('1', 0)`, `('1', 1)`.
+`u{0,1}.ch{0..1}` -> keys containing two `BraceCapture` objects, one for each brace component.
 
 ---
 

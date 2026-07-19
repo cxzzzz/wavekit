@@ -14,8 +14,8 @@ class Waveform:
     Every ``Waveform`` is a triple of parallel numpy arrays of equal length:
 
     * ``value``  — signal values sampled on every clock edge.
-    * ``clock``  — clock edge counter (0 = negedge before first posedge, then
-      increments by 1 on each sampled edge).
+    * ``clock``  — absolute sampling-edge number counted from the first selected
+      edge in the waveform file (which is cycle 0).
     * ``time``   — simulation timestamp (in the file's native time unit) of
       each sample.
 
