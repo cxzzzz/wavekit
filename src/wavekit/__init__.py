@@ -19,10 +19,18 @@ from .pattern import MatchStatus as MatchStatus
 from .pattern import Pattern as Pattern
 from .pattern import PatternError as PatternError
 from .readers.fst.reader import FstReader as FstReader
+from .readers.hierarchy import Node as Node
+from .readers.hierarchy import Range as Range
+from .readers.hierarchy import Scope as Scope
+from .readers.hierarchy import Signal as Signal
+from .readers.hierarchy import SignalCompositeType as SignalCompositeType
+from .readers.matcher import BraceCapture as BraceCapture
+from .readers.matcher import Capture as Capture
+from .readers.matcher import CaptureKey as CaptureKey
+from .readers.matcher import ExactCapture as ExactCapture
+from .readers.matcher import RegexCapture as RegexCapture
+from .readers.matcher import WildcardCapture as WildcardCapture
 from .readers.vcd.reader import VcdReader as VcdReader
-from .scope import Scope as Scope
-from .signal import Signal as Signal
-from .signal import SignalCompositeType as SignalCompositeType
 from .waveform import Waveform as Waveform
 
 __all__ = [
@@ -30,9 +38,17 @@ __all__ = [
     'VcdReader',
     'FsdbReader',
     'FstReader',
+    'Node',
     'Scope',
+    'Range',
     'Signal',
     'SignalCompositeType',
+    'Capture',
+    'CaptureKey',
+    'ExactCapture',
+    'BraceCapture',
+    'RegexCapture',
+    'WildcardCapture',
     'Pattern',
     'MatchResult',
     'MatchStatus',

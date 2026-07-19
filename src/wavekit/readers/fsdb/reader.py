@@ -1,17 +1,14 @@
 from __future__ import annotations
 
 import importlib
-from collections import defaultdict
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Any
 
 import numpy as np
 
-from ...scope import Scope
-from ...signal import Signal, SignalCompositeType
 from ..base import Reader
+from ..hierarchy import Node, Range, Scope, Signal, SignalCompositeType
 from .npi_fsdb_reader import (
     NPI_FSDB_CT_ARRAY,
     NPI_FSDB_CT_RECORD,
@@ -34,110 +31,82 @@ _MAPPING_TO_FSDB_MODE: dict[tuple[int, int, int, int], int] = {
 }
 
 
-@dataclass
+@dataclass(frozen=True, eq=False)
 class FsdbSignal(Signal):
-    """FSDB-backed :class:`~wavekit.signal.Signal` with lazy member loading.
-
-    Extends :class:`~wavekit.signal.Signal` by holding an NPI signal handle
-    directly, enabling on-demand loading of composite members without any
-    reader reference.  Construct via :meth:`from_handle`.
-    """
+    """FSDB-backed signal descriptor with lazy composite-member loading."""
 
     _npi_signal: NpiFsdbSignal | None = field(default=None, repr=False, compare=False)
 
     @classmethod
-    def from_handle(cls, npi_sig: NpiFsdbSignal, full_name: str) -> FsdbSignal:
-        """Build an :class:`FsdbSignal` from an NPI signal handle and its full path."""
-        _npi_ct_to_enum = {
+    def from_handle(cls, npi_signal: NpiFsdbSignal, parent: Node) -> FsdbSignal:
+        """Build an FSDB signal node from an NPI handle and its parent node."""
+        npi_ct_to_composite_type = {
             NPI_FSDB_CT_ARRAY: SignalCompositeType.ARRAY,
             NPI_FSDB_CT_STRUCT: SignalCompositeType.STRUCT,
             NPI_FSDB_CT_UNION: SignalCompositeType.UNION,
             NPI_FSDB_CT_TAGGED_UNION: SignalCompositeType.TAGGED_UNION,
             NPI_FSDB_CT_RECORD: SignalCompositeType.RECORD,
         }
-        ct_raw = npi_sig.composite_type()
-        if ct_raw is None:
+        composite_type_raw = npi_signal.composite_type()
+        if composite_type_raw is None:
             composite_type = None
-        elif ct_raw in _npi_ct_to_enum:
-            composite_type = _npi_ct_to_enum[ct_raw]
+        elif composite_type_raw in npi_ct_to_composite_type:
+            composite_type = npi_ct_to_composite_type[composite_type_raw]
         else:
-            raise ValueError(f"Unknown NPI composite type value: {ct_raw} for signal '{full_name}'")
+            raise ValueError(
+                f'Unknown NPI composite type value: {composite_type_raw} '
+                f"for signal '{npi_signal.name()}'"
+            )
+
+        raw_range = npi_signal.range()
+        native_range = Range(*raw_range) if raw_range is not None else None
         return cls(
-            name=npi_sig.name(),
-            parent_path=full_name[: -(len(npi_sig.name()) + 1)] if '.' in full_name else '',
-            width=npi_sig.width(),
-            range=npi_sig.range(),
+            base_name=npi_signal.name(),
+            parent=parent,
+            range=native_range,
+            native_range=native_range,
             composite_type=composite_type,
-            _npi_signal=npi_sig,
+            _npi_signal=npi_signal,
         )
 
     @cached_property
-    def member_list(self) -> list[Signal] | None:
+    def children(self) -> tuple[Node, ...]:
         if self.composite_type is None:
-            return None
+            return ()
+
         assert self._npi_signal is not None
-        npi_members = self._npi_signal.member_list()
-        if self.composite_type == SignalCompositeType.ARRAY:
-            # Array members' NPI names already include the array base name at every
-            # level, e.g. parent "a" has members "a[0]", "a[1]", and "a[0]" further
-            # has members "a[0][0]", "a[0][1]", etc.  The member name is therefore an
-            # extension of the parent name with no extra "." separator, so we must NOT
-            # prepend full_name (which would produce "tb.dut.a.a[0]").  Instead we use
-            # the parent scope path (full_name minus the signal's own local name) as
-            # the base, giving "tb.dut.a[0]", "tb.dut.a[0][1]", etc.
-            scope_path = self.full_name[: -(len(self.name) + 1)]
-            return [FsdbSignal.from_handle(m, f'{scope_path}.{m.name()}') for m in npi_members]
-        else:
-            return [FsdbSignal.from_handle(m, f'{self.full_name}.{m.name()}') for m in npi_members]
+        # NPI array members include their array base in their local names, e.g.
+        # ``arr[0]`` and ``arr[0][1]``. Node.full_name intentionally skips ARRAY
+        # parents, yielding ``scope.arr[0]`` rather than ``scope.arr.arr[0]``.
+        return tuple(
+            FsdbSignal.from_handle(member, self) for member in self._npi_signal.member_list()
+        )
 
 
+@dataclass(frozen=True, eq=False)
 class FsdbScope(Scope):
-    def __init__(self, handle: NpiFsdbScope, parent_scope: FsdbScope | None, reader: FsdbReader):
-        super().__init__(name=handle.name())
-        self._npi_scope = handle
-        self.parent_scope = parent_scope
-        self.reader = reader
+    """FSDB-backed hierarchy scope with lazy direct-child loading."""
+
+    _npi_scope: NpiFsdbScope = field(repr=False, compare=False)
 
     @cached_property
-    def signal_list(self) -> Sequence[Signal]:
-        full_scope_name = self.full_name()
-        return [
-            FsdbSignal.from_handle(npi_sig, f'{full_scope_name}.{npi_sig.name()}')
-            for npi_sig in self._npi_scope.signal_list()
-        ]
-
-    @cached_property
-    def child_scope_list(self) -> Sequence[Scope]:
-        return [FsdbScope(c, self, self.reader) for c in self._npi_scope.child_scope_list()]
-
-    @cached_property
-    def type(self) -> str:
-        """Return the NPI scope type string, e.g. 'npiFsdbScopeSvModule'."""
-        return self._npi_scope.type()
+    def children(self) -> tuple[Node, ...]:
+        scopes = tuple(
+            FsdbScope(base_name=scope.name(), parent=self, _npi_scope=scope)
+            for scope in self._npi_scope.child_scope_list()
+        )
+        signals = tuple(
+            FsdbSignal.from_handle(signal, self) for signal in self._npi_scope.signal_list()
+        )
+        return scopes + signals
 
     @cached_property
     def def_name(self) -> str | None:
-        """Return the module definition name, or None if this scope is not a module."""
+        """Return the module definition name, if this scope is a module."""
         return self._npi_scope.def_name()
 
-    def find_scope_by_module(self, module_name: str, depth: int = 0) -> list[Scope]:
-        if not hasattr(self, '_preloaded_module_scope'):
-            self.preload_module_scope()
-        return self._preloaded_module_scope[module_name]
 
-    def preload_module_scope(self):
-        preloaded_module_scope = defaultdict(list)
-        for c in self.child_scope_list:
-            for module_name, module_scope_list in c.preload_module_scope().items():
-                preloaded_module_scope[module_name].extend(module_scope_list)
-
-        if self.type == 'npiFsdbScopeSvModule':
-            preloaded_module_scope[self.def_name].append(self)
-        self._preloaded_module_scope = preloaded_module_scope
-        return preloaded_module_scope
-
-
-class FsdbReader(Reader):
+class FsdbReader(Reader[FsdbSignal]):
     pynpi: dict[str, Any] = {}
 
     @classmethod
@@ -191,41 +160,39 @@ class FsdbReader(Reader):
 
     def _load_value_changes(
         self,
-        signal: Signal,
+        signal: FsdbSignal,
         value_mapping: dict[str, int],
         begin_time: int | None = None,
         end_time: int | None = None,
-    ) -> tuple[np.ndarray, int]:
+    ) -> np.ndarray:
         """Load mapped FSDB value changes through the NPI reader."""
-        # FSDB/NPI resolves any trailing bit range and reports the effective width.
+        # FSDB/NPI resolves the selected trailing range in signal.full_name.
         npi_signal = self.file_handle.get_signal(signal.full_name)
-        c = value_mapping
-        key = (c['0'], c['1'], c['x'], c['z'])
-        mode = _MAPPING_TO_FSDB_MODE[key]
+        mapping_key = (
+            value_mapping['0'],
+            value_mapping['1'],
+            value_mapping['x'],
+            value_mapping['z'],
+        )
+        mode = _MAPPING_TO_FSDB_MODE[mapping_key]
         begin = begin_time if begin_time is not None else 0
         end = end_time if end_time is not None else 2**64 - 1
-        result = self.file_handle.load_value_change_mode(
-            npi_signal,
-            begin,
-            end,
-            mode,
-        )
-        return result, npi_signal.width()
+        return self.file_handle.load_value_change_mode(npi_signal, begin, end, mode)
 
-    def top_scope_list(self) -> Sequence[Scope]:
-        if not hasattr(self, '_top_scope_list'):
-            self._top_scope_list = [
-                FsdbScope(s, None, self) for s in self.file_handle.top_scope_list()
-            ]
-        return self._top_scope_list
+    @cached_property
+    def top_scopes(self) -> tuple[FsdbScope, ...]:
+        return tuple(
+            FsdbScope(base_name=scope.name(), parent=None, _npi_scope=scope)
+            for scope in self.file_handle.top_scope_list()
+        )
 
     @property
-    def begin_time(self) -> str:
+    def begin_time(self) -> int:
         return self.file_handle.min_time()
 
     @property
-    def end_time(self) -> str:
+    def end_time(self) -> int:
         return self.file_handle.max_time()
 
-    def close(self):
+    def close(self) -> None:
         self.file_handle.close()

@@ -65,10 +65,11 @@ Load one signal, sampled on every clock edge.
 
 ---
 
-### `reader.load_matched_waveforms(pattern, clock_pattern, ...) -> dict[tuple, Waveform]`
+### `reader.load_matched_waveforms(pattern, clock_pattern, ...) -> dict[CaptureKey, Waveform]`
 
-Batch-load all signals matching a pattern.  Returns a dict keyed by the
-captured pattern values.
+Batch-load all signals matching a pattern. Returns a dict keyed by tuples of
+`Capture` objects. Ordinary exact-name path components are omitted from keys;
+brace, regex, wildcard, and module-definition matches are retained.
 
 **Clock assignment:**
 - If `clock_pattern` matches **one** signal -> that clock is shared by all.
@@ -78,7 +79,7 @@ captured pattern values.
 ```python
 # Single clock broadcast
 waves = r.load_matched_waveforms("tb.dut.fifo_{0..3}.w_ptr[2:0]", "tb.clk")
-# -> { (0,): Waveform, (1,): Waveform, (2,): Waveform, (3,): Waveform }
+# -> keys contain BraceCapture(groups=("0",)), ..., BraceCapture(groups=("3",))
 ```
 
 ### `reader.load_unknown_mask(signal, clock, ...) -> Waveform`
@@ -105,14 +106,14 @@ mask = r.load_unknown_mask("tb.dut.data[7:0]", clock="tb.clk")
 known_data = data.mask(mask == 0)
 ```
 
-### `reader.load_matched_unknown_masks(pattern, clock_pattern, ...) -> dict[tuple, Waveform]`
+### `reader.load_matched_unknown_masks(pattern, clock_pattern, ...) -> dict[CaptureKey, Waveform]`
 
 Batch-load unknown masks with the same pattern and clock assignment rules as
 `load_matched_waveforms`.  Returned keys match `get_matched_signals(pattern)`.
 
 ---
 
-### `reader.get_matched_signals(pattern) -> dict[tuple, str]`
+### `reader.get_matched_signals(pattern) -> dict[CaptureKey, Signal]`
 
 Resolve a pattern to signal paths without loading data.  Useful to inspect
 what a pattern would match before committing to a load.
@@ -126,7 +127,7 @@ Evaluate a Python arithmetic expression where signal paths are embedded inline.
 - **`mode='single'`** (default): every path must match exactly one signal;
   returns a single `Waveform`.
 - **`mode='zip'`**: paths with brace/regex patterns expand per key; returns
-  `dict[tuple, Waveform]`.  Single-match paths are broadcast.
+  `dict[CaptureKey, Waveform]`. Single-match paths are broadcast.
 
 ```python
 # single mode
@@ -145,11 +146,12 @@ occs = r.eval(
 
 ### `reader.top_scope_list() -> list[Scope]`
 
-Return the root `Scope` nodes of the hierarchy.  Each `Scope` has:
-- `.name` -- local scope name
-- `.signal_list` -- signals at this level
-- `.child_scope_list` -- child scopes
-- `.full_name()` -- fully-qualified dotted name
+Return the root `Scope` nodes of the hierarchy. Each hierarchy node has:
+- `.base_name` -- local name without a signal range
+- `.name` -- local name including the selected/native signal range
+- `.children` -- immutable tuple of direct `Scope`/`Signal` children
+- `.parent` -- parent node, or `None` for top-level scopes
+- `.full_name` -- fully-qualified dotted name property
 
 ---
 
@@ -158,14 +160,14 @@ Return the root `Scope` nodes of the hierarchy.  Each `Scope` has:
 Used in `load_matched_waveforms`, `load_matched_unknown_masks`,
 `get_matched_signals`, and `eval`.
 
-| Syntax | Example | Keys produced |
-|--------|---------|---------------|
-| `{a,b,c}` | `sig_{read,write}` | `('read',)`, `('write',)` |
-| `{N..M}` | `fifo_{0..3}.ptr` | `(0,)`, `(1,)`, `(2,)`, `(3,)` |
-| `{N..M..step}` | `lane_{0..6..2}` | `(0,)`, `(2,)`, `(4,)`, `(6,)` |
-| `@<regex>` | `@([a-z]+)_valid` | `(capture_group,)` per match |
-| `$ModName` | `tb.$fifo_unit.ptr` | `(scope_path,)` — match direct-child scope by module/definition name (**FSDB only**) |
-| `$$ModName` | `tb.$$fifo_unit.ptr` | `(scope_path,)` — match any-depth descendant scope by module/definition name (**FSDB only**) |
+| Syntax | Example | Capture retained in key |
+|--------|---------|-------------------------|
+| `{a,b,c}` | `sig_{read,write}` | `BraceCapture(groups=('read',))`, etc. |
+| `{N..M}` | `fifo_{0..3}.ptr` | `BraceCapture(groups=('0',))`, etc. |
+| `{N..M..step}` | `lane_{0..6..2}` | `BraceCapture(groups=('0',))`, etc. |
+| `@<regex>` | `@([a-z]+)_valid` | `RegexCapture(path=..., groups=...)` |
+| `$ModName` | `tb.$fifo_unit.ptr` | `ExactCapture(path=..., definition='fifo_unit')` (**FSDB only**) |
+| `$$ModName` | `tb.$$fifo_unit.ptr` | Same capture type for any-depth matches (**FSDB only**) |
 
 Multiple `{...}` in one path produce a compound tuple key, e.g.
 `u{0,1}.ch{0..1}` -> keys `('0', 0)`, `('0', 1)`, `('1', 0)`, `('1', 1)`.

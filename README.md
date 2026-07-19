@@ -248,11 +248,17 @@ Some tips for programmable patterns:
 | `VcdReader(file)` / `FstReader(file)` / `FsdbReader(file)` | Open a waveform file. Use as a context manager. `FsdbReader` requires Verdi runtime (`WAVEKIT_NPI_LIB`, `VERDI_HOME`, or `LD_LIBRARY_PATH`). |
 | `reader.load_waveform(signal, clock, ...)` | Load one signal sampled on every clock edge. Returns `Waveform`. |
 | `reader.load_unknown_mask(signal, clock, ...)` | **Experimental.** Load X/Z bit presence as an unsigned mask `Waveform`. |
-| `reader.load_matched_waveforms(pattern, clock_pattern, ...)` | Batch-load signals matching a brace/regex pattern. Returns `dict[tuple, Waveform]`. |
-| `reader.load_matched_unknown_masks(pattern, clock_pattern, ...)` | **Experimental.** Batch-load X/Z masks for matched signals. Returns `dict[tuple, Waveform]`. |
+| `reader.load_matched_waveforms(pattern, clock_pattern, ...)` | Batch-load signals matching a brace/regex pattern. Returns `dict[CaptureKey, Waveform]`. |
+| `reader.load_matched_unknown_masks(pattern, clock_pattern, ...)` | **Experimental.** Batch-load X/Z masks for matched signals. Returns `dict[CaptureKey, Waveform]`. |
 | `reader.eval(expr, clock, mode='single'\|'zip', ...)` | Evaluate an arithmetic expression with embedded signal paths. |
 | `reader.get_matched_signals(pattern)` | Resolve a pattern to signal paths without loading data. |
 | `reader.top_scope_list()` | Return root `Scope` nodes of the signal hierarchy. |
+
+Matched-reader APIs use `CaptureKey = tuple[Capture, ...]`. Exact-name path
+components are omitted; brace, regex, wildcard, and module-definition matches
+remain as typed `Capture` objects containing their matched path and groups.
+Hierarchy nodes expose immutable `.children`, `.parent`, `.base_name`, `.name`,
+and `.full_name` properties.
 
 **Pattern syntax** used in signal paths:
 

@@ -5,7 +5,7 @@ from typing import Any, Callable, Literal, Union, cast
 import numpy as np
 import numpy.typing as npt
 
-from .signal import Signal
+from .readers.hierarchy import Signal
 
 
 class Waveform:
@@ -28,7 +28,7 @@ class Waveform:
     interop.
 
     ``width`` and ``signed`` are direct fields on ``Waveform``.  ``signal`` is
-    an optional :class:`~wavekit.signal.Signal` that is set only when the
+    an optional :class:`~wavekit.Signal` that is set only when the
     waveform was loaded directly from a reader.
 
     Bit-width rules

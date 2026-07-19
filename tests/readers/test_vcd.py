@@ -3,8 +3,26 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from wavekit import VcdReader, Waveform
+from wavekit import Scope, Signal, VcdReader, Waveform
 from wavekit.readers.base import Reader  # noqa: F401  # used in test_vcd_value_change_to_waveform_*
+from wavekit.readers.hierarchy import Range
+
+
+def _scopes(node):
+    return tuple(child for child in node.children if isinstance(child, Scope))
+
+
+def _signals(node):
+    return tuple(child for child in node.children if isinstance(child, Signal))
+
+
+def _capture_groups(results):
+    return {key[0].groups for key in results}
+
+
+def _by_group(results, group):
+    return next(value for key, value in results.items() if key[0].groups == (group,))
+
 
 # ------------------------------------------------------------------
 # Fixtures
@@ -49,20 +67,20 @@ def test_vcd_reader_top_scope_list(compare_vcd_path):
     with VcdReader(str(compare_vcd_path)) as reader:
         top = reader.top_scope_list()
         tb = top[0]
-        dut = next(scope for scope in tb.child_scope_list if scope.name == 'dut')
+        dut = next(scope for scope in _scopes(tb) if scope.name == 'dut')
 
         assert tb.name == 'compare_tb'
         assert dut.name == 'dut'
-        assert {sig.name for sig in tb.signal_list} == {'clk', 'rst_n'}
-        assert {sig.name for sig in dut.signal_list} >= {'clk', 'rst_n', 'counter', 'status'}
+        assert {sig.base_name for sig in _signals(tb)} == {'clk', 'rst_n'}
+        assert {sig.base_name for sig in _signals(dut)} >= {'clk', 'rst_n', 'counter', 'status'}
 
-        child_names = {scope.name for scope in dut.child_scope_list}
+        child_names = {scope.name for scope in _scopes(dut)}
         assert {'unit_a', 'unit_b'} <= child_names
 
-        unit_a = next(scope for scope in dut.child_scope_list if scope.name == 'unit_a')
-        unit_a_signals = {sig.name for sig in unit_a.signal_list}
+        unit_a = next(scope for scope in _scopes(dut) if scope.name == 'unit_a')
+        unit_a_signals = {sig.base_name for sig in _signals(unit_a)}
         assert {'data', 'nonzero_data', 'zero_range', 'bus', 'data_0', 'data_1'} <= unit_a_signals
-        unit_a_children = {scope.name for scope in unit_a.child_scope_list}
+        unit_a_children = {scope.name for scope in _scopes(unit_a)}
         assert {'pkt', 'u', 'gen_blk[0]', 'gen_blk[1]', 'gen_blk[2]'} <= unit_a_children
 
 
@@ -97,7 +115,7 @@ def test_vcd_reader_load_waveform_without_range(vcd_path):
         sample_on_posedge=False,
     )
 
-    assert j_next.signal.full_name == 'tb.u0.J_next'
+    assert j_next.signal.full_name == 'tb.u0.J_next[3:0]'
     assert j_next.width == 4
 
 
@@ -122,22 +140,22 @@ def test_vcd_reader_midrange_load(vcd_path):
 
 def test_vcd_reader_native_range_metadata(nonzero_vcd_path):
     with VcdReader(str(nonzero_vcd_path)) as reader:
-        tb = reader.top_scope_list()[0].child_scope_list[0]
-        signals = {sig.name: sig for sig in tb.signal_list}
+        tb = _scopes(reader.top_scope_list()[0])[0]
+        signals = {sig.base_name: sig for sig in _signals(tb)}
 
     assert signals['packed_vec'].full_name == 'TOP.tb.packed_vec[3:0]'
-    assert signals['packed_vec'].range == (3, 0)
-    assert signals['packed_vec'].native_range == (3, 0)
-    assert signals['packed_nonzero'].native_range == (7, 4)
-    assert signals['packed_nonzero'].range == (7, 4)
-    assert signals['packed_arr[10]'].native_range == (2, 0)
-    assert signals['packed_arr[10]'].range == (2, 0)
+    assert signals['packed_vec'].range == Range(3, 0)
+    assert signals['packed_vec'].native_range == Range(3, 0)
+    assert signals['packed_nonzero'].native_range == Range(7, 4)
+    assert signals['packed_nonzero'].range == Range(7, 4)
+    assert signals['packed_arr[10]'].native_range == Range(2, 0)
+    assert signals['packed_arr[10]'].range == Range(2, 0)
     assert signals['arr_elem[10][0]'].width == 1
     assert signals['arr_elem[10][0]'].range is None
     assert signals['arr_elem[10][0]'].native_range is None
-    assert signals['zero_range'].full_name == 'TOP.tb.zero_range[0:0]'
-    assert signals['zero_range'].range == (0, 0)
-    assert signals['zero_range'].native_range == (0, 0)
+    assert signals['zero_range'].full_name == 'TOP.tb.zero_range[0]'
+    assert signals['zero_range'].range == Range(0, 0)
+    assert signals['zero_range'].native_range == Range(0, 0)
     assert signals['zero_range'].width == 1
 
 
@@ -188,11 +206,11 @@ def test_vcd_reader_nonzero_native_range_loads(nonzero_vcd_path):
     assert np.array_equal(base.value, full.value)
     assert np.array_equal(view.value, np.array([0b10, 0b01, 0b10], dtype=np.uint64))
     assert view.width == 2
-    assert view.signal.range == (6, 5)
-    assert matched.name == 'packed_nonzero'
+    assert view.signal.range == Range(6, 5)
+    assert matched.base_name == 'packed_nonzero'
     assert matched.full_name == 'TOP.tb.packed_nonzero[6:5]'
     assert matched.width == 2
-    assert matched.range == (6, 5)
+    assert matched.range == Range(6, 5)
     assert masks[()].width == 2
     assert np.array_equal(masks[()].value, np.zeros(3, dtype=np.uint64))
 
@@ -200,6 +218,141 @@ def test_vcd_reader_nonzero_native_range_loads(nonzero_vcd_path):
 # ------------------------------------------------------------------
 # Signed / signal-object / name metadata (compare.vcd)
 # ------------------------------------------------------------------
+
+
+def test_vcd_reader_packed_range_directions(compare_vcd_path):
+    """Exercise ascending and descending nonzero packed ranges from real dumps."""
+    with VcdReader(str(compare_vcd_path)) as reader:
+        asc_zero_signal = reader.get_matched_signals('compare_tb.dut.unit_a.asc_zero')[()]
+        asc_nonzero_signal = reader.get_matched_signals('compare_tb.dut.unit_a.asc_nonzero')[()]
+        desc_nonzero_signal = reader.get_matched_signals('compare_tb.dut.unit_a.desc_nonzero')[()]
+
+        asc_zero = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_zero', clock='compare_tb.clk', begin_cycle=1, end_cycle=4
+        )
+        asc_nonzero = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_nonzero',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        desc_nonzero = reader.load_waveform(
+            'compare_tb.dut.unit_a.desc_nonzero',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+
+        asc_zero_left = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_zero[0:1]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        asc_zero_right = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_zero[2:3]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        asc_nonzero_left = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_nonzero[1:2]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        asc_nonzero_right = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_nonzero[2:3]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        desc_nonzero_left = reader.load_waveform(
+            'compare_tb.dut.unit_a.desc_nonzero[3:2]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        desc_nonzero_right = reader.load_waveform(
+            'compare_tb.dut.unit_a.desc_nonzero[2:1]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+
+        asc_zero_msb = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_zero[0]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        asc_zero_lsb = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_zero[3]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        asc_nonzero_msb = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_nonzero[1]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        asc_nonzero_lsb = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_nonzero[3]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        desc_nonzero_msb = reader.load_waveform(
+            'compare_tb.dut.unit_a.desc_nonzero[3]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        desc_nonzero_lsb = reader.load_waveform(
+            'compare_tb.dut.unit_a.desc_nonzero[1]',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+        matched = reader.load_matched_waveforms(
+            'compare_tb.dut.unit_{a,b}.asc_nonzero[1:2]',
+            'compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=4,
+        )
+
+    assert (asc_zero_signal.native_range.start, asc_zero_signal.native_range.end) == (0, 3)
+    assert (asc_nonzero_signal.native_range.start, asc_nonzero_signal.native_range.end) == (1, 3)
+    assert (desc_nonzero_signal.native_range.start, desc_nonzero_signal.native_range.end) == (3, 1)
+    assert asc_zero_signal.full_name == 'compare_tb.dut.unit_a.asc_zero[0:3]'
+    assert asc_nonzero_signal.full_name == 'compare_tb.dut.unit_a.asc_nonzero[1:3]'
+    assert desc_nonzero_signal.full_name == 'compare_tb.dut.unit_a.desc_nonzero[3:1]'
+
+    assert np.array_equal(asc_zero.value, np.array([0b1100, 0b0011, 0b1100], dtype=np.uint64))
+    assert np.array_equal(asc_nonzero.value, np.array([0b110, 0b001, 0b110], dtype=np.uint64))
+    assert np.array_equal(desc_nonzero.value, asc_nonzero.value)
+
+    assert np.array_equal(asc_zero_left.value, np.array([0b11, 0b00, 0b11], dtype=np.uint64))
+    assert np.array_equal(asc_zero_right.value, np.array([0b00, 0b11, 0b00], dtype=np.uint64))
+    assert np.array_equal(asc_nonzero_left.value, asc_zero_left.value)
+    assert np.array_equal(desc_nonzero_left.value, asc_zero_left.value)
+    assert np.array_equal(asc_nonzero_right.value, np.array([0b10, 0b01, 0b10], dtype=np.uint64))
+    assert np.array_equal(desc_nonzero_right.value, asc_nonzero_right.value)
+
+    assert np.array_equal(asc_zero_msb.value, np.array([1, 0, 1], dtype=np.uint64))
+    assert np.array_equal(asc_zero_lsb.value, np.array([0, 1, 0], dtype=np.uint64))
+    assert np.array_equal(asc_nonzero_msb.value, asc_zero_msb.value)
+    assert np.array_equal(desc_nonzero_msb.value, asc_zero_msb.value)
+    assert np.array_equal(asc_nonzero_lsb.value, asc_zero_lsb.value)
+    assert np.array_equal(desc_nonzero_lsb.value, asc_zero_lsb.value)
+
+    assert _capture_groups(matched) == {('a',), ('b',)}
+    assert np.array_equal(_by_group(matched, 'a').value, asc_nonzero_left.value)
+    assert np.array_equal(
+        _by_group(matched, 'b').value, np.array([0b00, 0b11, 0b00], dtype=np.uint64)
+    )
 
 
 def test_vcd_load_waveform_signed(compare_vcd_path):
@@ -245,7 +398,7 @@ def test_vcd_load_matched_waveforms_brace_expansion(compare_vcd_path):
             'compare_tb.dut.unit_{a,b}.data[7:0]', 'compare_tb.clk'
         )
 
-    assert set(waves.keys()) == {('a',), ('b',)}
+    assert _capture_groups(waves) == {('a',), ('b',)}
     assert {wave.signal.full_name for wave in waves.values()} == {
         'compare_tb.dut.unit_a.data[7:0]',
         'compare_tb.dut.unit_b.data[7:0]',
@@ -260,7 +413,7 @@ def test_vcd_load_matched_waveforms_regex(compare_vcd_path):
         )
 
     assert len(waves) == 2
-    assert {k[0][0] for k in waves} == {'unit_a', 'unit_b'}
+    assert _capture_groups(waves) == {('unit_a',), ('unit_b',)}
     assert all(wave.width == 8 for wave in waves.values())
 
 
@@ -274,7 +427,7 @@ def test_vcd_load_matched_waveforms_brace_expansion_jtag(vcd_path):
         sample_on_posedge=False,
     )
 
-    assert set(j_states.keys()) == {('next',), ('state',)}
+    assert _capture_groups(j_states) == {('next',), ('state',)}
     assert {wave.signal.full_name for wave in j_states.values()} == {
         'tb.u0.J_next[3:0]',
         'tb.u0.J_state[3:0]',
@@ -293,15 +446,15 @@ def test_vcd_reader_load_matched_waveforms_regex(vcd_path):
     )
 
     assert len(j_regex) == 2
-    assert {k[0][0] for k in j_regex} == {'next', 'state'}
+    assert _capture_groups(j_regex) == {('next',), ('state',)}
     assert all(wave.width == 4 for wave in j_regex.values())
 
 
-def test_vcd_reader_load_matched_waveforms_regex_key_conflict(vcd_path):
+def test_vcd_reader_load_matched_waveforms_regex_without_groups(vcd_path):
     vcd_reader = VcdReader(str(vcd_path))
 
-    with pytest.raises(Exception):
-        vcd_reader.load_matched_waveforms(r'tb.u0.@J_[A-Za-z0-9_]+[3:0]', 'tb.tck')
+    waves = vcd_reader.load_matched_waveforms(r'tb.u0./(?:J_state\[3:0\]|J_next\[3:0\])/', 'tb.tck')
+    assert len(waves) > 1
 
 
 def test_vcd_load_matched_waveforms_uses_signal_range(compare_vcd_path):
@@ -310,22 +463,22 @@ def test_vcd_load_matched_waveforms_uses_signal_range(compare_vcd_path):
 
     assert list(waves.keys()) == [()]
     wave = waves[()]
-    assert wave.signal.full_name == 'compare_tb.dut.unit_a.data'
+    assert wave.signal.full_name == 'compare_tb.dut.unit_a.data[7:0]'
     assert wave.width == 8
 
 
 def test_vcd_load_matched_waveforms_name_with_brace(vcd_path):
     with VcdReader(str(vcd_path)) as reader:
         waves = reader.load_matched_waveforms('tb.u0.J_{state,next}[3:0]', 'tb.tck', signed=True)
-    assert waves[('state',)].signal.full_name == 'tb.u0.J_state[3:0]'
-    assert waves[('next',)].signal.full_name == 'tb.u0.J_next[3:0]'
-    assert waves[('state',)].signed is True
-    assert waves[('next',)].signed is True
+    assert _by_group(waves, 'state').signal.full_name == 'tb.u0.J_state[3:0]'
+    assert _by_group(waves, 'next').signal.full_name == 'tb.u0.J_next[3:0]'
+    assert _by_group(waves, 'state').signed is True
+    assert _by_group(waves, 'next').signed is True
 
 
 def test_vcd_reader_module_name_matching_is_unsupported(vcd_path):
     with VcdReader(str(vcd_path)) as reader:
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(ValueError):
             reader.get_matched_signals('tb.$u0.J_state[3:0]')
 
 
@@ -338,7 +491,7 @@ def test_vcd_reader_clock_pattern_error(vcd_path):
 def test_vcd_reader_clock_pattern_key_mismatch_error(vcd_path):
     # clock brace expansion yields different keys than the signal pattern
     vcd_reader = VcdReader(str(vcd_path))
-    with pytest.raises(Exception, match='do not match signal pattern keys'):
+    with pytest.raises(Exception, match='no clock key is a prefix'):
         vcd_reader.load_matched_waveforms(
             'tb.u0.J_{state,next}[3:0]',  # keys: {('state',), ('next',)}
             'tb.{tck,tms}',  # keys: {('tck',), ('tms',)} — mismatch
@@ -372,9 +525,9 @@ def test_vcd_reader_load_unknown_mask_include_flags(compare_xz_vcd_path):
     assert both.signal.full_name == 'compare_xz_tb.bus[3:0]'
     assert both.width == 4
     assert both.signed is False
-    assert np.array_equal(both.value, np.array([0, 1, 1, 2, 5, 0], dtype=np.uint64))
-    assert np.array_equal(x_only.value, np.array([0, 1, 0, 2, 1, 0], dtype=np.uint64))
-    assert np.array_equal(z_only.value, np.array([0, 0, 1, 0, 4, 0], dtype=np.uint64))
+    assert np.array_equal(both.value, np.array([0, 15, 15, 2, 5, 0], dtype=np.uint64))
+    assert np.array_equal(x_only.value, np.array([0, 15, 0, 2, 1, 0], dtype=np.uint64))
+    assert np.array_equal(z_only.value, np.array([0, 0, 15, 0, 4, 0], dtype=np.uint64))
     assert np.array_equal(both.clock, values.clock)
     assert np.array_equal(both.time, values.time)
 
@@ -437,10 +590,10 @@ def test_vcd_load_matched_unknown_masks_name(compare_xz_vcd_path):
         masks = reader.load_matched_unknown_masks(
             'compare_xz_tb.data_{0,1}[3:0]', 'compare_xz_tb.clk'
         )
-    assert masks[('0',)].signal.full_name == 'compare_xz_tb.data_0[3:0]'
-    assert masks[('1',)].signal.full_name == 'compare_xz_tb.data_1[3:0]'
-    assert masks[('0',)].signed is False
-    assert masks[('1',)].signed is False
+    assert _by_group(masks, '0').signal.full_name == 'compare_xz_tb.data_0[3:0]'
+    assert _by_group(masks, '1').signal.full_name == 'compare_xz_tb.data_1[3:0]'
+    assert _by_group(masks, '0').signed is False
+    assert _by_group(masks, '1').signed is False
 
 
 def test_vcd_reader_load_matched_unknown_masks(compare_xz_vcd_path):
@@ -452,12 +605,12 @@ def test_vcd_reader_load_matched_unknown_masks(compare_xz_vcd_path):
             'compare_xz_tb.data_{0,1}[3:0]', 'compare_xz_tb.clk', xz_value=0
         )
 
-    assert set(masks) == set(values) == {('0',), ('1',)}
-    assert masks[('0',)].signal.full_name == 'compare_xz_tb.data_0[3:0]'
-    assert masks[('1',)].signal.full_name == 'compare_xz_tb.data_1[3:0]'
+    assert _capture_groups(masks) == _capture_groups(values) == {('0',), ('1',)}
+    assert _by_group(masks, '0').signal.full_name == 'compare_xz_tb.data_0[3:0]'
+    assert _by_group(masks, '1').signal.full_name == 'compare_xz_tb.data_1[3:0]'
     # data_0 has X bits at cycles 2 (bit 3) and 3 (bit 0); data_1 has X/Z bits at cycles 1,3
-    assert np.any(masks[('0',)].value != 0)
-    assert np.any(masks[('1',)].value != 0)
+    assert np.any(_by_group(masks, '0').value != 0)
+    assert np.any(_by_group(masks, '1').value != 0)
 
 
 def test_vcd_reader_matched_unknown_mask_both_false_is_all_zero(compare_xz_vcd_path):
@@ -469,9 +622,13 @@ def test_vcd_reader_matched_unknown_mask_both_false_is_all_zero(compare_xz_vcd_p
             include_z=False,
         )
 
-    assert set(masks) == {('0',), ('1',)}
-    assert np.array_equal(masks[('0',)].value, np.zeros(len(masks[('0',)].value), dtype=np.uint64))
-    assert np.array_equal(masks[('1',)].value, np.zeros(len(masks[('1',)].value), dtype=np.uint64))
+    assert _capture_groups(masks) == {('0',), ('1',)}
+    assert np.array_equal(
+        _by_group(masks, '0').value, np.zeros(len(_by_group(masks, '0').value), dtype=np.uint64)
+    )
+    assert np.array_equal(
+        _by_group(masks, '1').value, np.zeros(len(_by_group(masks, '1').value), dtype=np.uint64)
+    )
 
 
 # ------------------------------------------------------------------
@@ -482,9 +639,9 @@ def test_vcd_reader_matched_unknown_mask_both_false_is_all_zero(compare_xz_vcd_p
 def test_vcd_reader_verilator_composites_expose_structs_as_scopes(unknown_vcd_path):
     with VcdReader(str(unknown_vcd_path)) as reader:
         top = reader.top_scope_list()[0]
-        tb = top.child_scope_list[0]
-        signals = {sig.name: sig for sig in tb.signal_list}
-        children = {scope.name: scope for scope in tb.child_scope_list}
+        tb = _scopes(top)[0]
+        signals = {sig.base_name: sig for sig in _signals(tb)}
+        children = {scope.name: scope for scope in _scopes(tb)}
 
     assert top.name == 'TOP'
     assert tb.name == 'tb'
@@ -492,7 +649,7 @@ def test_vcd_reader_verilator_composites_expose_structs_as_scopes(unknown_vcd_pa
     assert 'packed_arr[32:0]' not in signals
     assert 'pkt_packed_arr[7:0]' not in signals
     assert signals['packed_arr[0]'].width == 3
-    assert signals['packed_arr[0]'].native_range == (2, 0)
+    assert signals['packed_arr[0]'].native_range == Range(2, 0)
     assert signals['packed_arr[0]'].composite_type is None
     assert signals['packed_arr[10]'].width == 3
     assert signals['unpacked_arr[0]'].width == 11
@@ -504,8 +661,8 @@ def test_vcd_reader_verilator_composites_expose_structs_as_scopes(unknown_vcd_pa
         'pkt_packed_arr[0]',
         'pkt_packed_arr[1]',
     }
-    assert {sig.name for sig in children['pkt'].signal_list} == {'valid', 'data'}
-    assert all(sig.composite_type is None for sig in children['pkt'].signal_list)
+    assert {sig.base_name for sig in _signals(children['pkt'])} == {'valid', 'data'}
+    assert all(sig.composite_type is None for sig in _signals(children['pkt']))
 
 
 def test_vcd_reader_verilator_packed_struct_member_reads(unknown_vcd_path):
@@ -646,7 +803,7 @@ def test_vcd_eval_zip_mode_brace_expansion(vcd_path):
             mode='zip',
         )
     assert isinstance(result, dict)
-    assert set(result.keys()) == {('state',), ('next',)}
+    assert _capture_groups(result) == {('state',), ('next',)}
     assert all(isinstance(w, Waveform) for w in result.values())
 
 

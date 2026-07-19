@@ -18,6 +18,13 @@ module compare_unit (
   logic [7:4] nonzero_data;
   logic [0:0] zero_range;
 
+  // Packed range direction regression signals.
+  /* verilator lint_off ASCRANGE */
+  logic [0:3] asc_zero;
+  logic [1:3] asc_nonzero;
+  /* verilator lint_on ASCRANGE */
+  logic [3:1] desc_nonzero;
+
   pkt_t pkt;
   union_t u;
 

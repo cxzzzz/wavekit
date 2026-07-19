@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from functools import cached_property
 
@@ -9,91 +9,81 @@ import numpy as np
 from vcdvcd import VCDVCD
 from vcdvcd import Scope as VcdVcdScope
 
-from ...scope import Scope, map_range_to_offsets
-from ...signal import Signal
 from ..base import Reader
+from ..hierarchy import Node, Range, Scope, Signal
 
 
-@dataclass
+@dataclass(frozen=True, eq=False)
 class VcdSignal(Signal):
     """VCD-backed signal descriptor carrying the dumped reference name."""
 
-    ref: str = field(default='', repr=False, compare=False)
-    native_range: tuple[int, int] | None = field(default=None, compare=False)
-    native_width: int | None = field(default=None, compare=False)
+    _ref: str = field(default='', repr=False, compare=False)
+
+    @property
+    def children(self) -> tuple[Node, ...]:
+        return ()
 
 
+@dataclass(frozen=True, eq=False)
 class VcdScope(Scope):
-    def __init__(
-        self,
-        vcdvcd_scope: VcdVcdScope,
-        parent_scope: Scope | None,
-        reader: VcdReader,
-    ):
-        super().__init__(name=vcdvcd_scope.name.split('.')[-1])
-        self.vcdvcd_scope = vcdvcd_scope
-        self.parent_scope = parent_scope
-        self.reader = reader
+    vcdvcd_scope: VcdVcdScope = field(repr=False, compare=False)
+    reader: VcdReader = field(repr=False, compare=False)
 
     @cached_property
-    def signal_list(self) -> Sequence[Signal]:
-        native_range_re = re.compile(r'\[(\d+):(\d+)\]$')
-        full_scope_name = self.full_name()
-        signals = []
-        for k, v in self.vcdvcd_scope.subElements.items():
-            if isinstance(v, str):
-                signal_path = f'{full_scope_name}.{k}'
-                width = int(self.reader.file_handle[signal_path].size)
-                if m := native_range_re.search(k):
-                    high, low = int(m.group(1)), int(m.group(2))
-                    if abs(high - low) + 1 != width:
-                        raise ValueError(
-                            f'native range [{high}:{low}] does not match width {width} '
-                            f"for signal '{signal_path}'"
-                        )
-                    native_range = (high, low)
-                    bare_name = k[: m.start()]
-                else:
-                    if width != 1:
-                        raise ValueError(
-                            f"width {width} mismatch for scalar signal '{signal_path}'"
-                        )
-                    native_range = None
-                    bare_name = k
+    def children(self) -> tuple[Node, ...]:
 
-                signals.append(
-                    VcdSignal(
-                        name=bare_name,
-                        parent_path=full_scope_name,
-                        width=width,
-                        range=native_range,
-                        ref=signal_path,
-                        native_range=native_range,
-                        native_width=width,
+        def signal_list() -> list[Signal]:
+            range_re = re.compile(r'\[(\d+):(\d+)\]$')
+            full_scope_name = self.full_name
+            signals = []
+            for k, v in self.vcdvcd_scope.subElements.items():
+                if isinstance(v, str):
+                    signal_path = f'{full_scope_name}.{k}'
+                    width = int(self.reader.file_handle[signal_path].size)
+                    if m := range_re.search(k):
+                        range = Range(int(m.group(1)), int(m.group(2)))
+                        assert abs(range.start - range.end) + 1 == width, (
+                            f"range {range} does not match width {width} for signal '{signal_path}'"
+                        )
+                        bare_name = k[: m.start()]
+                    else:
+                        range = None if width == 1 else Range(width - 1, 0)
+                        bare_name = k
+
+                    signals.append(
+                        VcdSignal(
+                            base_name=bare_name,
+                            parent=self,
+                            range=range,
+                            native_range=range,
+                            _ref=signal_path,
+                        )
                     )
-                )
-        return signals
+            return signals
 
-    @cached_property
-    def child_scope_list(self) -> Sequence[Scope]:
-        return [
-            VcdScope(v, self, self.reader)
-            for _, v in self.vcdvcd_scope.subElements.items()
-            if isinstance(v, VcdVcdScope)
-        ]
+        def scope_list() -> list[Scope]:
+            return [
+                VcdScope(base_name=k, parent=self, vcdvcd_scope=v, reader=self.reader)
+                for k, v in self.vcdvcd_scope.subElements.items()
+                if isinstance(v, VcdVcdScope)
+            ]
+
+        return tuple(scope_list() + signal_list())
 
 
-class VcdReader(Reader):
+class VcdReader(Reader[VcdSignal]):
     def __init__(self, file: str):
         super().__init__()
         self.file = file
         self.file_handle = VCDVCD(file, store_scopes=True)
-        self._top_scope_list = [
-            VcdScope(v, None, self) for k, v in self.file_handle.scopes.items() if '.' not in k
-        ]
 
-    def top_scope_list(self) -> Sequence[Scope]:
-        return self._top_scope_list
+    @cached_property
+    def top_scopes(self) -> tuple[Scope, ...]:
+        return tuple(
+            VcdScope(base_name=k, parent=None, vcdvcd_scope=v, reader=self)
+            for k, v in self.file_handle.scopes.items()
+            if '.' not in k
+        )
 
     @property
     def begin_time(self) -> int:
@@ -105,43 +95,60 @@ class VcdReader(Reader):
 
     def _load_value_changes(
         self,
-        signal: Signal,
+        signal: VcdSignal,
         value_mapping: dict[str, int],
         begin_time: int | None = None,
         end_time: int | None = None,
-    ) -> tuple[np.ndarray, int]:
-        """Load mapped VCD value changes with optional trailing range selection."""
+    ) -> np.ndarray:
+        """Load mapped VCD value changes with an optional time window.
 
-        vcd_signal = self._resolve_signal(signal)
-        assert isinstance(vcd_signal, VcdSignal)
-        lookup_path = vcd_signal.ref
+        ``begin_time`` retains the last value change at or before the window
+        start so the caller can reconstruct the signal value at that time.
+        ``end_time`` is exclusive. Range-to-raw mapping is calculated once
+        before iterating over value changes.
+        """
 
+        assert signal.composite_type is None
+        lookup_path = signal._ref
         signal_handle = self.file_handle[lookup_path]
-        width = vcd_signal.native_width or int(signal_handle.size)
-        high, low = map_range_to_offsets(
-            vcd_signal.full_name,
-            width,
-            vcd_signal.native_range,
-            vcd_signal.range,
-        )
+        native_width = signal.native_width
 
-        def decode(raw: str, high: int, low: int) -> int:
-            decoded = 0
-            # VCD binary values may be shorter than the signal width when leading
-            # bits are zero, so map bit indexes to raw-string positions manually.
+        if signal.native_range is None:
+            raw_start, raw_stop = 0, 1
+        else:
+
+            def hdl_index_to_raw_offset(index: int) -> int:
+                if signal.native_range.end >= signal.native_range.start:
+                    return index - signal.native_range.start
+                return signal.native_range.start - index
+
+            start_pos = hdl_index_to_raw_offset(signal.range.start)
+            end_pos = hdl_index_to_raw_offset(signal.range.end)
+            raw_start, raw_stop = start_pos, end_pos + 1
+
+        def decode(raw: str) -> int:
             raw = raw.lower()
-            for bit_index in range(min(high, len(raw) - 1), low - 1, -1):
-                raw_index = len(raw) - 1 - bit_index
-                decoded = (decoded << 1) + value_mapping.get(raw[raw_index], 0)
-            return decoded
+            if len(raw) > native_width:
+                raise ValueError(
+                    f"VCD value {raw!r} exceeds width {native_width} for signal '{lookup_path}'"
+                )
+            padding = raw[0] if raw and raw[0] in {'x', 'z'} else '0'
+            value = 0
+            for char in raw.rjust(native_width, padding)[raw_start:raw_stop]:
+                value = (value << 1) | value_mapping.get(char, 0)
+            return value
 
-        value_width = high - low + 1
-        dtype = np.object_ if value_width > 64 else np.uint64
-        pairs = [(v[0], decode(v[1], high, low)) for v in signal_handle.tv]
-        result = np.array(pairs, dtype=dtype)
-        if len(result) == 0:
-            raise ValueError(f"signal '{lookup_path}' has no value changes")
-        return result, value_width
+        tv = signal_handle.tv
+        times = [time for time, _ in tv]
+        begin_index = 0 if begin_time is None else max(0, bisect_right(times, begin_time) - 1)
+        end_index = len(tv) if end_time is None else bisect_left(times, end_time)
+        windowed_tv = tv[begin_index:end_index]
+
+        dtype = np.object_ if signal.width > 64 else np.uint64
+        pairs = [(time, decode(raw)) for time, raw in windowed_tv]
+        if pairs:
+            return np.array(pairs, dtype=dtype)
+        return np.empty((0, 2), dtype=dtype)
 
     def close(self):
         pass

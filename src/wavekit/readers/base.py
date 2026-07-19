@@ -2,24 +2,38 @@ from __future__ import annotations
 
 import ast
 from abc import abstractmethod
-from collections.abc import Sequence
-from typing import Any, Literal
+from dataclasses import dataclass, field
+from typing import Any, Generic, Literal, TypeVar, cast
 
 import numpy as np
 
-from ..scope import Scope, match_scopes, match_signals
-from ..signal import Signal
 from ..waveform import Waveform
 from .expr_parser import extract_wave_paths
-from .pattern_parser import (
-    PatternMap,
-    expand_brace_pattern,
-    split_by_hierarchy,
-)
+from .hierarchy import Node, Scope, Signal
+from .matcher import CaptureKey, ExactCapture
 from .value_change import value_change_to_value_array
 
+SignalT = TypeVar('SignalT', bound=Signal)
+NodeT = TypeVar('NodeT', bound=Node)
 
-class Reader:
+
+@dataclass(frozen=True, eq=False)
+class _SearchRoot(Node):
+    """Private search-only parent for the reader's top-level scopes."""
+
+    base_name: str = field(default='', init=False, repr=False)
+    parent: Node | None = field(default=None, init=False, repr=False)
+    top_scopes: tuple[Scope, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, 'top_scopes', tuple(self.top_scopes))
+
+    @property
+    def children(self) -> tuple[Scope, ...]:
+        return self.top_scopes
+
+
+class Reader(Generic[SignalT]):
     """Abstract base class for waveform file readers.
 
     Concrete subclasses (:class:`~wavekit.VcdReader`,
@@ -60,7 +74,7 @@ class Reader:
       regex instead of exact matching; capture groups ``(...)`` become tuple
       elements in the result key.
 
-    All pattern expansions produce ``dict[tuple, str]`` where the tuple key
+    All pattern expansions produce ``dict[CaptureKey, Signal]`` where the tuple key
     encodes the captured values and the value is the full signal path.
     """
 
@@ -77,8 +91,8 @@ class Reader:
 
     def load_waveform(
         self,
-        signal: Signal | str,
-        clock: Signal | str,
+        signal: SignalT | str,
+        clock: SignalT | str,
         xz_value: int = 0,
         signed: bool = False,
         sample_on_posedge: bool = False,
@@ -97,13 +111,13 @@ class Reader:
         Parameters
         ----------
         signal:
-            Full dotted path of the signal as a :class:`~wavekit.signal.Signal`
+            Full dotted path of the signal as a :class:`~wavekit.Signal`
             object or a string.  When a ``Signal`` is passed, ``signal.full_name``
             is used as the path (which may include bit-range suffixes).
             When a string is passed, the value is used verbatim as the full
             hierarchical path, e.g. ``"tb.dut.data[7:0]"`` or ``"tb.dut.data"``.
         clock:
-            Clock signal as a :class:`~wavekit.signal.Signal` or full dotted
+            Clock signal as a :class:`~wavekit.Signal` or full dotted
             path string, e.g. ``"tb.clk"``.
         xz_value:
             Integer substituted for ``X`` and ``Z`` values in the file.
@@ -166,8 +180,8 @@ class Reader:
 
     def load_unknown_mask(
         self,
-        signal: Signal | str,
-        clock: Signal | str,
+        signal: SignalT | str,
+        clock: SignalT | str,
         include_x: bool = True,
         include_z: bool = True,
         sample_on_posedge: bool = False,
@@ -193,9 +207,9 @@ class Reader:
         Parameters
         ----------
         signal:
-            Full dotted signal path or :class:`~wavekit.signal.Signal` object.
+            Full dotted signal path or :class:`~wavekit.Signal` object.
         clock:
-            Clock signal path or :class:`~wavekit.signal.Signal` object.
+            Clock signal path or :class:`~wavekit.Signal` object.
         include_x:
             If ``True`` (default), mark source ``X``/``x`` bits.
         include_z:
@@ -232,15 +246,15 @@ class Reader:
         wf.signed = False
         return wf
 
+    @property
     @abstractmethod
-    def top_scope_list(self) -> Sequence[Scope]:
-        """Return the top-level :class:`~wavekit.scope.Scope` nodes of the file.
+    def top_scopes(self) -> tuple[Scope, ...]:
+        """Return the real top-level scopes in the waveform hierarchy."""
+        pass
 
-        Each element corresponds to one root module in the waveform hierarchy
-        (typically just one, e.g. the testbench).  Traverse the tree via
-        :attr:`~wavekit.scope.Scope.child_scope_list` and
-        :attr:`~wavekit.scope.Scope.signal_list` for custom scope inspection.
-        """
+    def top_scope_list(self) -> list[Scope]:
+        """Return the real top-level scopes as a list for compatibility."""
+        return list(self.top_scopes)
 
     @staticmethod
     def _value_change_to_waveform(
@@ -269,17 +283,16 @@ class Reader:
     @abstractmethod
     def _load_value_changes(
         self,
-        signal: Signal,
+        signal: SignalT,
         value_mapping: dict[str, int],
         begin_time: int | None = None,
         end_time: int | None = None,
-    ) -> tuple[np.ndarray, int]:
+    ) -> np.ndarray:
         """Load raw value changes for a signal.
 
-        Subclasses implement file-format-specific loading.  Returns a tuple
-        of (value_change_array, width) where value_change_array has shape
-        (N, 2) with columns [time, value], and width is the effective decoded
-        width after any backend-applied range selection.
+        Subclasses implement file-format-specific loading. Returns an array
+        with shape ``(N, 2)`` whose columns are ``[time, value]``. The
+        effective width is defined by ``signal.width``.
 
         Parameters
         ----------
@@ -296,8 +309,8 @@ class Reader:
 
     def _sample_on_clock(
         self,
-        signal: Signal,
-        clock: Signal,
+        signal: SignalT,
+        clock: SignalT,
         value_mapping: dict[str, int],
         signed: bool,
         sample_on_posedge: bool,
@@ -319,7 +332,7 @@ class Reader:
 
         # Load clock value changes for absolute cycle computation
         clock_mapping = {'0': 0, '1': 1, 'x': 0, 'z': 0}
-        all_clock_changes, _ = self._load_value_changes(clock, clock_mapping)
+        all_clock_changes = self._load_value_changes(clock, clock_mapping)
 
         # Find sampling edge timestamps
         sample_value = 1 if sample_on_posedge else 0
@@ -360,8 +373,8 @@ class Reader:
             clock_mask &= all_clock_changes[:, 0] < end_time
         windowed_clock_changes = all_clock_changes[clock_mask]
 
-        # Load signal value changes (backend handles range suffix internally)
-        signal_value_change, width = self._load_value_changes(
+        # Load signal value changes (backend handles selection during decoding).
+        signal_value_change = self._load_value_changes(
             signal,
             value_mapping,
             begin_time=begin_time,
@@ -375,7 +388,7 @@ class Reader:
         result = self._value_change_to_waveform(
             signal_value_change,
             windowed_clock_changes,
-            width=width,
+            width=signal.width,
             signed=signed,
             sample_on_posedge=sample_on_posedge,
             clock_offset=clock_offset,
@@ -383,144 +396,115 @@ class Reader:
 
         return result
 
-    def _search_roots(self, root_scope: Scope | None) -> Sequence[Scope]:
-        """Return the list of scopes to start a search from."""
-        return [root_scope] if root_scope is not None else self.top_scope_list()
+    @staticmethod
+    def _public_matches(
+        matches: dict[CaptureKey, NodeT],
+    ) -> dict[CaptureKey, NodeT]:
+        """Project internal traversal captures to public reader result keys."""
+        results: dict[CaptureKey, NodeT] = {}
+        for captures, node in matches.items():
+            key = tuple(
+                capture
+                for capture in captures
+                if not (isinstance(capture, ExactCapture) and capture.definition is None)
+            )
+            if key in results:
+                raise ValueError(
+                    f'Query path matched more than one node for key {key!r}: '
+                    f'{results[key].full_name!r} vs {node.full_name!r}'
+                )
+            results[key] = node
+        return results
+
+    def _search_root(self, root_scope: Scope | None) -> Node:
+        """Return a real root or an internal search container for all top-level scopes."""
+        if root_scope is not None:
+            return root_scope
+        return _SearchRoot(top_scopes=self.top_scopes)
 
     def get_matched_signals(
         self,
-        pattern: str,
+        path: str,
         root_scope: Scope | None = None,
-    ) -> dict[tuple[Any, ...], Signal]:
-        """Return all signals whose paths match *pattern*, keyed by captured values.
+    ) -> dict[CaptureKey, SignalT]:
+        """Return all signals whose paths match *path*, keyed by captures.
 
         Traverses the scope tree starting from *root_scope* (or the file's
-        top-level scopes if *root_scope* is ``None``) and applies the pattern
-        to each level.  See the class docstring for pattern syntax details.
+        top-level scopes if *root_scope* is ``None``) and applies the query
+        path to each level.  See the class docstring for query path syntax.
 
         Parameters
         ----------
-        pattern:
-            Signal path pattern, e.g. ``"tb.dut.fifo_{0..3}.w_ptr[2:0]"`` or
-            ``r"tb.dut.@([a-z]+)_valid"``.
+        path:
+            Signal query path, e.g. ``"tb.dut.fifo_{0..3}.w_ptr[2:0]"`` or
+            ``r"tb.dut./([a-z]+)_valid/"``.
         root_scope:
             If provided, search only within this scope instead of starting
             from the file's top-level scopes.
 
         Returns
         -------
-        dict[tuple, Signal]:
-            Maps each captured key tuple to the matched :class:`~wavekit.signal.Signal`
+        dict[CaptureKey, Signal]:
+            Maps each capture key to the matched :class:`~wavekit.Signal`
             object (carrying name, width, range, signed).
-            For patterns without capture groups the key is ``()``.
+            Ordinary exact-name matches are omitted from the key, so a query
+            without binding matchers uses ``()``.
 
         Raises
         ------
-        Exception:
-            If two different signals resolve to the same key.
+        ValueError:
+            If two different signals resolve to the same key, or if using
+            module matchers on a backend without ``def_name`` support (VCD/FST).
         """
-
-        def combine_dict(
-            dict1: dict[tuple[Any, ...], Signal],
-            dict2: dict[tuple[Any, ...], Signal],
-        ) -> dict[tuple[Any, ...], Signal]:
-            common_keys = set(dict1.keys()).intersection(dict2.keys())
-
-            if common_keys:
-                signal1s = [dict1[k].name for k in common_keys]
-                signal2s = [dict2[k].name for k in common_keys]
-                raise Exception(
-                    'found more than one signal with the same keys: '
-                    f'keys:{list(common_keys)} , signals:{signal1s + signal2s}'
-                )
-
-            return {**dict1, **dict2}
-
-        pattern = pattern.strip()
-        expanded_pattern_list: list[PatternMap] = [
-            expand_brace_pattern(p) for p in split_by_hierarchy(pattern)
-        ]
-
-        matched_signals: dict[tuple[Any, ...], Signal] = {}
-        for scope in self._search_roots(root_scope):
-            matched_signals = combine_dict(
-                matched_signals,
-                match_signals(scope, expanded_pattern_list),
-            )
-        return matched_signals
+        search_root = self._search_root(root_scope)
+        matched = self._public_matches(search_root.get_matched_signals(path))
+        return cast(dict[CaptureKey, SignalT], matched)
 
     def get_matched_scopes(
         self,
-        pattern: str,
+        path: str,
         root_scope: Scope | None = None,
-    ) -> dict[tuple[Any, ...], Scope]:
-        """Return all scopes whose paths match *pattern*, keyed by captured values.
+    ) -> dict[CaptureKey, Scope]:
+        """Return all scopes whose paths match *path*, keyed by captures.
 
         Similar to :meth:`get_matched_signals` but stops at the scope level —
-        the last component of *pattern* must match a scope name, not a signal.
+        the last component of *path* must match a scope name, not a signal.
         Useful for enumerating module instances before loading their signals.
 
         Parameters
         ----------
-        pattern:
-            Scope path pattern using the same brace/regex syntax as signal
-            patterns.  The last component must match a scope (module) name,
-            e.g. ``"tb.dut.fifo_{0..3}"`` or ``r"tb.@([a-z]+)_core"``.
+        path:
+            Scope query path using the same syntax as signal paths.  The last
+            component must match a scope (module) name, e.g.
+            ``"tb.dut.fifo_{0..3}"`` or ``r"tb./([a-z]+)_core/"``.
         root_scope:
             If provided, search only within this scope instead of starting
             from the file's top-level scopes.
 
         Returns
         -------
-        dict[tuple, Scope]:
-            Maps each captured key tuple to the matched :class:`~wavekit.scope.Scope`.
-            For patterns without capture groups the key is ``()``.
+        dict[CaptureKey, Scope]:
+            Maps each capture key to the matched :class:`~wavekit.Scope`.
+            Ordinary exact-name matches are omitted from the key, so a query
+            without binding matchers uses ``()``.
 
         Raises
         ------
-        Exception:
-            If two different scopes resolve to the same key.
-
-        Example
-        -------
-        ::
-
-            # Find all fifo_N sub-scopes under tb.dut
-            scopes = reader.get_matched_scopes("tb.dut.fifo_{0..3}")
-            for (idx,), scope in scopes.items():
-                waves = reader.load_matched_waveforms(
-                    "w_ptr[2:0]", clock_pattern="clk", root_scope=scope
-                )
+        ValueError:
+            If two different scopes resolve to the same key, or if using
+            module matchers on a backend without ``def_name`` support (VCD/FST),
+            or if the path contains a terminal signal bit-range suffix.
         """
-
-        def combine_dict(
-            dict1: dict[tuple[Any, ...], Scope],
-            dict2: dict[tuple[Any, ...], Scope],
-        ) -> dict[tuple[Any, ...], Scope]:
-            common_keys = set(dict1.keys()).intersection(dict2.keys())
-            if common_keys:
-                raise Exception(
-                    f'found more than one scope with the same keys: keys:{list(common_keys)}'
-                )
-            return {**dict1, **dict2}
-
-        pattern = pattern.strip()
-        expanded_pattern_list: list[PatternMap] = [
-            expand_brace_pattern(p) for p in split_by_hierarchy(pattern)
-        ]
-
-        matched_scopes: dict[tuple[Any, ...], Scope] = {}
-        for scope in self._search_roots(root_scope):
-            matched_scopes = combine_dict(
-                matched_scopes,
-                match_scopes(scope, expanded_pattern_list),
-            )
-        return matched_scopes
+        search_root = self._search_root(root_scope)
+        return cast(
+            dict[CaptureKey, Scope],
+            self._public_matches(search_root.get_matched_scopes(path)),
+        )
 
     def load_matched_waveforms(
         self,
-        pattern: str,
-        clock_pattern: str,
+        signal_path: str | None = None,
+        clock_path: str | None = None,
         xz_value: int = 0,
         signed: bool = False,
         sample_on_posedge: bool = False,
@@ -529,61 +513,58 @@ class Reader:
         begin_cycle: int | None = None,
         end_cycle: int | None = None,
         root_scope: Scope | None = None,
-    ) -> dict[tuple[Any, ...], Waveform]:
-        """Batch-load all signals matching *pattern*, each paired with its clock.
+        *,
+        pattern: str | None = None,
+        clock_pattern: str | None = None,
+    ) -> dict[CaptureKey, Waveform]:
+        """Batch-load all signals matching *signal_path*, each paired with its clock.
 
-        Internally calls :meth:`get_matched_signals` for both *pattern* and
-        *clock_pattern*, then dispatches :meth:`load_waveform` for every match.
+        .. deprecated::
+           Use *signal_path* and *clock_path* instead of *pattern* and *clock_pattern*.
+
+        Internally calls :meth:`get_matched_signals` for both *signal_path* and
+        *clock_path*, then dispatches :meth:`load_waveform` for every match.
 
         Clock assignment rules:
 
-        * **Single clock** — if *clock_pattern* matches exactly one signal, that
+        * **Single clock** — if *clock_path* matches exactly one signal, that
           clock is broadcast to all matched signals.
-        * **Per-signal clock** — if *clock_pattern* matches multiple signals,
-          its key set must equal the key set of *pattern* exactly; each signal
-          is paired with the clock sharing the same key.
+        * **Multiple clocks** — for each signal key, the clock whose key is the
+          longest prefix of the signal key is selected. If no clock key is a
+          prefix, raises ``ValueError``.
 
         Parameters
         ----------
-        pattern:
-            Signal path pattern (brace/regex).  See class docstring.
-        clock_pattern:
-            Clock signal path or pattern.  Must match at least one signal.
+        signal_path:
+            Signal query path.  See class docstring.
+        clock_path:
+            Clock signal query path.  Must match at least one signal.
         xz_value, signed, sample_on_posedge, begin_time, end_time, begin_cycle, end_cycle:
             Forwarded to :meth:`load_waveform` for every loaded signal.
         root_scope:
-            If provided, both *pattern* and *clock_pattern* are searched within
+            If provided, both *signal_path* and *clock_path* are searched within
             this scope instead of the file's top-level scopes.
 
         Returns
         -------
-        dict[tuple, Waveform]:
-            Same keys as :meth:`get_matched_signals` on *pattern*.
+        dict[CaptureKey, Waveform]:
+            Same keys as :meth:`get_matched_signals` on *signal_path*.
 
         Raises
         ------
-        Exception:
-            If *clock_pattern* matches no signals, or if per-signal clock keys
-            do not match signal keys.
-
-        Example
-        -------
-        ::
-
-            # Load J_state and J_next sharing a single clock
-            waves = reader.load_matched_waveforms(
-                "tb.u0.J_{state,next}[3:0]",
-                clock_pattern="tb.tck",
-            )
-            # waves == { ('state',): Waveform, ('next',): Waveform }
+        ValueError:
+            If *clock_path* matches no signals, or if no clock key is a prefix
+            of a signal key.
         """
         self._validate_xz_value(xz_value)
-        matched_clocks = self.get_matched_signals(clock_pattern, root_scope=root_scope)
-        if not matched_clocks:
-            raise Exception(f'clock pattern {clock_pattern} can not match any signal')
-
-        matched_signals = self.get_matched_signals(pattern, root_scope=root_scope)
-
+        if signal_path is None:
+            signal_path = pattern  # type: ignore[assignment]
+        if clock_path is None:
+            clock_path = clock_pattern  # type: ignore[assignment]
+        if signal_path is None or clock_path is None:
+            raise TypeError('signal_path and clock_path are required')
+        clock_pairing = self._resolve_clock_pairing(signal_path, clock_path, root_scope)
+        matched_signals = self.get_matched_signals(signal_path, root_scope=root_scope)
         load_kwargs: dict[str, Any] = dict(
             xz_value=xz_value,
             signed=signed,
@@ -593,30 +574,15 @@ class Reader:
             begin_cycle=begin_cycle,
             end_cycle=end_cycle,
         )
-
-        if len(matched_clocks) == 1:
-            # Broadcast: single clock shared by all matched signals
-            clock_signal = next(iter(matched_clocks.values()))
-            return {
-                k: self.load_waveform(sig, clock_signal, **load_kwargs)
-                for k, sig in matched_signals.items()
-            }
-        else:
-            # Per-signal clock: keys must match exactly
-            if set(matched_clocks.keys()) != set(matched_signals.keys()):
-                raise Exception(
-                    f'clock pattern {clock_pattern!r} matched keys {sorted(matched_clocks.keys())} '
-                    f'which do not match signal pattern keys {sorted(matched_signals.keys())}'
-                )
-            return {
-                k: self.load_waveform(sig, matched_clocks[k], **load_kwargs)
-                for k, sig in matched_signals.items()
-            }
+        return {
+            k: self.load_waveform(sig, clock_pairing[k], **load_kwargs)
+            for k, sig in matched_signals.items()
+        }
 
     def load_matched_unknown_masks(
         self,
-        pattern: str,
-        clock_pattern: str,
+        signal_path: str,
+        clock_path: str,
         include_x: bool = True,
         include_z: bool = True,
         sample_on_posedge: bool = False,
@@ -625,24 +591,23 @@ class Reader:
         begin_cycle: int | None = None,
         end_cycle: int | None = None,
         root_scope: Scope | None = None,
-    ) -> dict[tuple[Any, ...], Waveform]:
-        """Batch-load X/Z mask waveforms for all signals matching *pattern*.
+    ) -> dict[CaptureKey, Waveform]:
+        """Batch-load X/Z mask waveforms for all signals matching *signal_path*.
 
         .. note::
 
            This API is **experimental**.  See :meth:`load_unknown_mask`.
 
         Clock assignment follows :meth:`load_matched_waveforms`: a single
-        matched clock is broadcast to all signals; otherwise clock keys must
-        exactly match signal keys.  The returned dict uses the same keys as
-        :meth:`get_matched_signals` for *pattern*.
+        matched clock is broadcast to all signals; otherwise the longest-prefix
+        clock key is selected for each signal key.
 
         Parameters
         ----------
-        pattern:
-            Signal path pattern (brace/regex).  See class docstring.
-        clock_pattern:
-            Clock signal path or pattern.  Must match at least one signal.
+        signal_path:
+            Signal query path.  See class docstring.
+        clock_path:
+            Clock signal query path.  Must match at least one signal.
         include_x:
             If ``True`` (default), mark source ``X``/``x`` bits.
         include_z:
@@ -650,20 +615,15 @@ class Reader:
         sample_on_posedge, begin_time, end_time, begin_cycle, end_cycle:
             Same sampling/windowing semantics as :meth:`load_waveform`.
         root_scope:
-            If provided, both *pattern* and *clock_pattern* are searched within
+            If provided, both *signal_path* and *clock_path* are searched within
             this scope instead of the file's top-level scopes.
 
         Returns
         -------
-        dict[tuple, Waveform]:
-            Same keys as :meth:`get_matched_signals` on *pattern*.
+        dict[CaptureKey, Waveform]:
+            Same keys as :meth:`get_matched_signals` on *signal_path*.
         """
-        matched_clocks = self.get_matched_signals(clock_pattern, root_scope=root_scope)
-        if not matched_clocks:
-            raise Exception(f'clock pattern {clock_pattern} can not match any signal')
-
-        matched_signals = self.get_matched_signals(pattern, root_scope=root_scope)
-
+        clock_pairing = self._resolve_clock_pairing(signal_path, clock_path, root_scope)
         load_kwargs: dict[str, Any] = dict(
             include_x=include_x,
             include_z=include_z,
@@ -673,38 +633,66 @@ class Reader:
             begin_cycle=begin_cycle,
             end_cycle=end_cycle,
         )
-
-        if len(matched_clocks) == 1:
-            clock_signal = next(iter(matched_clocks.values()))
-            return {
-                k: self.load_unknown_mask(sig, clock_signal, **load_kwargs)
-                for k, sig in matched_signals.items()
-            }
-        else:
-            if set(matched_clocks.keys()) != set(matched_signals.keys()):
-                raise Exception(
-                    f'clock pattern {clock_pattern!r} matched keys {sorted(matched_clocks.keys())} '
-                    f'which do not match signal pattern keys {sorted(matched_signals.keys())}'
-                )
-            return {
-                k: self.load_unknown_mask(sig, matched_clocks[k], **load_kwargs)
-                for k, sig in matched_signals.items()
-            }
+        matched_signals = self.get_matched_signals(signal_path, root_scope=root_scope)
+        return {
+            k: self.load_unknown_mask(sig, clock_pairing[k], **load_kwargs)
+            for k, sig in matched_signals.items()
+        }
 
     @staticmethod
     def _validate_xz_value(xz_value: int) -> None:
         if xz_value not in (0, 1):
             raise ValueError('xz_value must be 0 or 1')
 
-    def _resolve_signal(self, signal: Signal | str) -> Signal:
+    def _resolve_signal(self, signal: SignalT | str) -> SignalT:
         if isinstance(signal, Signal):
-            return signal
+            return cast(SignalT, signal)
         matched = self.get_matched_signals(signal)
         if len(matched) == 0:
             raise ValueError(f"signal '{signal}' not found")
         if len(matched) > 1:
             raise ValueError(f"signal '{signal}' matches more than one signal")
-        return matched[()]
+        return cast(SignalT, matched[()])
+
+    def _resolve_clock_pairing(
+        self,
+        signal_path: str,
+        clock_path: str,
+        root_scope: Scope | None,
+    ) -> dict[CaptureKey, SignalT]:
+        """Resolve signal/clock query paths into a {signal_key: clock_signal} map.
+
+        Rules:
+        - Single clock match: broadcast to all signals.
+        - Multiple clock matches: longest-prefix clock key per signal key.
+        - No prefix match for a signal: raise ValueError.
+        """
+        matched_clocks = self.get_matched_signals(clock_path, root_scope=root_scope)
+        if not matched_clocks:
+            raise ValueError(f'clock path {clock_path!r} matched no signals')
+
+        matched_signals = self.get_matched_signals(signal_path, root_scope=root_scope)
+
+        if len(matched_clocks) == 1:
+            clock_signal = next(iter(matched_clocks.values()))
+            return {k: clock_signal for k in matched_signals}
+
+        clock_keys = list(matched_clocks.keys())
+        pairing: dict[CaptureKey, SignalT] = {}
+        for sig_key in matched_signals:
+            best_len = -1
+            best_clock_key: CaptureKey | None = None
+            for ck in clock_keys:
+                if sig_key[: len(ck)] == ck and len(ck) > best_len:
+                    best_len = len(ck)
+                    best_clock_key = ck
+            if best_clock_key is None:
+                raise ValueError(
+                    f'no clock key is a prefix of signal key {sig_key!r}; '
+                    f'available clock keys: {clock_keys!r}'
+                )
+            pairing[sig_key] = matched_clocks[best_clock_key]
+        return pairing
 
     @abstractmethod
     def close(self):
@@ -727,7 +715,7 @@ class Reader:
         end_cycle: int | None = None,
         mode: Literal['single', 'zip'] = 'single',
         root_scope: Scope | None = None,
-    ) -> Waveform | dict[tuple[Any, ...], Waveform]:
+    ) -> Waveform | dict[CaptureKey, Waveform]:
         """Evaluate a waveform expression string.
 
         Wave signal paths embedded in *expr* are automatically extracted,
@@ -747,7 +735,7 @@ class Reader:
             signal; returns a single :class:`Waveform`.
             ``'zip'`` — paths matching multiple signals must all share the
             same set of pattern keys; single-match paths are broadcast;
-            returns ``dict[tuple, Waveform]``.
+            returns ``dict[CaptureKey, Waveform]``.
         root_scope:
             If provided, all signal paths in *expr* are resolved within this
             scope instead of the file's top-level scopes.
@@ -767,7 +755,7 @@ class Reader:
         )
 
         # Resolve each path to its matched signal(s)
-        matched_per_path: list[tuple[str, str, dict[tuple[Any, ...], Signal]]] = []
+        matched_per_path: list[tuple[str, str, dict[CaptureKey, SignalT]]] = []
         for placeholder, path in path_entries:
             matched = self.get_matched_signals(path, root_scope=root_scope)
             if not matched:
@@ -805,10 +793,10 @@ class Reader:
                     if set(matched.keys()) != ref_keys:
                         raise ValueError(
                             f'inconsistent match keys between paths: '
-                            f"'{ref_p}' has keys {sorted(ref_keys)}, "
-                            f"'{p}' has keys {sorted(matched.keys())}"
+                            f"'{ref_p}' has keys {ref_keys!r}, "
+                            f"'{p}' has keys {set(matched)!r}"
                         )
-                zip_keys: list[tuple[Any, ...]] = list(ref_keys)
+                zip_keys: list[CaptureKey] = list(ref_keys)
             else:
                 # All paths are single-match; degenerate to single behaviour
                 zip_keys = [()]
@@ -819,7 +807,7 @@ class Reader:
                 for placeholder, _, matched in single_paths
             }
 
-            result: dict[tuple[Any, ...], Waveform] = {}
+            result: dict[CaptureKey, Waveform] = {}
             try:
                 code = compile(ast.parse(substituted, mode='eval'), '<eval_expr>', 'eval')
             except SyntaxError as exc:
