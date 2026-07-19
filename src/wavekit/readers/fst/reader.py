@@ -141,9 +141,9 @@ class FstReader(Reader[FstSignal]):
 
         def decode(raw: str) -> int:
             raw = raw.lower()
-            assert len(raw) == signal.native_width, (
-                f'FST value {raw!r} does not match width {signal.native_width}'
-            )
+            assert (
+                len(raw) == signal.native_width
+            ), f'FST value {raw!r} does not match width {signal.native_width}'
             value = 0
             for char in raw[raw_start:raw_stop]:
                 value = (value << 1) | value_mapping.get(char, 0)

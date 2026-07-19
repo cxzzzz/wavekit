@@ -32,7 +32,6 @@ class VcdScope(Scope):
 
     @cached_property
     def children(self) -> tuple[Node, ...]:
-
         def signal_list() -> list[Signal]:
             range_re = re.compile(r'\[(\d+):(\d+)\]$')
             full_scope_name = self.full_name
@@ -43,9 +42,9 @@ class VcdScope(Scope):
                     width = int(self.reader.file_handle[signal_path].size)
                     if m := range_re.search(k):
                         range = Range(int(m.group(1)), int(m.group(2)))
-                        assert abs(range.start - range.end) + 1 == width, (
-                            f"range {range} does not match width {width} for signal '{signal_path}'"
-                        )
+                        assert (
+                            abs(range.start - range.end) + 1 == width
+                        ), f"range {range} does not match width {width} for signal '{signal_path}'"
                         bare_name = k[: m.start()]
                     else:
                         range = None if width == 1 else Range(width - 1, 0)
