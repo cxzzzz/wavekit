@@ -471,23 +471,15 @@ cdef class NpiFsdbSignal:
         return None
 
     def width(self) -> int:
-        """Return the total bit-width of this signal (sum of all leaf members for composites)."""
+        """Return the range width of a non-composite signal."""
         assert self.sig_handle != NULL
-        cdef int has_member
-        cdef int w
-        cdef npiFsdbSigIter sub_signal_iter
-        cdef npiFsdbSigHandle sub_signal
+        cdef int has_member = 0
+        cdef int w = 0
         assert npi_fsdb_sig_property(npiFsdbSigHasMember, self.sig_handle, &has_member)
-        if has_member == 0:
-            assert npi_fsdb_sig_property(npiFsdbSigRangeSize, self.sig_handle, &w)
-            return w
-        else:
-            sub_signal_iter = npi_fsdb_iter_member(self.sig_handle)
-            assert sub_signal_iter != NULL
-            w = 0
-            while (sub_signal := npi_fsdb_iter_sig_next(sub_signal_iter)):
-                w += NpiFsdbSignal.init(sub_signal).width()
-            return w
+        if has_member != 0:
+            raise ValueError('width() does not support composite FSDB signals')
+        assert npi_fsdb_sig_property(npiFsdbSigRangeSize, self.sig_handle, &w)
+        return w
 
     def range(self):
         """Return the (high, low) bit-range tuple, or None for non-array composites."""
@@ -685,10 +677,11 @@ cdef class NpiFsdbReader:
         unsigned long long begin_time,
         unsigned long long end_time,
         int mode,
+        int decode_width,
     ):
         cdef FsdbDecodeMode c_mode = <FsdbDecodeMode>mode
 
-        cdef int width = signal.width()
+        cdef int width = decode_width
         cdef npiFsdbVctHandle signal_vct_handle = npi_fsdb_create_vct(signal.sig_handle)
         assert signal_vct_handle != NULL, f"can't create vct for signal"
         cdef npiFsdbTime cur_time

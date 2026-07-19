@@ -223,7 +223,13 @@ class Signal(Node):
                 f"Signal '{self.full_name}' has composite type {self.composite_type} "
                 f'but also has a range {selected_range}. Only array signals can have a range.'
             )
-        return sum(child.width for child in self.children if isinstance(child, Signal))
+
+        child_widths = [child.width for child in self.children if isinstance(child, Signal)]
+        if not child_widths:
+            raise ValueError(f"Composite signal '{self.full_name}' has no children")
+        if self.composite_type == SignalCompositeType.UNION:
+            return max(child_widths)
+        return sum(child_widths)
 
     @cached_property
     def native_width(self) -> int:

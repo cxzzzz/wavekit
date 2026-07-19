@@ -172,6 +172,24 @@ class FsdbReader(Reader[FsdbSignal]):
         end_time: int | None = None,
     ) -> np.ndarray:
         """Load mapped FSDB value changes through the NPI reader."""
+        if signal.composite_type in (
+            SignalCompositeType.UNION,
+            SignalCompositeType.TAGGED_UNION,
+        ):
+            raise NotImplementedError(
+                f"Loading {signal.composite_type.value} signal '{signal.full_name}' "
+                'as a waveform is not supported; load one of its members instead'
+            )
+
+        if (
+            signal.composite_type == SignalCompositeType.ARRAY
+            and signal.range != signal.native_range
+        ):
+            raise NotImplementedError(
+                f"Loading partial range of FSDB array '{signal.full_name}' is not supported; "
+                'load the complete array or individual array elements instead'
+            )
+
         # FSDB/NPI resolves the selected trailing range in signal.full_name.
         npi_signal = self.file_handle.get_signal(signal.full_name)
         mapping_key = (
@@ -183,7 +201,13 @@ class FsdbReader(Reader[FsdbSignal]):
         mode = _MAPPING_TO_FSDB_MODE[mapping_key]
         begin = begin_time if begin_time is not None else 0
         end = end_time if end_time is not None else 2**64 - 1
-        return self.file_handle.load_value_change_mode(npi_signal, begin, end, mode)
+        return self.file_handle.load_value_change_mode(
+            npi_signal,
+            begin,
+            end,
+            mode,
+            signal.width,
+        )
 
     @cached_property
     def top_scopes(self) -> tuple[FsdbScope, ...]:

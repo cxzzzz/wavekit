@@ -688,6 +688,13 @@ def test_fsdb_reader_composite_metadata(fsdb_runtime):
         assert pkt_members['valid'].width == 1
         assert pkt_members['data'].width == 3
 
+        assert signals['pkt_union'].width == 4
+        assert signals['pkt_union'].composite_type == SignalCompositeType.UNION
+        union_members = {sig.base_name: sig for sig in _signals(signals['pkt_union'])}
+        assert set(union_members) == {'raw', 'packet'}
+        assert union_members['raw'].width == 4
+        assert union_members['packet'].width == 4
+
         assert signals['packed_arr'].width == 33
         assert signals['packed_arr'].composite_type == SignalCompositeType.ARRAY
         packed_members = {sig.base_name: sig for sig in _signals(signals['packed_arr'])}
@@ -744,6 +751,19 @@ def test_fsdb_reader_array_matching_prefers_elements_then_range_views(fsdb_runti
     assert struct_member.full_name == 'simple_tb.pkt_arr[0].valid'
 
 
+def test_fsdb_reader_rejects_partial_array_range_load(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        complete = reader.load_waveform(
+            'simple_tb.packed_arr[10:0]', clock='simple_tb.clk', end_cycle=6
+        )
+
+        for path in ('simple_tb.packed_arr[2:1]', 'simple_tb.unpacked_arr[2:1]'):
+            with pytest.raises(NotImplementedError, match='partial range of FSDB array'):
+                reader.load_waveform(path, clock='simple_tb.clk', end_cycle=6)
+
+    assert complete.width == 33
+
+
 def test_fsdb_reader_packed_struct_whole_and_fields(fsdb_runtime):
     with FsdbReader(str(fsdb_runtime)) as reader:
         pkt = reader.load_waveform('simple_tb.pkt', clock='simple_tb.clk', end_cycle=6)
@@ -758,6 +778,34 @@ def test_fsdb_reader_packed_struct_whole_and_fields(fsdb_runtime):
     assert np.array_equal(data.value, pkt.value & 0x7)
     assert np.array_equal(valid.clock, pkt.clock)
     assert np.array_equal(data.time, pkt.time)
+
+
+def test_fsdb_reader_union_requires_loading_a_member(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        with pytest.raises(NotImplementedError, match='load one of its members instead'):
+            reader.load_waveform('simple_tb.pkt_union', clock='simple_tb.clk', end_cycle=6)
+        with pytest.raises(NotImplementedError, match='load one of its members instead'):
+            reader.load_unknown_mask('simple_tb.pkt_union', clock='simple_tb.clk', end_cycle=6)
+
+
+def test_fsdb_reader_union_members(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        raw = reader.load_waveform('simple_tb.pkt_union.raw', clock='simple_tb.clk', end_cycle=6)
+        valid = reader.load_waveform(
+            'simple_tb.pkt_union.packet.valid', clock='simple_tb.clk', end_cycle=6
+        )
+        data = reader.load_waveform(
+            'simple_tb.pkt_union.packet.data', clock='simple_tb.clk', end_cycle=6
+        )
+
+    assert raw.width == 4
+    assert valid.width == 1
+    assert data.width == 3
+    assert np.array_equal(raw.value, np.array([0, 0, 0x9, 0xA, 0x7, 0xC]))
+    assert np.array_equal(valid.value, (raw.value >> 3) & 0x1)
+    assert np.array_equal(data.value, raw.value & 0x7)
+    assert np.array_equal(valid.clock, raw.clock)
+    assert np.array_equal(data.time, raw.time)
 
 
 def test_fsdb_reader_array_whole_and_elements(fsdb_runtime):
