@@ -244,22 +244,25 @@ records = Pattern(read_burst, timeout=64).collect()
 | `reader.top_scopes` | 根 `Scope` 节点组成的不可变 tuple。 |
 | `has_fsdb_support()` | 检查当前是否可以使用 Verdi FSDB 运行时。 |
 
-匹配与层级查询 API 使用 `CaptureKey = tuple[Capture, ...]`。普通精确路径段不会进入 key，因此纯精确查询使用 `()`；`BraceCapture` / `RegexCapture` 通过 `.groups` 提供捕获值，`WildcardCapture` 保存匹配 `.path`，FSDB 模块匹配通过带 `.definition` 的 `ExactCapture` 保留语义。
+### 信号路径模式
 
-`Node` 是不可变的 `Scope` / `Signal` 基类，提供 `.parent`、不可变 `.children`、`.base_name`、`.name` 和 `.full_name`。`Signal` 还提供 `.range`、`.native_range`、`.width`、`.native_width`、`.is_leaf` 与 `.composite_type`；`Range(start, end)` 保留 HDL 范围方向。
+| 语法 | 示例 | 作用 | 结果 key 中的 Capture |
+|------|------|------|-----------------------|
+| 普通名称 | `tb.dut.valid` | 精确名称匹配 | 无 |
+| `{a,b,c}` | `sig_{read,write}` | 枚举命名变体 | `BraceCapture(path=..., groups=...)` |
+| `{N..M}` | `fifo_{0..3}.ptr` | 整数范围 | `BraceCapture(path=..., groups=...)` |
+| `{N..M..step}` | `lane_{0..6..2}` | 带步长的范围 | `BraceCapture(path=..., groups=...)` |
+| `/<regex>/` | `/([a-z]+)_valid/` | 正式正则语法，保留捕获组 | `RegexCapture(path=..., groups=...)` |
+| `@<regex>` | `@([a-z]+)_valid` | 兼容旧代码的正则语法 | `RegexCapture(path=..., groups=...)` |
+| `*` / `**` | `tb.*.valid` / `tb.**.valid` | 单层 / 递归通配 | `WildcardCapture(path=...)` |
+| `$ModName` | `tb.$fifo_unit.ptr` | 按模块名匹配直接子层级（仅 FSDB） | `ExactCapture(path=..., definition=...)` |
+| `$$ModName` | `tb.$$fifo_unit.ptr` | 按模块名匹配任意深度后代（仅 FSDB） | `ExactCapture(path=..., definition=...)` |
 
-**信号路径支持的模式语法**：
+`$` 和 `$$` 是路径段级修饰符：它们可以与普通名称、brace、regex，
+以及末尾的 range 选择继续组合。
+例如：`tb.$/fifo_(in|out)/.data_{0..3}[7:0]`。
 
-| 语法 | 示例 | 作用 |
-|------|------|------|
-| `{a,b,c}` | `sig_{read,write}` | 枚举命名变体 |
-| `{N..M}` | `fifo_{0..3}.ptr` | 整数范围 |
-| `{N..M..step}` | `lane_{0..6..2}` | 带步长的范围 |
-| `/<regex>/` | `/([a-z]+)_valid/` | 正式正则语法，保留捕获组 |
-| `@<regex>` | `@([a-z]+)_valid` | 兼容旧代码的正则语法 |
-| `*` / `**` | `tb.*.valid` / `tb.**.valid` | 单层 / 递归通配 |
-| `$ModName` | `tb.$fifo_unit.ptr` | 按模块名匹配直接子层级（仅 FSDB） |
-| `$$ModName` | `tb.$$fifo_unit.ptr` | 按模块名匹配任意深度后代（仅 FSDB） |
+匹配与层级查询 API 返回以 `CaptureKey = tuple[Capture, ...]` 为 key 的字典。普通精确路径段不会进入 key，因此纯精确查询使用 `()`。
 
 ### Waveform
 

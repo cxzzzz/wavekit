@@ -254,30 +254,27 @@ Some tips for programmable patterns:
 | `reader.top_scopes` | Immutable tuple of root `Scope` nodes. |
 | `has_fsdb_support()` | Report whether the Verdi FSDB runtime is currently available. |
 
-Matched-reader and hierarchy query APIs use `CaptureKey = tuple[Capture, ...]`.
-Ordinary exact-name components are omitted, so an exact query uses key `()`.
-Bindings remain typed: `BraceCapture` and `RegexCapture` expose `.groups`,
-`WildcardCapture` records the matched `.path`, and FSDB module queries retain an
-`ExactCapture` with `.definition`.
+### Signal path patterns
 
-`Node` is the immutable base for `Scope` and `Signal`. Nodes expose `.parent`,
-immutable `.children`, local `.base_name` / `.name`, and qualified `.full_name`.
-A `Signal` additionally exposes `.range`, `.native_range`, `.width`,
-`.native_width`, `.is_leaf`, and `.composite_type`; `Range(start, end)` preserves
-HDL declaration direction.
+| Syntax | Example | Effect | Capture in result key |
+|--------|---------|--------|-----------------------|
+| Plain name | `tb.dut.valid` | Exact-name match | None |
+| `{a,b,c}` | `sig_{read,write}` | Enumerate named variants | `BraceCapture(path=..., groups=...)` |
+| `{N..M}` | `fifo_{0..3}.ptr` | Integer range | `BraceCapture(path=..., groups=...)` |
+| `{N..M..step}` | `lane_{0..6..2}` | Stepped range | `BraceCapture(path=..., groups=...)` |
+| `/<regex>/` | `/([a-z]+)_valid/` | Canonical regex syntax with capture groups | `RegexCapture(path=..., groups=...)` |
+| `@<regex>` | `@([a-z]+)_valid` | Legacy-compatible regex syntax | `RegexCapture(path=..., groups=...)` |
+| `*` / `**` | `tb.*.valid` / `tb.**.valid` | Single-level / recursive wildcard | `WildcardCapture(path=...)` |
+| `$ModName` | `tb.$fifo_unit.ptr` | Match a direct-child scope by module/definition name (FSDB only) | `ExactCapture(path=..., definition=...)` |
+| `$$ModName` | `tb.$$fifo_unit.ptr` | Match any-depth descendant scope by module/definition name (FSDB only) | `ExactCapture(path=..., definition=...)` |
 
-**Pattern syntax** used in signal paths:
+`$` and `$$` are path-step modifiers: they can combine with exact names, brace
+expansion, regex, and a trailing range selector in the same query.
+For example: `tb.$/fifo_(in|out)/.data_{0..3}[7:0]`.
 
-| Syntax | Example | Effect |
-|--------|---------|--------|
-| `{a,b,c}` | `sig_{read,write}` | Enumerate named variants |
-| `{N..M}` | `fifo_{0..3}.ptr` | Integer range |
-| `{N..M..step}` | `lane_{0..6..2}` | Stepped range |
-| `/<regex>/` | `/([a-z]+)_valid/` | Canonical regex syntax with capture groups |
-| `@<regex>` | `@([a-z]+)_valid` | Legacy-compatible regex syntax |
-| `*` / `**` | `tb.*.valid` / `tb.**.valid` | Single-level / recursive wildcard |
-| `$ModName` | `tb.$fifo_unit.ptr` | Match a direct-child scope by module/definition name (FSDB only) |
-| `$$ModName` | `tb.$$fifo_unit.ptr` | Match any-depth descendant scope by module/definition name (FSDB only) |
+Matched-reader and hierarchy query APIs return dictionaries keyed by
+`CaptureKey = tuple[Capture, ...]`. Exact-name components are omitted, so a
+fully exact query uses key `()`.
 
 ---
 

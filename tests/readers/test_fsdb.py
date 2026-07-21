@@ -4,8 +4,10 @@ import numpy as np
 import pytest
 
 from wavekit import (
+    BraceCapture,
     ExactCapture,
     FsdbReader,
+    RegexCapture,
     Scope,
     Signal,
     SignalCompositeType,
@@ -531,6 +533,77 @@ def test_fsdb_reader_dollar_dollar_module_name_matching(compare_fsdb):
     assert all(isinstance(capture, ExactCapture) for capture in captures)
     assert {capture.path for capture in captures} == {'dut.unit_a', 'dut.unit_b'}
     assert {capture.definition for capture in captures} == {'compare_unit'}
+
+
+def test_fsdb_reader_module_regex_combines_with_signal_brace(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        matched = reader.get_matched_signals(r'compare_tb.dut.$/compare_(unit)/.data_{0,1}')
+
+    assert len(matched) == 4
+    assert all(isinstance(key[0], RegexCapture) for key in matched)
+    assert all(isinstance(key[1], BraceCapture) for key in matched)
+    assert {key[0].path for key in matched} == {'unit_a', 'unit_b'}
+    assert {key[0].definition for key in matched} == {'compare_unit'}
+    assert {key[0].groups for key in matched} == {('unit',)}
+    assert {key[1].path for key in matched} == {'data_0', 'data_1'}
+    assert {key[1].groups for key in matched} == {('0',), ('1',)}
+
+
+def test_fsdb_reader_recursive_module_partial_brace(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        matched = reader.get_matched_scopes(r'compare_tb.$$compare_{dut,unit}')
+
+    assert len(matched) == 3
+    captures = {key[0] for key in matched}
+    assert all(isinstance(capture, BraceCapture) for capture in captures)
+    assert {capture.path for capture in captures} == {
+        'dut',
+        'dut.unit_a',
+        'dut.unit_b',
+    }
+    assert {capture.definition for capture in captures} == {'compare_dut', 'compare_unit'}
+    assert {capture.groups for capture in captures} == {('dut',), ('unit',)}
+
+
+def test_fsdb_reader_signal_regex_trailing_range(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        matched = reader.get_matched_signals(r'compare_tb.dut.unit_a./data/[1:0]')
+
+    assert len(matched) == 1
+    (capture,) = next(iter(matched))
+    signal = next(iter(matched.values()))
+    assert isinstance(capture, RegexCapture)
+    assert capture.path == 'data[1:0]'
+    assert capture.groups == ()
+    assert signal.range == Range(1, 0)
+    assert signal.full_name == 'compare_tb.dut.unit_a.data[1:0]'
+
+
+def test_fsdb_reader_signal_regex_escaped_native_range(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        matched = reader.get_matched_signals(r'compare_tb.dut.unit_a./data\[7:0\]/')
+
+    assert len(matched) == 1
+    (capture,) = next(iter(matched))
+    signal = next(iter(matched.values()))
+    assert isinstance(capture, RegexCapture)
+    assert capture.path == 'data[7:0]'
+    assert capture.groups == ()
+    assert signal.range == Range(7, 0)
+    assert signal.full_name == 'compare_tb.dut.unit_a.data[7:0]'
+
+
+def test_fsdb_reader_scope_regex_escaped_brackets(compare_fsdb):
+    with FsdbReader(str(compare_fsdb)) as reader:
+        matched = reader.get_matched_signals(r'compare_tb.dut.unit_a./gen_blk\[0\]/.gen_sig[3:0]')
+
+    assert len(matched) == 1
+    (capture,) = next(iter(matched))
+    signal = next(iter(matched.values()))
+    assert isinstance(capture, RegexCapture)
+    assert capture.path == 'gen_blk[0]'
+    assert capture.groups == ()
+    assert signal.full_name == 'compare_tb.dut.unit_a.gen_blk[0].gen_sig[3:0]'
 
 
 # ------------------------------------------------------------------

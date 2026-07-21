@@ -23,6 +23,18 @@ def test_matcher_parser_preserves_regex_hierarchy_content():
     assert steps[1].matcher.regex.pattern == r'u[0-3]\.core'
 
 
+def test_matcher_parser_distinguishes_regex_range_from_escaped_brackets():
+    selected = parse_query_path(r'/data/[1:0]')[0].matcher
+    escaped = parse_query_path(r'/data\[7:0\]/')[0].matcher
+
+    assert isinstance(selected, RegexMatcher)
+    assert selected.regex.pattern == 'data'
+    assert selected.range == Range(1, 0)
+    assert isinstance(escaped, RegexMatcher)
+    assert escaped.regex.pattern == r'data\[7:0\]'
+    assert escaped.range is None
+
+
 def test_matcher_parser_expands_braces():
     matcher = parse_query_path('unit_{a,b}.sig_{0..1}')[0].matcher
 
