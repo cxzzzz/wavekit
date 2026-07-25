@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from typing import Any
 
 from ..waveform import Waveform
@@ -14,6 +14,7 @@ from .steps import (
     DelayStep,
     IntValue,
     LoopStep,
+    MessageValue,
     RepeatStep,
     RequireStep,
     SignalValue,
@@ -21,7 +22,7 @@ from .steps import (
     WaitStep,
 )
 
-PatternBody = Callable[[PatternContext], Awaitable[object]]
+PatternBody = Callable[[PatternContext], object]
 
 
 def infer_declarative_axis(steps: list[Step]) -> Waveform | None:
@@ -71,21 +72,19 @@ def infer_declarative_axis(steps: list[Step]) -> Waveform | None:
 
 
 def compile_declarative_pattern(steps: list[Step]) -> PatternBody:
-    """Compile declarative pattern steps into an internal async program body.
-
-    Step objects stay read-only AST nodes.  The generated coroutine uses the
-    public PatternContext methods (wait, delay, capture, require), so compiled
-    declarative patterns and handwritten programmable patterns share runtime
-    scheduling, channel arbitration, guard timing, and waveform validation.
-    """
+    """Compile declarative pattern steps into a program body."""
     first_step = steps[0] if steps else None
 
     def eval_condition(cond: Condition, ctx: PatternContext) -> bool:
         if isinstance(cond, Waveform):
             return bool(ctx.value(cond))
+        if isinstance(cond, bool):
+            return cond
         if callable(cond):
             return bool(cond(ctx.index, ctx.captures))
-        raise PatternError(f'condition must be a Waveform or callable, got {type(cond).__name__}')
+        raise PatternError(
+            f'condition must be a Waveform, bool, or callable, got {type(cond).__name__}'
+        )
 
     def eval_signal(signal: SignalValue, ctx: PatternContext) -> Any:
         if isinstance(signal, Waveform):
@@ -102,53 +101,71 @@ def compile_declarative_pattern(steps: list[Step]) -> PatternBody:
             return int(result)
         raise PatternError(f'integer value must be an int or callable, got {type(value).__name__}')
 
-    async def run_steps(ctx: PatternContext, step_list: list[Step]) -> None:
+    def eval_message(message: MessageValue | None, ctx: PatternContext) -> str | None:
+        if message is None or isinstance(message, str):
+            return message
+        if callable(message):
+            return str(message(ctx.index, ctx.captures))
+        raise PatternError(f'message must be a str or callable, got {type(message).__name__}')
+
+    def adapt_message(message: MessageValue | None, ctx: PatternContext):
+        if message is None:
+            return None
+        return lambda _ctx, message=message: eval_message(message, ctx)
+
+    def run_steps(ctx: PatternContext, step_list: list[Step]) -> None:
         for step in step_list:
             if isinstance(step, WaitStep):
-                await ctx.wait(
+                ctx.wait(
                     lambda step=step: eval_condition(step.cond, ctx),
                     require=None
                     if step.require is None
                     else lambda step=step: eval_condition(step.require, ctx),
+                    require_message=adapt_message(step.require_message, ctx),
                 )
             elif isinstance(step, ConsumeStep):
-                await ctx.consume(
+                ctx.consume(
                     lambda step=step: eval_condition(step.cond, ctx),
                     channel=step.channel,
                     require=None
                     if step.require is None
                     else lambda step=step: eval_condition(step.require, ctx),
+                    require_message=adapt_message(step.require_message, ctx),
                 )
             elif isinstance(step, DelayStep):
-                await ctx.delay(
+                ctx.delay(
                     eval_int(step.n, ctx),
                     require=None
                     if step.require is None
                     else lambda step=step: eval_condition(step.require, ctx),
+                    require_message=adapt_message(step.require_message, ctx),
                 )
             elif isinstance(step, CaptureStep):
                 ctx.capture(step.name, eval_signal(step.signal, ctx), mode=step.mode)
             elif isinstance(step, RequireStep):
-                ctx.require(lambda step=step: eval_condition(step.cond, ctx))
+                ctx.require(
+                    lambda step=step: eval_condition(step.cond, ctx),
+                    message=adapt_message(step.message, ctx),
+                )
             elif isinstance(step, BranchStep):
                 if eval_condition(step.cond, ctx):
                     if step.true_body:
-                        await run_steps(ctx, step.true_body)
+                        run_steps(ctx, step.true_body)
                 elif step.false_body:
-                    await run_steps(ctx, step.false_body)
+                    run_steps(ctx, step.false_body)
             elif isinstance(step, RepeatStep):
                 count = eval_int(step.n, ctx)
                 if count < 0:
                     raise PatternError(f'repeat count must be non-negative, got {count}')
                 for _ in range(count):
-                    await run_steps(ctx, step.body_template)
+                    run_steps(ctx, step.body_template)
             elif isinstance(step, LoopStep):
                 if step.when is not None:
                     while eval_condition(step.when, ctx):
-                        await run_steps(ctx, step.body_template)
+                        run_steps(ctx, step.body_template)
                 elif step.until is not None:
                     while True:
-                        await run_steps(ctx, step.body_template)
+                        run_steps(ctx, step.body_template)
                         if eval_condition(step.until, ctx):
                             break
                 else:
@@ -156,17 +173,17 @@ def compile_declarative_pattern(steps: list[Step]) -> PatternBody:
             else:
                 raise PatternError(f'Unknown step type: {type(step).__name__}')
 
-    async def body(ctx: PatternContext) -> object:
+    def body(ctx: PatternContext) -> object:
         if isinstance(first_step, WaitStep) and first_step.require is None:
             # Treat the first unguarded wait as the trigger: candidates whose
             # first condition is false are discarded immediately instead of
-            # accumulating as blocked instances.  Guarded first waits cannot use
+            # accumulating as blocked instances. Guarded first waits cannot use
             # this shortcut because require must be evaluated while blocked.
             # Consume steps are not trigger-shortcut candidates because they
             # need FIFO/ownership arbitration through the runtime.
             if not eval_condition(first_step.cond, ctx):
                 return None
-        await run_steps(ctx, steps)
+        run_steps(ctx, steps)
         return ctx.OK
 
     return body

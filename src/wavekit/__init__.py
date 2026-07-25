@@ -9,11 +9,6 @@ try:
 except metadata.PackageNotFoundError:
     __version__ = 'unknown'
 
-from .pattern import Channel as Channel
-from .pattern import MatchResult as MatchResult
-from .pattern import MatchStatus as MatchStatus
-from .pattern import Pattern as Pattern
-from .pattern import PatternError as PatternError
 from .readers.fst.reader import FstReader as FstReader
 from .readers.hierarchy import Node as Node
 from .readers.hierarchy import Scope as Scope
@@ -45,11 +40,6 @@ __all__ = [
     'BraceCapture',
     'RegexCapture',
     'WildcardCapture',
-    'Pattern',
-    'MatchResult',
-    'MatchStatus',
-    'PatternError',
-    'Channel',
     'has_fsdb_support',
 ]
 

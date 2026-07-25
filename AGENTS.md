@@ -264,161 +264,112 @@ Every operation returns a **new** `Waveform`; none mutate in place.
 
 ## Pattern Matching
 
-The `Pattern` API extracts all matching protocol transactions from waveforms in a
-single unified-runtime scan. It is useful for latency measurement, protocol
-compliance checking, and temporal data extraction.
+Pattern APIs live under `wavekit.pattern`, not top-level `wavekit`:
 
-### How it works
+```python
+from wavekit.pattern import Channel, MatchStatus, Pattern, collect, match
+```
 
-- A `Pattern` has two authoring styles: declarative builder steps for fixed-shape
-  transactions, and an async programmable body for dynamic branches, retries,
-  per-ID routing, or row-oriented Python records.
-- Both styles share one runtime and the same `wait` / `consume` / `delay`
-  semantics.
-- A declarative `Pattern` is a sequence of **steps** describing what to wait for
-  and what to capture.
-- Calling `.match()` runs the engine over all loaded waveforms and returns a
-  `MatchResult` (struct-of-arrays, one entry per matched instance).
-- If the **first step is `wait`**, its condition is used as the trigger: one
-  instance is forked each cycle the condition is True.
-- If the **first step is not `wait`** (e.g. `capture`, `delay`), an instance
-  is forked **every cycle** (useful for paired-sample extraction).
+Use Pattern for declarative step construction, and module-level `match()` /
+`collect()` for execution. The runtime is synchronous and start-major: it starts
+one candidate per eligible cycle and runs that candidate to completion before
+trying the next start cycle. Matches may still overlap in time.
+
+### Declarative usage
+
+```python
+pattern = (
+    Pattern()
+    .wait(req_valid & req_ready)
+    .consume(rsp_valid & rsp_ready, channel='response')
+    .capture('rsp_data', rsp_data)
+)
+result = match(pattern)
+```
+
+If the first step is an unguarded `wait`, that condition is the trigger. If the
+first step is not `wait`, the pattern is attempted at every scanned cycle.
+
+### Programmable usage
+
+Programmable bodies are normal functions, not `async` functions. Use synchronous
+context calls and return `ctx.OK` for a successful check row, or `None` to skip
+the current start cycle.
+
+```python
+fire = valid & ready
+
+def tx(ctx):
+    if ctx.value(fire):
+        ctx.consume(lambda: ctx.value(done), channel='done')
+        return ctx.OK
+    return None
+
+result = match(tx, timeout=64)
+```
+
+For extraction, use `collect(body)`. It records every non-`None` Python return
+value and raises `PatternError` on timeout or require failure. `collect(pattern)`
+is intentionally unsupported.
 
 ### Step reference
 
 | Step | Blocking? | Description |
 |------|-----------|-------------|
-| `.wait(cond, require=None)` | yes | Block until `cond` is True without consuming the event. `require` is checked each waiting cycle (not the match cycle); violation → `REQUIRE_VIOLATED`. |
-| `.consume(cond, channel, require=None)` | yes | Block until `cond` is True with exclusive FIFO consumption. `channel` can be a `Channel`, a hashable key, or `callable(index, captures) -> Channel | Hashable` for dynamic routing (e.g., per-ID channels for AXI). |
-| `.delay(n, require=None)` | yes (n≥1) / epsilon (n=0) | Advance exactly `n` cycles. `delay(0)` is a no-op. |
-| `.capture(name, signal)` | no | Record signal value at current cycle into `captures[name]`. Use `name[]` to append to a list (inside loop/repeat). `signal` can be a Waveform or `callable(index, captures)`. |
-| `.require(cond)` | no | Assert condition; terminate with `REQUIRE_VIOLATED` if False. |
-| `.loop(body, *, until=None, when=None)` | — | Exactly one of `until`/`when` required. `until`: do-while — run body first, exit when True. `when`: while — check before each iteration, exit when False. |
-| `.repeat(body, n)` | — | Run `body` exactly `n` times. `n` may be `callable(index, captures) -> int`. |
+| `.wait(cond, require=None, require_message=None)` | yes | Block until `cond` is true without consuming the event. |
+| `.consume(cond, channel, require=None, require_message=None)` | yes | Block until `cond` is true and exclusively consume `(channel, cycle)`. |
+| `.delay(n, require=None, require_message=None)` | yes for n≥1 / epsilon for n=0 | Advance exactly `n` cycles. |
+| `.capture(name, signal, mode='last')` | no | Record a value. `mode='list'` appends to a Python list. |
+| `.require(cond, message=None)` | no | Assert a condition; failure produces `MatchStatus.RequireViolated(message)`. |
+| `.loop(body, *, until=None, when=None)` | — | `until`: do-while. `when`: while. |
+| `.repeat(body, n)` | — | Run `body` exactly `n` times. |
 | `.branch(cond, true_body, false_body)` | — | Epsilon conditional branch. |
-| `.timeout(max_cycles)` | — | Per-instance timeout; incomplete instances become `TIMEOUT`. Instances still active at end of waveform are always reported as `TIMEOUT` regardless. |
 
-### `match()` parameters
+Declarative dynamic callbacks use `callable(index, captures)`. Programmable
+conditions passed to `ctx.wait()` / `ctx.consume()` are zero-argument callables
+that close over `ctx`. In both cases `index` / `ctx.index` is the current
+waveform-array sample index, not a cycle number and not rebased by
+`match(start_cycle=...)`.
 
-```python
-result = pattern.match(start_cycle=None, end_cycle=None)
-```
+### `MatchRecords` fields
 
-- `start_cycle` / `end_cycle`: limit the scan window (same convention as
-  `load_waveform`'s `begin_cycle`/`end_cycle` — start inclusive, end exclusive).
-
-### `MatchResult` fields
-
-All fields are `Waveform` objects whose `.clock` axis is `start_cycle`, so they
-live in the same coordinate system as ordinary signal waveforms.
+`match()` returns `MatchRecords`, a row-aligned batch. It can be iterated to get
+`MatchRecord` rows with `MatchPoint` start/end values.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `.start` | `Waveform[int64]` | Start cycle of each match (inclusive). |
-| `.end` | `Waveform[int64]` | End cycle of each match (inclusive, last active cycle). |
-| `.duration` | `Waveform[int64]` | `end - start + 1` (number of cycles). |
-| `.status` | `Waveform[uint8]` | `MatchStatus.OK=0`, `TIMEOUT=1`, `REQUIRE_VIOLATED=2`. |
-| `.captures` | `dict[str, Waveform]` | Named captures. List captures (`name[]`) have `object` dtype where each element is a Python list. |
-| `.ok` | property | Boolean 1-bit Waveform: `status == OK`. |
-| `.failed` | property | Boolean 1-bit Waveform: `status != OK`. |
-| `.filter_ok()` | method | Return new `MatchResult` with only `OK` instances. |
-| `.filter_status(status)` | method | Return new `MatchResult` with only the requested `MatchStatus` or integer status. |
-| `.filter_failed()` | method | Return new `MatchResult` with only non-OK instances. |
+| `.start` | `Waveform[int64]` | Start point: `.value` is sample index, `.clock` is absolute cycle, `.time` is simulation timestamp. |
+| `.end` | `Waveform[int64]` | End point, inclusive; same `.value` / `.clock` / `.time` meaning as `.start`. |
+| `.duration` | `Waveform[int64]` | `end.value - start.value + 1` sampled cycles. |
+| `.status` | `Waveform[object]` | `MatchStatus.OK()`, `MatchStatus.Timeout(...)`, or `MatchStatus.RequireViolated(...)`. |
+| `.captures` | `dict[str, Waveform]` | Named captures aligned to result rows. |
+| `.ok` / `.failed` | `Waveform[bool]` | Boolean result-row masks. |
+
+Use `filter_ok()`, `filter_failed()`, and `filter_status(status_or_class)`. For
+example, `result.filter_status(MatchStatus.Timeout)` keeps all timeout rows.
 
 **`end` is inclusive**: to extract a waveform slice for a match use
-`wf.cycle_slice(start, end + 1)`.
-
-### Dynamic conditions and captures
-
-Any `cond` or `signal` argument can be a **callable** `(index, captures) -> value`
-instead of a static `Waveform`. `index` is the absolute waveform sample index,
-not rebased by `match(start_cycle=...)`; `captures` is the instance's capture
-dict so far.
-
-```python
-# Capture the length field, then repeat that many times
-Pattern()
-.wait(start_valid)
-.capture("len", length_field)
-.repeat(Pattern().wait(data_valid).capture("data[]", data),
-        n=lambda idx, cap: int(cap["len"]))
-.match()
-```
+`wf.cycle_slice(start.clock, end.clock + 1)`.
 
 ### Channel ordering with consume
 
-When multiple concurrent instances call `consume` with the same `channel`, they
-consume events in FIFO order (oldest instance first). This is how
-request/response pairing is implemented without explicit demultiplexing.
+`consume(cond, channel)` claims only the current `(logical_channel, cycle)` when
+`cond` is true and that event is free. It does not reserve a channel while
+waiting. A successful consume remains committed even if the candidate later
+fails or times out.
 
 ```python
-# Each request matches the next response in order
-result = (
-    Pattern()
-    .wait(req_valid & req_ready)
-    .capture('req_data', req_data)
-    .consume(rsp_valid & rsp_ready, channel='response')
-    .capture('rsp_data', rsp_data)
-    .match()
-)
-```
-
-### Programmable Pattern usage
-
-Programmable patterns run an async body under the same runtime. The runtime starts
-one candidate per scanned cycle, so use a positive current-cycle start guard and
-return `None` for non-start cycles:
-
-```python
-fire = valid & ready  # precompute fixed waveform expressions outside the body
-
-async def tx(ctx):
-    if ctx.value(fire):
-        await ctx.consume(lambda: ctx.value(done), channel='done')
-        return ctx.OK
-    return None
-
-result = Pattern(tx, timeout=64, max_active=10000).match()
-```
-
-Agent contracts:
-- Prefer a current-cycle guard such as `if ctx.value(fire): ...` for starts.
-- Avoid beginning a programmable body with `await ctx.wait(fire)` unless
-  accumulating suspended candidates is intentional.
-- Precompute fixed waveform expressions outside the async body; do not write
-  `ctx.value(valid & ready)` or `await ctx.wait(valid & ready)` inside it.
-- Dynamic callbacks should be cheap and side-effect-free. For local/capture-
-  dependent logic, use scalar reads such as
-  `lambda: ctx.value(valid) and ctx.value(id) == expected_id`.
-- In programmable callbacks, `ctx.index` is the absolute waveform sample index,
-  not rebased by `match(start_cycle=...)`.
-- `collect()` records each non-`None` Python return value; `match()` records
-  `return ctx.OK` as success and skips `return None`.
-- Do not use `tick` parameters or `MatchResult.valid` / `filter_valid()` aliases.
-
-**Dynamic channel for AXI-style ID routing:**
-
-For protocols where responses must be matched to requests by ID (e.g., AXI), use
-a callable for `channel` to create independent FIFOs per ID:
-
-```python
-# Match responses to requests by ARID/RID
 def match_id(idx, cap):
-    """Condition: response valid AND ID matches the captured request ID."""
     return bool(rvalid.value[idx] & rready.value[idx]) and int(rid.value[idx]) == int(cap['arid'])
 
-result = (
+pattern = (
     Pattern()
     .wait(arvalid & arready)
     .capture('arid', arid)
-    .capture('araddr', araddr)
-    .consume(
-        match_id,  # Condition checks ID match
-        channel=lambda idx, cap: f'read_{cap["arid"]}'  # Per-ID channel
-    )
+    .consume(match_id, channel=lambda idx, cap: f'read_{cap["arid"]}')
     .capture('rdata', rdata)
-    .match()
 )
+result = match(pattern)
 ```
 
 ---
@@ -443,7 +394,7 @@ result = (
    be compared by `.clock` value for alignment.
 8. **Pattern matching — all waveforms must share the same clock axis**: pass
    waveforms loaded with the same `clock` signal to all pattern steps.
-9. **`MatchResult.end` is inclusive**: use `cycle_slice(start, end + 1)` to
+9. **`MatchRecords.end` is inclusive**: use `cycle_slice(start.clock, end.clock + 1)` to
    extract the corresponding waveform window.
 10. **Pattern time movement is explicit**: `wait` / `consume` resume in the same
     cycle when already true; insert `delay(1)` for next-cycle behavior.

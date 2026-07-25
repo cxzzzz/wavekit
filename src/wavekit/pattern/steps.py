@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Protocol, Union, runtime_checkable
+from typing import Any, Callable, Literal, Protocol, Union, get_args, runtime_checkable
 
 from typing_extensions import TypeAlias
 
@@ -22,27 +22,17 @@ class Channel:
     in-flight instance wins).  Plain ``wait`` steps are observational and do not
     consume channels.
 
-    Internal state:
-        ``(_consumed_epoch, _consumed_at)`` records *which runtime run* and
-        *which cycle* this channel was last consumed at.  Each ``run()``
-        gets a fresh epoch, so consumption state from a previous run is
-        automatically invalidated — both static and user-managed dynamic
-        channels (e.g. ``defaultdict(Channel)`` lookups) are safe to reuse
-        across successive ``match()`` calls without explicit reset.
     """
 
-    __slots__ = ('_consumed_epoch', '_consumed_at')
-
-    def __init__(self) -> None:
-        self._consumed_epoch: int = -1
-        self._consumed_at: int = -1
+    __slots__ = ()
 
 
-# Type aliases for step parameters. Callable ``index`` values are absolute
-# waveform sample indices, not rebased by match(start_cycle=...).
-Condition = Union[Waveform, Callable[[int, dict], bool]]
+# Type aliases for step parameters. Callable ``index`` values are waveform-array
+# sample indices, not cycle numbers and not rebased by match(start_cycle=...).
+Condition = Union[Waveform, Callable[[int, dict], bool], bool]
 IntValue = Union[int, Callable[[int, dict], int]]
 SignalValue = Union[Waveform, Callable[[int, dict], Any]]
+MessageValue = Union[str, Callable[[int, dict], str]]
 ChannelValue: TypeAlias = Union[
     HashableKey,
     Channel,
@@ -50,47 +40,42 @@ ChannelValue: TypeAlias = Union[
 ]
 
 CaptureMode = Literal['last', 'first', 'list']
-_VALID_CAPTURE_MODES = ('last', 'first', 'list')
 
-Step = Union[
-    'WaitStep',
-    'ConsumeStep',
-    'DelayStep',
-    'CaptureStep',
-    'RequireStep',
-    'LoopStep',
-    'RepeatStep',
-    'BranchStep',
-]
+
+class Step:
+    """Base class for all declarative pattern steps."""
 
 
 @dataclass
-class WaitStep:
+class WaitStep(Step):
     """Blocking: observe cycles until *cond* is True.
 
     Attributes
     ----------
     cond:
         Waveform or ``callable(index, captures) -> bool``. ``index`` is the
-        absolute waveform sample index.
+        waveform-array sample index, not a cycle number.
     require:
         Optional condition that must hold every cycle while waiting;
-        violation terminates the instance with ``REQUIRE_VIOLATED``.
+        violation terminates the instance with ``MatchStatus.RequireViolated``.
+    require_message:
+        Optional human-readable violation message.
     """
 
     cond: Condition
     require: Condition | None = None
+    require_message: MessageValue | None = None
 
 
 @dataclass
-class ConsumeStep:
+class ConsumeStep(Step):
     """Blocking: wait for *cond* and consume an explicit FIFO channel.
 
     Attributes
     ----------
     cond:
         Waveform or ``callable(index, captures) -> bool``. ``index`` is the
-        absolute waveform sample index.
+        waveform-array sample index, not a cycle number.
     channel:
         Explicit ``Channel`` / hashable key (or ``callable`` returning one) for
         FIFO consumption. Callable ``index`` is the absolute waveform sample
@@ -98,27 +83,32 @@ class ConsumeStep:
     require:
         Optional condition that must hold every cycle while waiting or blocked
         by channel arbitration; violation terminates the instance with
-        ``REQUIRE_VIOLATED``.
+        ``MatchStatus.RequireViolated``.
+    require_message:
+        Optional human-readable violation message.
     """
 
     cond: Condition
     channel: ChannelValue
     require: Condition | None = None
+    require_message: MessageValue | None = None
 
 
 @dataclass
-class DelayStep:
+class DelayStep(Step):
     """Blocking: unconditionally wait *n* cycles.
 
-    Callable ``n`` receives the absolute waveform sample index.
+    Callable ``n`` receives the current waveform-array sample index, not a cycle
+    number. ``require_message`` is used when the optional ``require`` guard fails.
     """
 
     n: IntValue
     require: Condition | None = None
+    require_message: MessageValue | None = None
 
 
 @dataclass
-class CaptureStep:
+class CaptureStep(Step):
     """Epsilon: record a signal value into captures.
 
     ``mode``:
@@ -126,7 +116,7 @@ class CaptureStep:
         * ``'first'`` – keep only the first write (``cap[name]`` is scalar)
         * ``'list'``  – append every write (``cap[name]`` is a Python list)
 
-    Callable ``signal`` receives the absolute waveform sample index.
+    Callable ``signal`` receives the current waveform-array sample index, not a cycle number.
     """
 
     name: str
@@ -134,21 +124,21 @@ class CaptureStep:
     mode: CaptureMode = 'last'
 
     def __post_init__(self) -> None:
-        if self.mode not in _VALID_CAPTURE_MODES:
-            raise ValueError(
-                f'CaptureStep mode must be one of {_VALID_CAPTURE_MODES}, got {self.mode!r}'
-            )
+        allowed = get_args(CaptureMode)
+        if self.mode not in allowed:
+            raise ValueError(f'CaptureStep mode must be one of {allowed}, got {self.mode!r}')
 
 
 @dataclass
-class RequireStep:
-    """Epsilon: assert cond is True, else REQUIRE_VIOLATED."""
+class RequireStep(Step):
+    """Epsilon: assert cond is True, else MatchStatus.RequireViolated."""
 
     cond: Condition
+    message: MessageValue | None = None
 
 
 @dataclass
-class LoopStep:
+class LoopStep(Step):
     """Epsilon entry: conditional loop over *body_template*.
 
     Exactly one of *until* or *when* must be set.
@@ -163,7 +153,7 @@ class LoopStep:
 
 
 @dataclass
-class RepeatStep:
+class RepeatStep(Step):
     """Epsilon entry: execute body exactly *n* times."""
 
     body_template: list[Step]
@@ -171,7 +161,7 @@ class RepeatStep:
 
 
 @dataclass
-class BranchStep:
+class BranchStep(Step):
     """Epsilon: conditional branch."""
 
     cond: Condition

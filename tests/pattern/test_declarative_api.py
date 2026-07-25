@@ -6,27 +6,25 @@ import pytest
 from helpers import bool_wf as _bool_wf
 from helpers import wf as _wf
 from wavekit import Waveform
-from wavekit.pattern import MatchResult, MatchStatus, Pattern
-
-# ---------------------------------------------------------------------------
+from wavekit.pattern import MatchRecords, MatchStatus, Pattern, match
 
 
 class TestSingleWait:
     def test_basic_trigger(self):
         sig = _bool_wf([0, 1, 0, 1, 1, 0])
-        result = Pattern().wait(sig).match()
+        result = match(Pattern().wait(sig))
         assert len(result) == 3
         np.testing.assert_array_equal(result.start.value, [1, 3, 4])
-        np.testing.assert_array_equal(result.status.value, [0, 0, 0])  # all OK
+        np.testing.assert_array_equal(result.status.value, [MatchStatus.OK()] * 3)
 
     def test_no_matches(self):
         sig = _bool_wf([0, 0, 0])
-        result = Pattern().wait(sig).match()
+        result = match(Pattern().wait(sig))
         assert len(result) == 0
 
     def test_all_ones(self):
         sig = _bool_wf([1, 1, 1])
-        result = Pattern().wait(sig).match()
+        result = match(Pattern().wait(sig))
         assert len(result) == 3
 
 
@@ -34,7 +32,7 @@ class TestWaitCapture:
     def test_capture_value(self):
         valid = _bool_wf([0, 1, 0, 1, 0])
         data = _wf([10, 20, 30, 40, 50], width=8)
-        result = Pattern().wait(valid).capture('data', data).match()
+        result = match(Pattern().wait(valid).capture('data', data))
         assert len(result) == 2
         np.testing.assert_array_equal(result.captures['data'].value, [20, 40])
 
@@ -42,7 +40,7 @@ class TestWaitCapture:
         req = _bool_wf([0, 1, 0, 0, 0, 1, 0, 0])
         ack = _bool_wf([0, 0, 0, 1, 0, 0, 1, 0])
         data = _wf([0, 0, 0, 99, 0, 0, 77, 0], width=8)
-        result = Pattern().wait(req).wait(ack).capture('data', data).match()
+        result = match(Pattern().wait(req).wait(ack).capture('data', data))
         assert len(result) == 2
         np.testing.assert_array_equal(result.captures['data'].value, [99, 77])
         np.testing.assert_array_equal(result.start.value, [1, 5])
@@ -56,7 +54,7 @@ class TestLoopUntil:
         beat = _bool_wf([0, 1, 0, 1, 0, 1])
         last = _bool_wf([0, 0, 0, 0, 0, 1])
         data = _wf([0, 10, 0, 20, 0, 30], width=8)
-        result = (
+        result = match(
             Pattern()
             .wait(start)
             .loop(
@@ -66,7 +64,6 @@ class TestLoopUntil:
                 .branch(last == 0, true_body=Pattern().delay(1)),
                 until=last,
             )
-            .match()
         )
         ok = result.filter_ok()
         assert len(ok) == 1
@@ -78,14 +75,10 @@ class TestLoopUntil:
         beat = _bool_wf([0, 1, 0])
         last = _bool_wf([0, 1, 0])
         data = _wf([0, 99, 0], width=8)
-        result = (
+        result = match(
             Pattern()
             .wait(start)
-            .loop(
-                Pattern().wait(beat).capture('d', data, mode='list'),
-                until=last,
-            )
-            .match()
+            .loop(Pattern().wait(beat).capture('d', data, mode='list'), until=last)
         )
         ok = result.filter_ok()
         assert len(ok) == 1
@@ -95,18 +88,13 @@ class TestLoopUntil:
 class TestLoopWhile:
     def test_capture_while_high(self):
         """Capture data each cycle while enable is high."""
-        # Use a single trigger point, then loop while high
         trigger = _bool_wf([0, 1, 0, 0, 0, 0])
         enable = _bool_wf([0, 1, 1, 1, 0, 0])
         data = _wf([0, 10, 20, 30, 40, 50], width=8)
-        result = (
+        result = match(
             Pattern()
             .wait(trigger)
-            .loop(
-                Pattern().capture('d', data, mode='list').delay(1),
-                when=enable,
-            )
-            .match()
+            .loop(Pattern().capture('d', data, mode='list').delay(1), when=enable)
         )
         ok = result.filter_ok()
         assert len(ok) == 1
@@ -117,31 +105,24 @@ class TestLoopWhile:
         trigger = _bool_wf([1, 0, 0])
         cond = _bool_wf([0, 0, 0])
         data = _wf([10, 20, 30], width=8)
-        result = (
+        result = match(
             Pattern()
             .wait(trigger)
-            .loop(
-                Pattern().delay(1).capture('d', data, mode='list'),
-                when=cond,
-            )
+            .loop(Pattern().delay(1).capture('d', data, mode='list'), when=cond)
             .capture('after', data)
-            .match()
         )
         ok = result.filter_ok()
         assert len(ok) == 1
-        # Loop skipped, capture happens at trigger cycle
         assert ok.captures['after'].value[0] == 10
-        # No loop captures
         assert 'd' not in ok.captures or list(ok.captures['d'].value[0]) == []
 
 
 class TestStallDetection:
     def test_stall_interval(self):
         """Find stall intervals using loop-until."""
-        #                      0  1  2  3  4  5  6  7  8  9
         stall = _bool_wf([0, 1, 1, 1, 1, 0, 0, 1, 1, 0])
-        trigger = stall.rising_edge()  # rising edge at cycles 1 and 7
-        result = Pattern().wait(trigger).loop(Pattern().delay(1), until=stall == 0).match()
+        trigger = stall.rising_edge()
+        result = match(Pattern().wait(trigger).loop(Pattern().delay(1), until=stall == 0))
         ok = result.filter_ok()
         assert len(ok) == 2
         np.testing.assert_array_equal(ok.start.value, [1, 7])
@@ -154,14 +135,10 @@ class TestRepeat:
         trigger = _bool_wf([1, 0, 0, 0, 0, 0])
         beat = _bool_wf([0, 1, 1, 1, 0, 0])
         data = _wf([0, 10, 20, 30, 0, 0], width=8)
-        result = (
+        result = match(
             Pattern()
             .wait(trigger)
-            .repeat(
-                Pattern().wait(beat).capture('d', data, mode='list').delay(1),
-                n=3,
-            )
-            .match()
+            .repeat(Pattern().wait(beat).capture('d', data, mode='list').delay(1), n=3)
         )
         ok = result.filter_ok()
         assert len(ok) == 1
@@ -174,7 +151,7 @@ class TestRepeatDynamic:
         len_sig = _wf([2, 0, 0, 0, 0], width=4)
         beat = _bool_wf([0, 1, 1, 0, 0])
         data = _wf([0, 10, 20, 0, 0], width=8)
-        result = (
+        result = match(
             Pattern()
             .wait(trigger)
             .capture('len', len_sig)
@@ -182,7 +159,6 @@ class TestRepeatDynamic:
                 Pattern().wait(beat).capture('d', data, mode='list').delay(1),
                 n=lambda idx, cap: cap['len'],
             )
-            .match()
         )
         ok = result.filter_ok()
         assert len(ok) == 1
@@ -195,34 +171,27 @@ class TestCaptureDynamic:
         sig_a = _wf([0, 100, 0], width=8)
         sig_b = _wf([0, 200, 0], width=8)
         mode = _wf([0, 1, 0], width=1)
-        result = (
+        result = match(
             Pattern()
             .wait(trigger)
             .capture('mode', mode)
             .capture(
                 'val', lambda idx, cap: sig_a.value[idx] if cap['mode'] == 0 else sig_b.value[idx]
             )
-            .match()
         )
         ok = result.filter_ok()
         assert len(ok) == 1
-        assert ok.captures['val'].value[0] == 200  # mode=1 → sig_b
+        assert ok.captures['val'].value[0] == 200
 
 
 class TestBranch:
-    @pytest.mark.parametrize(
-        ('cond_value', 'expected'),
-        [
-            (1, 10),
-            (0, 20),
-        ],
-    )
+    @pytest.mark.parametrize(('cond_value', 'expected'), [(1, 10), (0, 20)])
     def test_branch_selects_body(self, cond_value, expected):
         trigger = _bool_wf([0, 1, 0])
         cond = _bool_wf([0, cond_value, 0])
         data_a = _wf([0, 10, 0], width=8)
         data_b = _wf([0, 20, 0], width=8)
-        result = (
+        result = match(
             Pattern()
             .wait(trigger)
             .branch(
@@ -230,7 +199,6 @@ class TestBranch:
                 true_body=Pattern().capture('val', data_a),
                 false_body=Pattern().capture('val', data_b),
             )
-            .match()
         )
         ok = result.filter_ok()
         assert len(ok) == 1
@@ -241,12 +209,11 @@ class TestBranch:
         trigger = _bool_wf([0, 1, 0])
         cond = _bool_wf([0, 0, 0])
         data = _wf([0, 42, 0], width=8)
-        result = (
+        result = match(
             Pattern()
             .wait(trigger)
             .branch(cond, true_body=Pattern().capture('optional', data))
             .capture('always', data)
-            .match()
         )
         ok = result.filter_ok()
         assert len(ok) == 1
@@ -254,87 +221,94 @@ class TestBranch:
         assert 'optional' not in ok.captures
 
 
-# ---------------------------------------------------------------------------
-# MatchResult helpers
-# ---------------------------------------------------------------------------
-
-
-class TestMatchResult:
+class TestMatchRecords:
     def _mixed_status_result(self):
-        start = _wf([10, 20, 30], width=64)
-        end = _wf([10, 23, 31], width=64)
-        duration = _wf([1, 4, 2], width=64)
-        status = _wf(
-            [MatchStatus.OK, MatchStatus.TIMEOUT, MatchStatus.REQUIRE_VIOLATED],
-            width=8,
+        start = Waveform(
+            np.array([0, 1, 2], dtype=np.int64),
+            np.array([10, 20, 30], dtype=np.int64),
+            np.array([100, 200, 300], dtype=np.int64),
+            width=64,
+        )
+        end = Waveform(
+            np.array([0, 4, 3], dtype=np.int64),
+            np.array([10, 23, 31], dtype=np.int64),
+            np.array([100, 230, 310], dtype=np.int64),
+            width=64,
+        )
+        duration = Waveform(
+            np.array([1, 4, 2], dtype=np.int64), start.clock.copy(), start.time.copy(), width=64
+        )
+        status = Waveform(
+            np.array(
+                [MatchStatus.OK(), MatchStatus.Timeout(), MatchStatus.RequireViolated()],
+                dtype=object,
+            ),
+            start.clock.copy(),
+            start.time.copy(),
         )
         samples = np.empty(3, dtype=object)
         samples[:] = [[1], [2, 3], [4, 5, 6]]
         captures = {
-            'data': _wf([100, 200, 300], width=16),
-            'samples': Waveform(
-                samples,
+            'data': Waveform(
+                np.array([100, 200, 300], dtype=np.int64),
                 start.clock.copy(),
                 start.time.copy(),
+                width=16,
             ),
+            'samples': Waveform(samples, start.clock.copy(), start.time.copy()),
         }
-        return MatchResult(start, end, duration, status, captures)
+        return MatchRecords(start, end, duration, status, captures)
 
     def test_filter_ok(self):
         sometimes = _bool_wf([0, 0, 1, 0, 0])
         data = _wf([0, 0, 42, 0, 0], width=8)
         trig2 = _bool_wf([1, 0, 1, 0, 0])
-        result = Pattern().wait(trig2).wait(sometimes).capture('val', data).timeout(3).match()
-        # Instance 1: fork at 0, wait sometimes → cycle 2 → OK, capture val=42
-        # Instance 2: fork at 2, wait sometimes → needs next True... cycle 2 already past
-        #   for this instance, it starts at step_idx=1 (skip first wait), wait sometimes
-        #   at cycle 3,4 → never True → TIMEOUT
+        result = match(Pattern().wait(trig2).wait(sometimes).capture('val', data), timeout=3)
         assert len(result) >= 1
         ok = result.filter_ok()
-        assert all(s == MatchStatus.OK for s in ok.status.value)
+        assert all(s == MatchStatus.OK() for s in ok.status.value)
 
     def test_ok_replaces_valid_aliases(self):
         trigger = _bool_wf([1, 0])
-        result = Pattern().wait(trigger).match()
-
+        result = match(Pattern().wait(trigger))
         np.testing.assert_array_equal(result.ok.value, [True])
         assert not hasattr(result, 'valid')
         assert not hasattr(result, 'filter_valid')
 
     def test_failed_preserves_status_axis(self):
         result = self._mixed_status_result()
-
         np.testing.assert_array_equal(result.failed.value, [False, True, True])
         np.testing.assert_array_equal(result.failed.clock, result.status.clock)
         np.testing.assert_array_equal(result.failed.time, result.status.time)
         assert result.failed.width == 1
         assert result.failed.signed is False
 
-    @pytest.mark.parametrize('status', [MatchStatus.TIMEOUT, int(MatchStatus.TIMEOUT)])
+    @pytest.mark.parametrize('status', [MatchStatus.Timeout(), MatchStatus.Timeout])
     def test_filter_status_keeps_exact_status_and_capture_alignment(self, status):
         result = self._mixed_status_result()
-
         timeout = result.filter_status(status)
-
-        np.testing.assert_array_equal(timeout.status.value, [MatchStatus.TIMEOUT])
-        np.testing.assert_array_equal(timeout.start.value, [20])
-        np.testing.assert_array_equal(timeout.end.value, [23])
+        np.testing.assert_array_equal(timeout.status.value, [MatchStatus.Timeout()])
+        np.testing.assert_array_equal(timeout.start.value, [1])
+        np.testing.assert_array_equal(timeout.end.value, [4])
         np.testing.assert_array_equal(timeout.duration.value, [4])
         np.testing.assert_array_equal(timeout.captures['data'].value, [200])
         np.testing.assert_array_equal(timeout.captures['data'].clock, timeout.start.clock)
         assert list(timeout.captures['samples'].value[0]) == [2, 3]
         np.testing.assert_array_equal(timeout.captures['samples'].clock, timeout.start.clock)
 
+    def test_filter_status_accepts_status_class(self):
+        result = self._mixed_status_result()
+        timeout = result.filter_status(MatchStatus.Timeout)
+        assert len(timeout) == 1
+        assert timeout[0].status == MatchStatus.Timeout()
+
     def test_filter_failed_keeps_non_ok_statuses(self):
         result = self._mixed_status_result()
-
         failed = result.filter_failed()
-
         np.testing.assert_array_equal(
-            failed.status.value,
-            [MatchStatus.TIMEOUT, MatchStatus.REQUIRE_VIOLATED],
+            failed.status.value, [MatchStatus.Timeout(), MatchStatus.RequireViolated()]
         )
-        np.testing.assert_array_equal(failed.start.value, [20, 30])
+        np.testing.assert_array_equal(failed.start.value, [1, 2])
         np.testing.assert_array_equal(failed.captures['data'].value, [200, 300])
         assert [list(value) for value in failed.captures['samples'].value] == [[2, 3], [4, 5, 6]]
         np.testing.assert_array_equal(failed.captures['samples'].clock, failed.start.clock)
@@ -343,34 +317,49 @@ class TestMatchResult:
         trigger = _bool_wf([1, 0, 1, 0, 0])
         ready = _bool_wf([0, 1, 0, 0, 0])
         data = _wf([10, 20, 30, 40, 50], width=8)
-
-        result = (
-            Pattern()
-            .wait(trigger)
-            .capture('samples', data, mode='list')
-            .wait(ready)
-            .timeout(3)
-            .match()
-        )
-
+        result = match(Pattern().wait(trigger).capture('samples', data, mode='list').wait(ready))
         np.testing.assert_array_equal(result.ok.clock, result.status.clock)
         np.testing.assert_array_equal(result.ok.time, result.status.time)
         assert result.ok.width == 1
-
         ok = result.filter_ok()
         assert len(ok) == 1
         np.testing.assert_array_equal(ok.start.clock, [0])
         np.testing.assert_array_equal(ok.captures['samples'].clock, ok.start.clock)
         assert list(ok.captures['samples'].value[0]) == [10]
 
+    def test_start_end_points_store_index_cycle_and_time(self):
+        trigger = Waveform(
+            np.array([1, 0, 0], dtype=np.int64),
+            np.array([10, 20, 30], dtype=np.int64),
+            np.array([100, 200, 300], dtype=np.int64),
+            width=1,
+        )
+        result = match(Pattern().wait(trigger).delay(1))
+        assert len(result) == 1
+        np.testing.assert_array_equal(result.start.value, [0])
+        np.testing.assert_array_equal(result.start.clock, [10])
+        np.testing.assert_array_equal(result.start.time, [100])
+        np.testing.assert_array_equal(result.end.value, [1])
+        np.testing.assert_array_equal(result.end.clock, [20])
+        np.testing.assert_array_equal(result.end.time, [200])
+        np.testing.assert_array_equal(result.duration.value, [2])
+        record = result[0]
+        assert record.start.index == 0
+        assert record.start.cycle == 10
+        assert record.start.time == 100
+        assert record.end.index == 1
+        assert record.end.cycle == 20
+        assert record.end.time == 200
+        assert record.duration == 2
+
     def test_repr(self):
         trigger = _bool_wf([1, 0])
-        result = Pattern().wait(trigger).match()
-        assert 'MatchResult' in repr(result)
+        result = match(Pattern().wait(trigger))
+        assert 'MatchRecords' in repr(result)
 
     def test_len(self):
         trigger = _bool_wf([1, 1, 1])
-        result = Pattern().wait(trigger).match()
+        result = match(Pattern().wait(trigger))
         assert len(result) == 3
 
 
@@ -379,9 +368,7 @@ class TestEveryCycleFork:
         """Pattern without wait → fork every cycle, delay creates pairing."""
         a = _wf([10, 20, 30, 40, 50], width=8)
         b = _wf([100, 200, 300, 400, 500], width=8)
-        result = Pattern().capture('a', a).delay(2).capture('b', b).match()
-        # Forks at cycles 0,1,2,3,4. Only 0,1,2 complete (need 2 more cycles).
-        # Cycles 3,4 are incomplete → TIMEOUT.
+        result = match(Pattern().capture('a', a).delay(2).capture('b', b))
         assert len(result) == 5
         ok = result.filter_ok()
         assert len(ok) == 3
@@ -391,21 +378,16 @@ class TestEveryCycleFork:
     def test_pure_capture(self):
         """Pure epsilon pattern → every cycle completes immediately."""
         sig = _wf([1, 2, 3], width=8)
-        result = Pattern().capture('v', sig).match()
+        result = match(Pattern().capture('v', sig))
         assert len(result) == 3
         np.testing.assert_array_equal(result.captures['v'].value, [1, 2, 3])
 
     def test_with_start_end_cycle(self):
         """start_cycle/end_cycle limits fork range."""
         sig = _wf([10, 20, 30, 40, 50], width=8)
-        result = Pattern().capture('v', sig).match(start_cycle=1, end_cycle=4)
+        result = match(Pattern().capture('v', sig), start_cycle=1, end_cycle=4)
         assert len(result) == 3
         np.testing.assert_array_equal(result.captures['v'].value, [20, 30, 40])
-
-
-# ---------------------------------------------------------------------------
-# Error cases
-# ---------------------------------------------------------------------------
 
 
 class TestCaptureModes:
@@ -415,7 +397,7 @@ class TestCaptureModes:
         beat = _bool_wf([0, 1, 1, 1, 0])
         last = _bool_wf([0, 0, 0, 0, 1])
         data = _wf([0, 10, 20, 30, 0], width=8)
-        result = (
+        result = match(
             Pattern()
             .wait(trigger)
             .loop(
@@ -425,7 +407,6 @@ class TestCaptureModes:
                 .branch(last == 0, true_body=Pattern().delay(1)),
                 until=last,
             )
-            .match()
         )
         ok = result.filter_ok()
         assert len(ok) == 1
@@ -437,7 +418,7 @@ class TestCaptureModes:
         beat = _bool_wf([0, 1, 1, 1, 0])
         last = _bool_wf([0, 0, 0, 1, 0])
         data = _wf([0, 10, 20, 30, 0], width=8)
-        result = (
+        result = match(
             Pattern()
             .wait(trigger)
             .loop(
@@ -447,7 +428,6 @@ class TestCaptureModes:
                 .branch(last == 0, true_body=Pattern().delay(1)),
                 until=last,
             )
-            .match()
         )
         ok = result.filter_ok()
         assert len(ok) == 1

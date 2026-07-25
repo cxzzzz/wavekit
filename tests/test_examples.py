@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 from contextlib import contextmanager
 
 import pytest
@@ -32,6 +33,7 @@ def run_make_all(cwd, project_root):
     env = os.environ.copy()
     src_path = os.path.join(project_root, 'src')
     env['PYTHONPATH'] = f"{src_path}:{env.get('PYTHONPATH', '')}"
+    env['PATH'] = f"{os.path.dirname(sys.executable)}:{env.get('PATH', '')}"
 
     # Run 'make all'
     result = subprocess.run(['make', 'all'], cwd=cwd, env=env, capture_output=True, text=True)

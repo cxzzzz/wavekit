@@ -126,14 +126,15 @@ with VcdReader("fifo_tb.vcd") as f:
 它有两种写法：
 
 - **声明式** — 用 `.wait()`、`.consume()`、`.capture()`、`.loop()`等步骤串成链式调用。适合固定流程。
-- **编程式** — 把 处理函数传给 `Pattern(...)`。适合动态分支、按 ID 路由等复杂流程。
+- **编程式** — 把普通处理函数传给 `match(...)` 或 `collect(...)`。适合动态分支、按 ID 路由等复杂流程。
 
 #### 声明式示例
 
 **AXI-Lite 读延迟测量**
 
 ```python
-from wavekit import VcdReader, Pattern
+from wavekit import VcdReader
+from wavekit.pattern import Pattern, match, collect
 
 with VcdReader("axi_tb.vcd") as f:
     clk     = "tb.clk"
@@ -143,13 +144,13 @@ with VcdReader("axi_tb.vcd") as f:
     rready  = f.load_waveform("tb.dut.rready",      clock=clk)
     rdata   = f.load_waveform("tb.dut.rdata[31:0]", clock=clk)
 
-    result = (
-        Pattern(timeout=256)
+    pattern = (
+        Pattern()
         .wait(arvalid & arready)   # AR 握手 → 事务开始
         .wait(rvalid  & rready)    # R  握手 → 事务结束
         .capture("rdata", rdata)
-        .match()
     )
+    result = match(pattern, timeout=256)
 
     ok = result.filter_ok()
     print(f"读延迟（周期）: {ok.duration.value}")
@@ -161,13 +162,12 @@ with VcdReader("axi_tb.vcd") as f:
 ```python
 beat = Pattern().consume(wvalid & wready, channel="w").capture("beats", wdata, mode="list")
 
-result = (
+pattern = (
     Pattern()
     .wait(awvalid & awready)   # AW 握手 → 突发开始
     .loop(beat, until=wlast)   # 收集每拍数据，直到 wlast
-    .timeout(512)
-    .match()
 )
+result = match(pattern, timeout=512)
 
 for i, inst in enumerate(result.filter_ok()):
     print(f"突发 {i}: {len(inst.captures['beats'])} 拍")
@@ -178,12 +178,12 @@ for i, inst in enumerate(result.filter_ok()):
 ```python
 stall = valid & (ready == 0)
 
-result = (
+pattern = (
     Pattern()
     .wait(stall.rising_edge())             # stall 开始
     .loop(Pattern().delay(1), when=stall)  # 持续等待，直到 stall 结束
-    .match()
 )
+result = match(pattern)
 
 stalls = result.filter_ok()
 print(f"Stall 持续时间: {stalls.duration.value} 周期")
@@ -196,16 +196,16 @@ print(f"Stall 持续时间: {stalls.duration.value} 周期")
 当总线上不同 ID 的 R 拍交替出现时，按 `arid`把每个 AR 请求和属于它的响应拍一一配对，并把结果收集成 Python dict。
 
 ```python
-arfire = arvalid & arready   # 在 async 函数外预先算好
+arfire = arvalid & arready   # 在函数外预先算好
 rfire = rvalid & rready
 
-async def read_burst(ctx):
+def read_burst(ctx):
     if ctx.value(arfire):
         my_id = ctx.value(arid)
         beats = []
 
         while True:
-            await ctx.consume(
+            ctx.consume(
                 lambda: ctx.value(rfire) and ctx.value(rid) == my_id,
                 channel=("r", my_id),
             )
@@ -216,12 +216,12 @@ async def read_burst(ctx):
         return {"arid": my_id, "beats": beats}
     return None
 
-records = Pattern(read_burst, timeout=64).collect()
+records = collect(read_burst, timeout=64)
 ```
 
 一些编程式 Pattern 的使用建议：
 
-- 固定的波形表达式（比如 `fire = valid & ready`）在 async 函数外先算好，
+- 固定的波形表达式（比如 `fire = valid & ready`）在函数外先算好，
   避免每周期反复构造。
 - 函数开头用 `if ctx.value(fire): ...` 判断当前周期是不是事务起点，
   不是起点就 `return None`。
@@ -331,27 +331,25 @@ changed = wave != wave.back(3)
 
 | API | 说明 |
 |-----|------|
-| `Pattern(timeout=..., max_active=...)` | 创建声明式 Pattern。继续调用 `.wait()`、`.capture()` 等方法添加步骤，最后用 `.match()` 运行。 |
-| `Pattern(async_fn, timeout=..., max_active=...)` | 创建编程式 Pattern。`async_fn` 会收到一个 `ctx` 参数。 |
-| `.match(start_cycle=None, end_cycle=None)` | 运行 Pattern，返回 `MatchResult`。编程式 Pattern 中，`return ctx.OK` 表示匹配成功，`return None` 表示跳过。 |
-| `.collect(start_cycle=None, end_cycle=None)` | 仅用于编程式 Pattern。收集 async 函数返回的所有非 `None` 对象。 |
+| `Pattern()` | 创建声明式 Pattern。继续调用 `.wait()`、`.capture()` 等方法添加步骤；执行参数放在 `match()` / `collect()`。 |
+| `match(pattern_or_body, *, axis=None, timeout=None, start_cycle=None, end_cycle=None)` | 运行声明式 Pattern 或编程式检查函数，返回 `MatchRecords`。检查函数中 `return ctx.OK` 表示匹配成功，`return None` 表示跳过。 |
+| `collect(body, *, axis=None, timeout=None, start_cycle=None, end_cycle=None)` | 运行编程式提取函数，收集所有非 `None` Python 对象。 |
 
 **声明式步骤**
 
 | 方法 | 说明 |
 |------|------|
-| `.wait(cond, *, require=None)` | 等到 `cond` 为真，但不占用这个事件。如果当前周期已经满足条件，会在同一周期继续；如果想等到下一周期，显式写 `.delay(1)`。`require` 会在等待期间每周期检查，失败则标记为 `REQUIRE_VIOLATED`。 |
-| `.consume(cond, channel, *, require=None)` | 等到 `cond` 为真，并从 `channel` 独占消费这个事件。适合把请求和响应按 FIFO 顺序配对，或按 key 分流。 |
-| `.delay(n, *, require=None)` | 前进 n 个周期。`delay(0)` 不做任何事。`require` 在延迟期间必须一直为真。 |
+| `.wait(cond, *, require=None, require_message=None)` | 等到 `cond` 为真，但不占用这个事件。如果当前周期已经满足条件，会在同一周期继续；如果想等到下一周期，显式写 `.delay(1)`。`require` 会在等待期间每周期检查，失败则标记为 `MatchStatus.RequireViolated`。 |
+| `.consume(cond, channel, *, require=None, require_message=None)` | 等到 `cond` 为真，并从 `channel` 独占消费这个事件。适合把请求和响应按 FIFO 顺序配对，或按 key 分流。 |
+| `.delay(n, *, require=None, require_message=None)` | 前进 n 个周期。`delay(0)` 不做任何事。`require` 在延迟期间必须一直为真。 |
 | `.capture(name, signal, *, mode='last')` | 在当前周期记录信号值。`mode='last'` 默认覆盖旧值；`'first'` 只保留第一次；`'list'` 追加到列表。 |
-| `.require(cond)` | 检查当前周期必须满足 `cond`，否则标记为 `REQUIRE_VIOLATED`。 |
+| `.require(cond)` | 检查当前周期必须满足 `cond`，否则标记为 `MatchStatus.RequireViolated`。 |
 | `.loop(body, *, until=None, when=None)` | 循环执行 `body`。`until` 是先执行再判断退出；`when` 是先判断，不满足就不进入循环。 |
 | `.repeat(body, n)` | 把 `body` 重复执行 n 次。n 可以是可调用对象。 |
 | `.branch(cond, true_body, false_body)` | 条件分支。 |
-| `.timeout(max_cycles)` | 对未完成的实例标记 `TIMEOUT`。 |
 
-编程式 Pattern 里也可以用同样的等待、消费和延迟操作：
-`await ctx.wait(...)`、`await ctx.consume(...)`、`await ctx.delay(...)`。
+编程式函数里也可以用同样的等待、消费和延迟操作：
+`ctx.wait(...)`、`ctx.consume(...)`、`ctx.delay(...)`。
 
 **编程式上下文**
 
@@ -360,17 +358,17 @@ changed = wave != wave.back(3)
 | `ctx.value(waveform, offset=0)` | 读取当前采样点的值，可用 `offset` 读前后几个采样点。 |
 | `ctx.cycle(waveform, offset=0)` | 读取当前采样点的周期号，可带 `offset`。 |
 | `ctx.time(waveform, offset=0)` | 读取当前采样点的时间戳，可带 `offset`。 |
-| `await ctx.wait(cond, require=None)` | 等到条件为真；只观察，不消费事件。 |
-| `await ctx.consume(cond, channel, require=None)` | 等到条件为真，并从 `channel` 独占消费这个事件。 |
-| `await ctx.delay(n, require=None)` | 前进 n 个周期。 |
-| `ctx.capture(name, value, mode='last')` | 在编程式 `.match()` 中记录捕获值。 |
-| `ctx.OK` | 在编程式 `.match()` 中返回，表示这次匹配成功。 |
+| `ctx.wait(cond, require=None, require_message=None)` | 等到条件为真；只观察，不消费事件。 |
+| `ctx.consume(cond, channel, require=None, require_message=None)` | 等到条件为真，并从 `channel` 独占消费这个事件。 |
+| `ctx.delay(n, require=None, require_message=None)` | 前进 n 个周期。 |
+| `ctx.capture(name, value, mode='last')` | 在编程式 `match()` 中记录捕获值。 |
+| `ctx.OK` | 在编程式 `match()` 中返回，表示这次匹配成功。 |
 
 **动态回调**
 
 声明式 Pattern 的动态回调写成 `callable(index, captures)`。这里的 `index`
-是波形数组里的绝对采样下标；即使使用 `match(start_cycle=...)` 缩小扫描范围，
-它也不会从窗口起点重新计数。
+是当前波形数组采样下标，可直接索引 `waveform.value/clock/time`，不是 cycle；
+即使使用 `match(start_cycle=...)` 缩小扫描范围，它也不会从窗口起点重新计数。
 
 **Channel 与 consume 的关系**
 
@@ -384,14 +382,14 @@ hashable key，或者动态回调给 `consume(..., channel=...)`。
 
 ```python
 from collections import defaultdict
-from wavekit import Channel, Pattern
+from wavekit.pattern import Channel, Pattern, match
 
 # 多 Bank Cache：每个 bank 有独立的响应端口，多个 bank 可以在同一周期返回数据。
 # 按 bank 分 Channel 可以让每个在飞读请求各自消费对应 bank 的响应，
 # 同时保留同一 bank 内的 FIFO 顺序。
 banks = defaultdict(Channel)
 
-result = (
+pattern = (
     Pattern()
     .wait(req_valid)
     .capture('bank', req_addr & 1)
@@ -401,22 +399,22 @@ result = (
     )
     .capture('rdata',
         lambda i, cap: bank_data[cap['bank']].value[i])
-    .match()
 )
+result = match(pattern)
 ```
 
-**`MatchResult`**
+**`MatchRecords`**
 
 | 字段 | 说明 |
 |------|------|
-| `.start` / `.end` | 每个匹配实例的起始和结束周期，二者都包含在匹配范围内。 |
-| `.duration` | 持续周期数，即 `end - start + 1`。 |
-| `.status` | `MatchStatus.OK`、`TIMEOUT` 或 `REQUIRE_VIOLATED`。 |
+| `.start` / `.end` | 点位 Waveform。`.value` 是波形数组采样下标，`.clock` 是绝对 cycle，`.time` 是仿真时间戳。end 为 inclusive。 |
+| `.duration` | `end.value - start.value + 1` 个采样周期。 |
+| `.status` | `MatchStatus.OK()`、`MatchStatus.Timeout(...)` 或 `MatchStatus.RequireViolated(...)`。 |
 | `.captures` | 捕获结果，类型为 `dict[str, Waveform]`。 |
-| `.ok` | 布尔 Waveform，表示 `status == MatchStatus.OK`。 |
-| `.failed` | 布尔 Waveform，表示 `status != MatchStatus.OK`。 |
+| `.ok` | 布尔 Waveform，表示 `status == MatchStatus.OK()`。 |
+| `.failed` | 布尔 Waveform，表示 `status != MatchStatus.OK()`。 |
 | `.filter_ok()` | 只保留状态为 `OK` 的匹配实例。 |
-| `.filter_status(status)` | 只保留指定 `MatchStatus` 或整数状态的匹配实例。 |
+| `.filter_status(status)` | 只保留指定 status 对象或 status class 的匹配实例。 |
 | `.filter_failed()` | 只保留非 OK 的匹配实例。 |
 
 ## 开发

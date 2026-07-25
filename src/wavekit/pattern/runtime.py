@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Hashable, Iterator
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import Any, Union
 
 import numpy as np
@@ -9,128 +10,29 @@ from typing_extensions import TypeAlias
 
 from ..waveform import Waveform
 from .errors import PatternError
-from .result import MatchResult, MatchStatus
+from .result import MatchRecords, MatchStatus, MatchStatusValue
 from .steps import CaptureMode, Channel
 
 _MAX_SAME_CYCLE_STEPS = 100_000
-_UNSET = object()
 
-# Runtime conditions deliberately use zero-argument callables.  Declarative
-# callables that need (index, captures) are adapted by compiler.py so this
-# scheduler can drive both public APIs through one small operation protocol.
-RuntimeCondition: TypeAlias = Union[Waveform, Callable[[], bool], bool]
-RuntimeChannel: TypeAlias = Union[
-    Channel,
-    Hashable,
-    Callable[[int, dict[str, Any]], Union[Channel, Hashable]],
-]
-PatternBody: TypeAlias = Callable[['PatternContext'], Awaitable[object]]
+PatternBody: TypeAlias = Callable[['PatternContext'], object]
+Message: TypeAlias = Union[str, Callable[[Any], str]]
 
 
-class _OkSentinel:
-    def __repr__(self) -> str:
-        return 'ctx.OK'
-
-
-OK = _OkSentinel()
-
-
-class _RequireViolation(PatternError):
-    pass
-
-
-class RuntimeOp:
-    """Cooperative operation yielded by ``await ctx.*`` calls.
-
-    The programmable API looks async, but it is not scheduled by ``asyncio``.
-    ``__await__`` yields the operation object back to ``PatternRuntime`` so the
-    runtime can decide, once per waveform cycle, whether this instance can keep
-    running in the same cycle or must remain suspended until a later cycle.
-    """
-
-    def __await__(self) -> Iterator[RuntimeOp]:
-        yield self
-        return None
-
-    def ready(self, ctx: PatternContext, runtime: PatternRuntime) -> bool:
-        raise NotImplementedError
-
-    def commit(self, ctx: PatternContext, runtime: PatternRuntime) -> None:
-        pass
+class _StopPattern(PatternError):
+    def __init__(self, status: MatchStatusValue):
+        self.status = status
 
 
 @dataclass
-class WaitOp(RuntimeOp):
-    cond: RuntimeCondition
-    require: RuntimeCondition | None = None
-
-    def ready(self, ctx: PatternContext, runtime: PatternRuntime) -> bool:
-        # Condition-first is part of the blocking-guard contract: a successful
-        # wait never evaluates require on the match cycle.  The guard only protects
-        # cycles where the instance is still blocked.
-        if not runtime.eval_condition(self.cond, ctx):
-            self._check_require(ctx, runtime)
-            return False
-        return True
-
-    def _check_require(self, ctx: PatternContext, runtime: PatternRuntime) -> None:
-        if self.require is not None and not runtime.eval_condition(self.require, ctx):
-            raise _RequireViolation
-
-
-@dataclass
-class ConsumeOp(RuntimeOp):
-    cond: RuntimeCondition
-    channel: RuntimeChannel
-    require: RuntimeCondition | None = None
-    _ready_channel: Channel | None = field(default=None, init=False, repr=False)
-
-    def ready(self, ctx: PatternContext, runtime: PatternRuntime) -> bool:
-        # Condition-first matches wait(require=...) semantics: the guard protects
-        # blocked cycles, including cycles blocked by FIFO arbitration, but not
-        # the success cycle.
-        if not runtime.eval_condition(self.cond, ctx):
-            self._check_require(ctx, runtime)
-            return False
-        channel = runtime.resolve_channel(self.channel, ctx)
-        if runtime.channel_free(channel, ctx.index):
-            self._ready_channel = channel
-            return True
-        self._ready_channel = None
-        self._check_require(ctx, runtime)
-        return False
-
-    def commit(self, ctx: PatternContext, runtime: PatternRuntime) -> None:
-        # Channel consumption is committed after all readiness checks, so two
-        # instances that become ready in the same cycle arbitrate through the
-        # runtime epoch/index marker instead of through waveform state.
-        if self._ready_channel is None:
-            raise PatternError('consume operation committed before a channel was reserved')
-        runtime.consume_channel(self._ready_channel, ctx.index)
-        self._ready_channel = None
-
-    def _check_require(self, ctx: PatternContext, runtime: PatternRuntime) -> None:
-        if self.require is not None and not runtime.eval_condition(self.require, ctx):
-            raise _RequireViolation
-
-
-@dataclass
-class DelayOp(RuntimeOp):
-    n: int
+class PatternInstance:
     start_index: int
-    require: RuntimeCondition | None = None
-
-    def ready(self, ctx: PatternContext, runtime: PatternRuntime) -> bool:
-        # delay(0) is epsilon.  For delay(n>0) started at t, this op is not
-        # ready on t..t+n-1, checks the guard on those blocked cycles, and then
-        # resumes at t+n without evaluating the guard for this delay again.
-        if self.n == 0:
-            return True
-        if ctx.index >= self.start_index + self.n:
-            return True
-        if self.require is not None and not runtime.eval_condition(self.require, ctx):
-            raise _RequireViolation
-        return False
+    order: int
+    captures: dict[str, Any] = field(default_factory=dict)
+    status: MatchStatusValue | None = None
+    end_index: int = 0
+    return_value: Any = None
+    discarded: bool = False
 
 
 @dataclass
@@ -138,15 +40,13 @@ class PatternContext:
     _runtime: PatternRuntime
     _instance: PatternInstance
     _index: int
+    _same_cycle_steps: int = 0
 
-    OK = OK
+    OK = MatchStatus.OK()
 
     @property
     def index(self) -> int:
-        """Absolute waveform sample index for the current cycle.
-
-        This is not rebased to zero when ``match(start_cycle=...)`` is used.
-        """
+        """Current waveform-array sample index, not a cycle number."""
         return self._index
 
     @property
@@ -154,76 +54,137 @@ class PatternContext:
         """Captures accumulated by the current pattern instance."""
         return self._instance.captures
 
+    def _touch(self) -> None:
+        self._instance.end_index = self._index
+
+    def _message_text(self, message: Message | None) -> str | None:
+        if message is None:
+            return None
+        if isinstance(message, str):
+            return message
+        if callable(message):
+            return str(message(self))
+        raise PatternError(f'message must be a str or callable, got {type(message).__name__}')
+
+    def _timeout_status(self, message: Message | None) -> MatchStatusValue:
+        return MatchStatus.Timeout(self._message_text(message) or self._runtime._timeout_message)
+
+    def _require_status(self, message: Message | None) -> MatchStatusValue:
+        return MatchStatus.RequireViolated(self._message_text(message))
+
+    def _guard_operation(self) -> None:
+        self._same_cycle_steps += 1
+        if self._same_cycle_steps > _MAX_SAME_CYCLE_STEPS:
+            raise PatternError('programmable Pattern exceeded same-cycle step limit')
+        timeout = self._runtime._timeout_cycles
+        if timeout is not None and self._index - self._instance.start_index + 1 > timeout:
+            raise _StopPattern(self._timeout_status(None))
+        self._touch()
+
+    def _advance_cycle(self) -> None:
+        if self._runtime._axis is None:
+            raise PatternError(
+                'Pattern runtime could not determine scan axis; pass axis=<waveform> '
+                'or observe a Waveform before blocking operations'
+            )
+        if self._index >= self._runtime.scan_end_index - 1:
+            raise _StopPattern(self._timeout_status(None))
+        self._index += 1
+        self._same_cycle_steps = 0
+        self._touch()
+
+    def _wait_next(
+        self,
+        require: Waveform | Callable[[], bool] | bool | None,
+        require_message: Message | None,
+    ) -> None:
+        if self._runtime.eval_condition(require, self):
+            self._advance_cycle()
+            return
+        raise _StopPattern(self._require_status(require_message))
+
     def value(self, waveform: Waveform, offset: int = 0) -> Any:
         index = self._index + offset
-        # Waveform observation is the validation boundary.  This keeps
-        # declarative and programmable patterns lazy: unexecuted branches and
-        # untouched captures do not need to be pre-collected or pre-validated.
         self._runtime.note_waveform(waveform)
+        self._touch()
         return waveform.value[index]
 
     def cycle(self, waveform: Waveform, offset: int = 0) -> Any:
         index = self._index + offset
         self._runtime.note_waveform(waveform)
+        self._touch()
         return waveform.clock[index]
 
     def time(self, waveform: Waveform, offset: int = 0) -> Any:
         index = self._index + offset
         self._runtime.note_waveform(waveform)
+        self._touch()
         return waveform.time[index]
 
     def wait(
         self,
-        cond: RuntimeCondition,
+        cond: Waveform | Callable[[], bool] | bool,
         *,
-        require: RuntimeCondition | None = None,
-    ) -> WaitOp:
-        """Observe cycles until *cond* is true.
-
-        ``require`` is a blocking guard: it is checked only on cycles where the
-        wait remains blocked.  If *cond* is true, the wait succeeds without
-        checking the guard on that success cycle.  ``wait`` does not consume or
-        arbitrate events; use :meth:`consume` for exclusive FIFO ownership.
-        """
-        return WaitOp(cond=cond, require=require)
+        require: Waveform | Callable[[], bool] | bool | None = None,
+        require_message: Message | None = None,
+    ) -> None:
+        while True:
+            self._guard_operation()
+            if self._runtime.eval_condition(cond, self):
+                return
+            self._wait_next(require, require_message)
 
     def consume(
         self,
-        cond: RuntimeCondition,
-        channel: RuntimeChannel,
+        cond: Waveform | Callable[[], bool] | bool,
+        channel: Channel | Hashable | Callable[[int, dict[str, Any]], Channel | Hashable],
         *,
-        require: RuntimeCondition | None = None,
-    ) -> ConsumeOp:
-        """Block until *cond* is true and atomically consume *channel*.
+        require: Waveform | Callable[[], bool] | bool | None = None,
+        require_message: Message | None = None,
+    ) -> None:
+        while True:
+            self._guard_operation()
+            if self._runtime.eval_condition(cond, self):
+                resolved = self._runtime.resolve_channel(channel, self)
+                if self._runtime.channel_free(resolved, self._index):
+                    self._runtime.consume_channel(resolved, self._index)
+                    return
+            self._wait_next(require, require_message)
 
-        ``channel`` may be a :class:`Channel` object, any hashable key, or a
-        ``callable(index, captures)`` that returns either.  ``require`` follows
-        ``wait(..., require=...)`` blocking-guard semantics, including cycles
-        blocked by channel arbitration.
-        """
-        return ConsumeOp(cond=cond, channel=channel, require=require)
-
-    def try_consume(self, cond: RuntimeCondition, channel: RuntimeChannel) -> bool:
-        op = ConsumeOp(cond=cond, channel=channel)
-        if not op.ready(self, self._runtime):
+    def try_consume(
+        self,
+        cond: Waveform | Callable[[], bool] | bool,
+        channel: Channel | Hashable | Callable[[int, dict[str, Any]], Channel | Hashable],
+    ) -> bool:
+        self._guard_operation()
+        if not self._runtime.eval_condition(cond, self):
             return False
-        op.commit(self, self._runtime)
+        resolved = self._runtime.resolve_channel(channel, self)
+        if not self._runtime.channel_free(resolved, self._index):
+            return False
+        self._runtime.consume_channel(resolved, self._index)
         return True
 
-    def delay(self, n: int, *, require: RuntimeCondition | None = None) -> DelayOp:
-        """Block for *n* cycles.
-
-        ``delay(0)`` is a no-op and checks no guard.  For ``n > 0``, ``require``
-        is checked on blocked cycles from the starting cycle through the cycle
-        before resume; the resume cycle itself is not checked by this delay.
-        """
+    def delay(
+        self,
+        n: int,
+        *,
+        require: Waveform | Callable[[], bool] | bool | None = None,
+        require_message: Message | None = None,
+    ) -> None:
         if isinstance(n, bool) or not isinstance(n, int):
             raise PatternError('ctx.delay(n) requires an integer cycle count')
         if n < 0:
             raise PatternError(f'ctx.delay(n) requires n >= 0, got {n}')
-        return DelayOp(n=n, start_index=self._index, require=require)
+        if n == 0:
+            return
+        target_index = self._index + n
+        while self._index < target_index:
+            self._guard_operation()
+            self._wait_next(require, require_message)
 
     def capture(self, name: str, value: Any, mode: CaptureMode = 'last') -> None:
+        self._guard_operation()
         if isinstance(value, Waveform):
             value = self.value(value)
         if mode == 'last':
@@ -235,36 +196,16 @@ class PatternContext:
         else:
             raise PatternError("ctx.capture() mode must be 'last', 'first', or 'list'")
 
-    def require(self, cond: RuntimeCondition) -> None:
+    def require(
+        self, cond: Waveform | Callable[[], bool] | bool, *, message: Message | None = None
+    ) -> None:
+        self._guard_operation()
         if not self._runtime.eval_condition(cond, self):
-            raise _RequireViolation
-
-
-@dataclass
-class PatternInstance:
-    coroutine: Any
-    context: PatternContext | None
-    start_index: int
-    order: int
-    captures: dict[str, Any] = field(default_factory=dict)
-    current_op: RuntimeOp | None = None
-    status: MatchStatus | None = None
-    end_index: int = 0
-    return_value: Any = None
-    discarded: bool = False
+            raise _StopPattern(self._require_status(message))
 
 
 class PatternRuntime:
-    """Unified cycle-major runtime for programmable and declarative patterns.
-
-    A new candidate instance starts at each scanned cycle.  Each active
-    coroutine then runs as far as possible in that same cycle until it completes,
-    discards itself by returning ``None``, or yields a blocking ``RuntimeOp``.
-    Declarative patterns are compiled to the same coroutine shape, so there is
-    only one production execution backend.
-    """
-
-    _next_epoch = 0
+    """Synchronous start-major runtime for declarative and programmable patterns."""
 
     def __init__(
         self,
@@ -272,41 +213,74 @@ class PatternRuntime:
         *,
         axis: Waveform | None = None,
         timeout_cycles: int | None = None,
-        max_active: int = 32768,
+        timeout_message: str | None = None,
     ) -> None:
         self._program = program
         self._timeout_cycles = timeout_cycles
-        self._max_active = max_active
-        PatternRuntime._next_epoch += 1
-        self._epoch = PatternRuntime._next_epoch
-        self._key_channels: dict[Hashable, Channel] = {}
+        self._timeout_message = timeout_message
         self._axis: Waveform | None = axis
+        self._start_cycle: int | None = None
+        self._end_cycle: int | None = None
+        self._key_channels: dict[Hashable, np.ndarray] = {}
         self._validated_waveform_ids: set[int] = set()
         if axis is not None:
             self._validated_waveform_ids.add(id(axis))
         self._order = 0
 
-    def match(self, start_cycle: int | None = None, end_cycle: int | None = None) -> MatchResult:
+    @cached_property
+    def scan_start_index(self) -> int:
+        if self._start_cycle is None:
+            return 0
+        axis = self._require_axis()
+        return int(np.searchsorted(axis.clock, self._start_cycle))
+
+    @cached_property
+    def scan_end_index(self) -> int:
+        axis = self._require_axis()
+        if self._end_cycle is None:
+            return len(axis.value)
+        return int(np.searchsorted(axis.clock, self._end_cycle))
+
+    def match(self, start_cycle: int | None = None, end_cycle: int | None = None) -> MatchRecords:
         completed = self._run(start_cycle, end_cycle)
         for inst in completed:
-            if inst.status == MatchStatus.OK and inst.return_value is not OK:
-                raise PatternError('programmable Pattern .match() body must return ctx.OK or None')
-        completed = [inst for inst in completed if not inst.discarded]
-        axis = self._axis
-        if axis is None:
-            raise PatternError(
-                'Pattern runtime could not determine scan axis; pass axis=<waveform>'
-            )
-        completed.sort(key=lambda i: (int(axis.clock[i.start_index]), i.order))
-        start_arr = np.array([int(axis.clock[i.start_index]) for i in completed], dtype=np.int64)
-        end_arr = np.array([int(axis.clock[i.end_index]) for i in completed], dtype=np.int64)
-        status_arr = np.array([i.status for i in completed], dtype=np.uint8)
-        duration_arr = end_arr - start_arr + 1
-        clock = start_arr.copy()
-        time = start_arr.copy()
+            if isinstance(inst.status, MatchStatus.OK) and not isinstance(
+                inst.return_value, MatchStatus.OK
+            ):
+                raise PatternError('pattern match body must return ctx.OK or None')
+        return self._records([inst for inst in completed if not inst.discarded])
 
-        def wf(value: np.ndarray) -> Waveform:
-            return Waveform(value, clock.copy(), time.copy())
+    def collect(self, start_cycle: int | None = None, end_cycle: int | None = None) -> list[Any]:
+        completed = self._run(start_cycle, end_cycle)
+        axis = self._require_axis()
+        for inst in completed:
+            if inst.status is None or isinstance(inst.status, MatchStatus.OK):
+                continue
+            raise PatternError(
+                f'Pattern failed with {inst.status}; '
+                f'start_cycle={axis.clock[inst.start_index]}, '
+                f'failure_cycle={axis.clock[inst.end_index]}'
+            )
+        return [inst.return_value for inst in completed if inst.return_value is not None]
+
+    def _records(self, completed: list[PatternInstance]) -> MatchRecords:
+        axis = self._require_axis()
+        completed.sort(key=lambda i: (int(axis.clock[i.start_index]), i.order))
+        start_index_arr = np.array([i.start_index for i in completed], dtype=np.int64)
+        end_index_arr = np.array([i.end_index for i in completed], dtype=np.int64)
+        start_cycle_arr = np.array(
+            [int(axis.clock[i.start_index]) for i in completed], dtype=np.int64
+        )
+        end_cycle_arr = np.array([int(axis.clock[i.end_index]) for i in completed], dtype=np.int64)
+        start_time_arr = np.array(
+            [int(axis.time[i.start_index]) for i in completed], dtype=np.int64
+        )
+        end_time_arr = np.array([int(axis.time[i.end_index]) for i in completed], dtype=np.int64)
+        duration_arr = end_index_arr - start_index_arr + 1
+        status_arr = np.array([i.status for i in completed], dtype=object)
+
+        def row_wf(value: np.ndarray) -> Waveform:
+            return Waveform(value, start_cycle_arr.copy(), start_time_arr.copy())
 
         all_keys: set[str] = set()
         for inst in completed:
@@ -319,38 +293,21 @@ class PatternRuntime:
                 arr = np.array(vals, dtype=np.int64)
             except (ValueError, TypeError, OverflowError):
                 arr = np.array(vals, dtype=object)
-            captures[name] = wf(arr)
+            captures[name] = row_wf(arr)
 
-        return MatchResult(
-            start=wf(start_arr),
-            end=wf(end_arr),
-            duration=wf(duration_arr),
-            status=wf(status_arr),
+        return MatchRecords(
+            start=Waveform(start_index_arr, start_cycle_arr, start_time_arr),
+            end=Waveform(end_index_arr, end_cycle_arr, end_time_arr),
+            duration=row_wf(duration_arr),
+            status=row_wf(status_arr),
             captures=captures,
         )
 
-    def collect(self, start_cycle: int | None = None, end_cycle: int | None = None) -> list[Any]:
-        completed = self._run(start_cycle, end_cycle)
-        axis = self._axis
-        if axis is None:
-            raise PatternError(
-                'Pattern runtime could not determine scan axis; pass axis=<waveform>'
-            )
-        for inst in completed:
-            if inst.status is None or inst.status == MatchStatus.OK:
-                continue
-            kind = {
-                MatchStatus.TIMEOUT: 'timed out',
-                MatchStatus.REQUIRE_VIOLATED: 'require failed',
-            }[inst.status]
-            raise PatternError(
-                f'Pattern {kind}; '
-                f'start_cycle={axis.clock[inst.start_index]}, '
-                f'failure_cycle={axis.clock[inst.end_index]}'
-            )
-        return [inst.return_value for inst in completed if inst.return_value is not None]
-
-    def eval_condition(self, cond: Any, ctx: PatternContext) -> bool:
+    def eval_condition(
+        self, cond: Waveform | Callable[[], bool] | bool | None, ctx: PatternContext
+    ) -> bool:
+        if cond is None:
+            return True
         if isinstance(cond, Waveform):
             self.note_waveform(cond)
             return bool(cond.value[ctx.index])
@@ -364,9 +321,6 @@ class PatternRuntime:
         )
 
     def note_waveform(self, waveform: Waveform) -> None:
-        # This is the single clock-axis validation point for both APIs.  The
-        # first observed waveform establishes the scan axis; every later
-        # waveform must have the same clock array, not merely the same length.
         waveform_id = id(waveform)
         if waveform_id in self._validated_waveform_ids:
             return
@@ -380,7 +334,11 @@ class PatternRuntime:
             raise PatternError('Waveform clock arrays are not aligned')
         self._validated_waveform_ids.add(waveform_id)
 
-    def resolve_channel(self, key: Any, ctx: PatternContext) -> Channel:
+    def resolve_channel(
+        self,
+        key: Channel | Hashable | Callable[[int, dict[str, Any]], Channel | Hashable],
+        ctx: PatternContext,
+    ) -> Hashable:
         if callable(key) and not isinstance(key, Channel):
             key = key(ctx.index, ctx.captures)
         if isinstance(key, Channel):
@@ -389,138 +347,77 @@ class PatternRuntime:
             raise PatternError(
                 f'channel must be a Channel or hashable key, got {type(key).__name__}'
             )
-        return self._key_channels.setdefault(key, Channel())
+        return key
 
-    def channel_free(self, channel: Channel, index: int) -> bool:
-        return channel._consumed_epoch != self._epoch or channel._consumed_at != index
+    def channel_free(self, channel: Hashable, index: int) -> bool:
+        mask = self._key_channels.get(channel)
+        if mask is None or index >= len(mask):
+            return True
+        return not bool(mask[index])
 
-    def consume_channel(self, channel: Channel, index: int) -> None:
-        channel._consumed_epoch = self._epoch
-        channel._consumed_at = index
+    def consume_channel(self, channel: Hashable, index: int) -> None:
+        mask = self._key_channels.get(channel)
+        if mask is None:
+            length = self.scan_end_index if self._axis is not None else index + 1
+            mask = np.zeros(length, dtype=bool)
+            self._key_channels[channel] = mask
+        elif self._axis is not None and len(mask) < self.scan_end_index:
+            new_mask = np.zeros(self.scan_end_index, dtype=bool)
+            new_mask[: len(mask)] = mask
+            self._key_channels[channel] = mask = new_mask
+        elif index >= len(mask):
+            new_mask = np.zeros(index + 1, dtype=bool)
+            new_mask[: len(mask)] = mask
+            self._key_channels[channel] = mask = new_mask
+        mask[index] = True
 
-    def _run(
-        self,
-        start_cycle: int | None,
-        end_cycle: int | None,
-    ) -> list[PatternInstance]:
-        ref_wf = self._axis
-        start_index = 0
-        end_index: int | None = None
-        if ref_wf is not None:
-            n = len(ref_wf.value)
-            start_index = (
-                0 if start_cycle is None else int(np.searchsorted(ref_wf.clock, start_cycle))
-            )
-            end_index = n if end_cycle is None else int(np.searchsorted(ref_wf.clock, end_cycle))
-            start_index = max(0, min(start_index, n))
-            end_index = max(start_index, min(end_index, n))
-        elif start_cycle is not None or end_cycle is not None:
+    def _run_candidate(self, start_index: int, order: int) -> PatternInstance:
+        inst = PatternInstance(start_index=start_index, order=order, end_index=start_index)
+        ctx = PatternContext(self, inst, start_index)
+        try:
+            inst.return_value = self._program(ctx)
+        except _StopPattern as stop:
+            inst.status = stop.status
+        else:
+            if inst.return_value is None:
+                inst.discarded = True
+            else:
+                inst.status = MatchStatus.OK()
+        return inst
+
+    def _run(self, start_cycle: int | None, end_cycle: int | None) -> list[PatternInstance]:
+        self._start_cycle = start_cycle
+        self._end_cycle = end_cycle
+
+        if self._axis is None and (start_cycle is not None or end_cycle is not None):
             raise PatternError(
                 'Pattern runtime requires axis=<waveform> when start/end cycle is used'
             )
 
-        active: list[PatternInstance] = []
-        completed: list[PatternInstance] = []
+        start_index = self.scan_start_index
+        end_index: int | None = self.scan_end_index if self._axis is not None else None
 
+        completed: list[PatternInstance] = []
         t = start_index
         while end_index is None or t < end_index:
-            assert self._program is not None
-            inst = PatternInstance(
-                coroutine=None,
-                context=None,
-                start_index=t,
-                order=self._order,
-            )
+            inst = self._run_candidate(t, self._order)
             self._order += 1
-            ctx = PatternContext(self, inst, t)
-            inst.context = ctx
-            inst.coroutine = self._program(ctx)
-            active.append(inst)
-
-            still_active: list[PatternInstance] = []
-            for inst in active:
-                self._advance_instance(inst, t)
-                if inst.status is None and not inst.discarded:
-                    still_active.append(inst)
-                else:
-                    completed.append(inst)
-            active = still_active
-
-            if len(active) > self._max_active:
-                raise PatternError(
-                    f'programmable Pattern exceeded max_active={self._max_active}; '
-                    'too many candidates are suspended. Use a current-cycle start guard '
-                    'such as "if ctx.value(fire): ..." instead of starting many '
-                    'candidates with "await ctx.wait(...)", or increase max_active '
-                    'if this accumulation is intentional.'
-                )
-
-            if t == start_index and ref_wf is None:
-                if self._axis is not None:
-                    ref_wf = self._axis
-                    end_index = len(ref_wf.value)
-                else:
-                    raise PatternError(
-                        'Pattern runtime could not determine scan axis; pass axis=<waveform>'
-                    )
-            t += 1
-
-        assert ref_wf is not None
-        stop_index = end_index if end_index is not None else len(ref_wf.value)
-        last_index = max(start_index, stop_index) - 1
-        for inst in active:
-            # Instances still suspended when the scan window closes are reported
-            # as TIMEOUT with an inclusive end index at the final scanned cycle.
-            inst.status = MatchStatus.TIMEOUT
-            inst.end_index = last_index
             completed.append(inst)
+
+            if self._axis is None:
+                raise PatternError(
+                    'Pattern runtime could not determine scan axis; pass axis=<waveform>'
+                )
+            if end_index is None:
+                end_index = self.scan_end_index
+
+            t += 1
 
         return completed
 
-    def _advance_instance(self, inst: PatternInstance, index: int) -> None:
-        if self._timeout_cycles is not None and index - inst.start_index + 1 > self._timeout_cycles:
-            inst.end_index = index
-            inst.status = MatchStatus.TIMEOUT
-            return
-        ctx = inst.context
-        assert ctx is not None
-        ctx._index = index
-        steps = 0
-        while inst.status is None and not inst.discarded:
-            steps += 1
-            if steps > _MAX_SAME_CYCLE_STEPS:
-                # Protect against a program that loops forever without yielding a
-                # blocking op (for example, repeated delay(0) transitions).
-                raise PatternError('programmable Pattern exceeded same-cycle step limit')
-
-            if inst.current_op is not None:
-                try:
-                    if not inst.current_op.ready(ctx, self):
-                        return
-                    inst.current_op.commit(ctx, self)
-                except _RequireViolation:
-                    inst.end_index = index
-                    inst.status = MatchStatus.REQUIRE_VIOLATED
-                    return
-                inst.current_op = None
-
-            try:
-                yielded = inst.coroutine.send(None)
-            except StopIteration as exc:
-                inst.return_value = exc.value
-                inst.end_index = index
-                if exc.value is None:
-                    inst.discarded = True
-                else:
-                    inst.status = MatchStatus.OK
-                return
-            except _RequireViolation:
-                inst.end_index = index
-                inst.status = MatchStatus.REQUIRE_VIOLATED
-                return
-
-            if not isinstance(yielded, RuntimeOp):
-                raise PatternError(
-                    f'programmable Pattern yielded unsupported awaitable {type(yielded)}'
-                )
-            inst.current_op = yielded
+    def _require_axis(self) -> Waveform:
+        if self._axis is None:
+            raise PatternError(
+                'Pattern runtime could not determine scan axis; pass axis=<waveform>'
+            )
+        return self._axis

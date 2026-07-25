@@ -135,14 +135,15 @@ with VcdReader("fifo_tb.vcd") as f:
 There are two ways to describe a pattern:
 
 - **Declarative** — chain steps like `.wait()`, `.consume()`, `.capture()`, `.loop()`. Best for fixed transaction flows.
-- **Programmable** — pass a handler function to `Pattern(...)`. Best for dynamic branches, per-ID routing, and other complex flows.
+- **Programmable** — pass a normal handler function to `match(...)` or `collect(...)`. Best for dynamic branches, per-ID routing, and other complex flows.
 
 #### Declarative examples
 
 **AXI-Lite read latency**
 
 ```python
-from wavekit import VcdReader, Pattern
+from wavekit import VcdReader
+from wavekit.pattern import Pattern, match, collect
 
 with VcdReader("axi_tb.vcd") as f:
     clk     = "tb.clk"
@@ -152,13 +153,13 @@ with VcdReader("axi_tb.vcd") as f:
     rready  = f.load_waveform("tb.dut.rready",      clock=clk)
     rdata   = f.load_waveform("tb.dut.rdata[31:0]", clock=clk)
 
-    result = (
-        Pattern(timeout=256)
+    pattern = (
+        Pattern()
         .wait(arvalid & arready)   # AR handshake → transaction starts
         .wait(rvalid  & rready)    # R  handshake → transaction ends
         .capture("rdata", rdata)
-        .match()
     )
+    result = match(pattern, timeout=256)
 
     ok = result.filter_ok()
     print(f"Read latencies (cycles): {ok.duration.value}")
@@ -170,13 +171,12 @@ with VcdReader("axi_tb.vcd") as f:
 ```python
 beat = Pattern().consume(wvalid & wready, channel="w").capture("beats", wdata, mode="list")
 
-result = (
+pattern = (
     Pattern()
     .wait(awvalid & awready)   # AW handshake → burst starts
     .loop(beat, until=wlast)   # collect each beat until wlast
-    .timeout(512)
-    .match()
 )
+result = match(pattern, timeout=512)
 
 for i, inst in enumerate(result.filter_ok()):
     print(f"Burst {i}: {len(inst.captures['beats'])} beats")
@@ -187,12 +187,12 @@ for i, inst in enumerate(result.filter_ok()):
 ```python
 stall = valid & (ready == 0)
 
-result = (
+pattern = (
     Pattern()
     .wait(stall.rising_edge())             # stall begins
     .loop(Pattern().delay(1), when=stall)  # keep waiting until stall ends
-    .match()
 )
+result = match(pattern)
 
 stalls = result.filter_ok()
 print(f"Stall durations: {stalls.duration.value} cycles")
@@ -208,13 +208,13 @@ When R beats from different IDs interleave on the bus, match each AR to its resp
 arfire = arvalid & arready   # precompute outside the handler
 rfire = rvalid & rready
 
-async def read_burst(ctx):
+def read_burst(ctx):
     if ctx.value(arfire):
         my_id = ctx.value(arid)
         beats = []
 
         while True:
-            await ctx.consume(
+            ctx.consume(
                 lambda: ctx.value(rfire) and ctx.value(rid) == my_id,
                 channel=("r", my_id),
             )
@@ -225,7 +225,7 @@ async def read_burst(ctx):
         return {"arid": my_id, "beats": beats}
     return None
 
-records = Pattern(read_burst, timeout=64).collect()
+records = collect(read_burst, timeout=64)
 ```
 
 Some tips for programmable patterns:
@@ -347,28 +347,25 @@ changed = wave != wave.back(3)
 
 | API | Description |
 |-----|-------------|
-| `Pattern(timeout=..., max_active=...)` | Create a Declarative Pattern. Add steps with builder methods, then call `.match()`. |
-| `Pattern(async_fn, timeout=..., max_active=...)` | Create a Programmable Pattern. The async function receives `ctx`. |
-| `.match(start_cycle=None, end_cycle=None)` | Run the pattern and return `MatchResult`. In a Programmable Pattern, return `ctx.OK` for success and `None` to skip. |
-| `.collect(start_cycle=None, end_cycle=None)` | Programmable Pattern only. Collect each non-`None` Python return value. |
+| `Pattern()` | Create a declarative Pattern. Add steps with builder methods; execution options live on `match()` / `collect()`. |
+| `match(pattern_or_body, *, axis=None, timeout=None, start_cycle=None, end_cycle=None)` | Run a declarative Pattern or programmable check body and return `MatchRecords`. Check bodies return `ctx.OK` or `None`. |
+| `collect(body, *, axis=None, timeout=None, start_cycle=None, end_cycle=None)` | Run a programmable extraction body and collect each non-`None` Python return value. |
 
 **Declarative Steps**
 
 | Method | Description |
 |--------|-------------|
-| `.wait(cond, *, require=None)` | Block until `cond` is True without consuming the event. Resumes in the same cycle when already true; use `.delay(1)` for next-cycle behavior. `require` is checked each waiting cycle (failure → `REQUIRE_VIOLATED`). |
-| `.consume(cond, channel, *, require=None)` | Block until `cond` is True and this instance can exclusively consume from `channel`. Resumes in the same cycle on success. Use this for FIFO request/response pairing and per-key routing. |
-| `.delay(n, *, require=None)` | Advance `n` cycles. `delay(0)` is a no-op. `require` must hold every cycle. |
+| `.wait(cond, *, require=None, require_message=None)` | Block until `cond` is True without consuming the event. Resumes in the same cycle when already true; use `.delay(1)` for next-cycle behavior. `require` is checked each waiting cycle (failure → `MatchStatus.RequireViolated`). |
+| `.consume(cond, channel, *, require=None, require_message=None)` | Block until `cond` is True and this instance can exclusively consume from `channel`. Resumes in the same cycle on success. Use this for FIFO request/response pairing and per-key routing. |
+| `.delay(n, *, require=None, require_message=None)` | Advance `n` cycles. `delay(0)` is a no-op. `require` must hold every cycle. |
 | `.capture(name, signal, *, mode='last')` | Record signal value at current cycle. `mode='last'` (default) overwrites; `'first'` keeps the first write; `'list'` appends to a list. |
-| `.require(cond)` | Assert condition; fail with `REQUIRE_VIOLATED` if False. |
+| `.require(cond)` | Assert condition; fail with `MatchStatus.RequireViolated` if False. |
 | `.loop(body, *, until=None, when=None)` | `until`: do-while (exit when True after body). `when`: while (exit when False before body). |
 | `.repeat(body, n)` | Execute body exactly `n` times. `n` may be a callable. |
 | `.branch(cond, true_body, false_body)` | Conditional branch. |
-| `.timeout(max_cycles)` | Terminate unfinished instances with `TIMEOUT`. |
 
 The same time and ownership operations are available inside Programmable
-Patterns as `await ctx.wait(...)`, `await ctx.consume(...)`, and
-`await ctx.delay(...)`.
+patterns as `ctx.wait(...)`, `ctx.consume(...)`, and `ctx.delay(...)`.
 
 **Programmable Context**
 
@@ -377,16 +374,17 @@ Patterns as `await ctx.wait(...)`, `await ctx.consume(...)`, and
 | `ctx.value(waveform, offset=0)` | Read a scalar value at the current sample plus optional offset. |
 | `ctx.cycle(waveform, offset=0)` | Read the cycle number at the current sample plus optional offset. |
 | `ctx.time(waveform, offset=0)` | Read the timestamp at the current sample plus optional offset. |
-| `await ctx.wait(cond, require=None)` | Observe cycles until `cond` is true; does not consume the event. |
-| `await ctx.consume(cond, channel, require=None)` | Wait for `cond` and exclusively consume from `channel`. |
-| `await ctx.delay(n, require=None)` | Advance `n` cycles. |
-| `ctx.capture(name, value, mode='last')` | Record a capture for programmable `.match()`. |
-| `ctx.OK` | Return from programmable `.match()` to record a successful match. |
+| `ctx.wait(cond, require=None, require_message=None)` | Observe cycles until `cond` is true; does not consume the event. |
+| `ctx.consume(cond, channel, require=None, require_message=None)` | Wait for `cond` and exclusively consume from `channel`. |
+| `ctx.delay(n, require=None, require_message=None)` | Advance `n` cycles. |
+| `ctx.capture(name, value, mode='last')` | Record a capture for programmable `match()`. |
+| `ctx.OK` | Return from programmable `match()` to record a successful match. |
 
 **Dynamic callbacks**
 
-Declarative callbacks use `callable(index, captures)`. `index` is the absolute
-waveform sample index; it is not rebased when `match(start_cycle=...)` is used.
+Declarative callbacks use `callable(index, captures)`. `index` is the current
+sample index into `waveform.value/clock/time`, not a cycle number, and is not
+rebased when `match(start_cycle=...)` is used.
 
 **Channels and consume vs. wait**
 
@@ -401,14 +399,14 @@ instances sharing the same channel key consume from the same queue.
 
 ```python
 from collections import defaultdict
-from wavekit import Channel, Pattern
+from wavekit.pattern import Channel, Pattern, match
 
 # Multi-bank cache: each bank has its own response port, so two banks
 # can return data in the *same* cycle. A per-bank Channel lets each in-flight
 # read consume from its own bank while preserving FIFO order within that bank.
 banks = defaultdict(Channel)
 
-result = (
+pattern = (
     Pattern()
     .wait(req_valid)
     .capture('bank', req_addr & 1)
@@ -418,22 +416,22 @@ result = (
     )
     .capture('rdata',
         lambda i, cap: bank_data[cap['bank']].value[i])
-    .match()
 )
+result = match(pattern)
 ```
 
-**`MatchResult`**
+**`MatchRecords`**
 
 | Field | Description |
 |-------|-------------|
-| `.start` / `.end` | Start and end cycle of each match (both inclusive). |
-| `.duration` | `end - start + 1` cycles. |
-| `.status` | `MatchStatus.OK`, `TIMEOUT`, or `REQUIRE_VIOLATED`. |
+| `.start` / `.end` | Point Waveforms. `.value` is the waveform-array sample index, `.clock` is the absolute cycle, and `.time` is the simulation timestamp. End is inclusive. |
+| `.duration` | `end.value - start.value + 1` sampled cycles. |
+| `.status` | `MatchStatus.OK()`, `MatchStatus.Timeout(...)`, or `MatchStatus.RequireViolated(...)`. |
 | `.captures` | `dict[str, Waveform]` of captured values. |
-| `.ok` | Boolean Waveform where `status == MatchStatus.OK`. |
-| `.failed` | Boolean Waveform where `status != MatchStatus.OK`. |
+| `.ok` | Boolean Waveform where `status == MatchStatus.OK()`. |
+| `.failed` | Boolean Waveform where `status != MatchStatus.OK()`. |
 | `.filter_ok()` | Return only `OK` matches. |
-| `.filter_status(status)` | Return only matches with the given `MatchStatus` or integer status. |
+| `.filter_status(status)` | Return only matches with the given status object or status class. |
 | `.filter_failed()` | Return only non-OK matches. |
 
 ---
