@@ -126,7 +126,9 @@ with VcdReader("fifo_tb.vcd") as f:
 它有两种写法：
 
 - **声明式** — 用 `.wait()`、`.consume()`、`.capture()`、`.loop()`等步骤串成链式调用。适合固定流程。
-- **编程式** — 把普通处理函数传给 `match(...)` 或 `collect(...)`。适合动态分支、按 ID 路由等复杂流程。
+- **编程式** — 把处理函数传给 `match(...)` 或 `collect(...)`。适合动态分支、按 ID 路由等复杂流程。
+
+`match(pattern)` 返回 `MatchRecords`，而 `collect(body)` 返回 Python `list`，用于保存提取出的值。
 
 #### 声明式示例
 
@@ -150,7 +152,7 @@ with VcdReader("axi_tb.vcd") as f:
         .wait(rvalid  & rready)    # R  握手 → 事务结束
         .capture("rdata", rdata)
     )
-    result = match(pattern, timeout=256)
+    result = match(pattern)
 
     ok = result.filter_ok()
     print(f"读延迟（周期）: {ok.duration.value}")
@@ -167,7 +169,7 @@ pattern = (
     .wait(awvalid & awready)   # AW 握手 → 突发开始
     .loop(beat, until=wlast)   # 收集每拍数据，直到 wlast
 )
-result = match(pattern, timeout=512)
+result = match(pattern)
 
 for i, inst in enumerate(result.filter_ok()):
     print(f"突发 {i}: {len(inst.captures['beats'])} 拍")
@@ -191,32 +193,56 @@ print(f"Stall 持续时间: {stalls.duration.value} 周期")
 
 #### 编程式示例
 
-**按 ID 匹配乱序 AXI 读响应**
+**DMA 风格命令流**
 
-当总线上不同 ID 的 R 拍交替出现时，按 `arid`把每个 AR 请求和属于它的响应拍一一配对，并把结果收集成 Python dict。
+当命令的 opcode 会改变后续时序形状时，用编程式控制流更自然。
+这个例子里，写命令包含一个数据 burst 和状态响应；读命令则包含响应和读数据 burst。
 
 ```python
-arfire = arvalid & arready   # 在函数外预先算好
-rfire = rvalid & rready
+cmd_fire = cmd_valid & cmd_ready   # 在函数外预先算好
+w_fire = w_valid & w_ready
+rsp_fire = rsp_valid & rsp_ready
+r_fire = r_valid & r_ready
 
-def read_burst(ctx):
-    if ctx.value(arfire):
-        my_id = ctx.value(arid)
-        beats = []
+OP_READ = 0
+OP_WRITE = 1
 
-        while True:
-            ctx.consume(
-                lambda: ctx.value(rfire) and ctx.value(rid) == my_id,
-                channel=("r", my_id),
-            )
-            beats.append(int(ctx.value(rdata)))
-            if ctx.value(rlast):
-                break
+def read_dma_cmd(ctx):
+    if not ctx.value(cmd_fire):
+        return None
 
-        return {"arid": my_id, "beats": beats}
+    op = int(ctx.value(cmd_op))
+    addr = int(ctx.value(cmd_addr))
+    length = int(ctx.value(cmd_len))
+
+    if op == OP_WRITE:
+        data = []
+        for _ in range(length):
+            ctx.consume(w_fire, channel="wdata")
+            data.append(int(ctx.value(w_data)))
+
+        ctx.consume(rsp_fire, channel="rsp")
+        return {
+            "op": "write",
+            "addr": addr,
+            "data": data,
+            "status": int(ctx.value(rsp_status)),
+        }
+
+    if op == OP_READ:
+        ctx.consume(rsp_fire, channel="rsp")
+        data = []
+        for _ in range(length):
+            ctx.consume(r_fire, channel="rdata")
+            data.append(int(ctx.value(r_data)))
+
+        return {"op": "read", "addr": addr, "data": data}
+
+    ctx.require(False, message=f"unknown DMA op {op}")
     return None
 
-records = collect(read_burst, timeout=64)
+commands = collect(read_dma_cmd)
+print(f"捕获到 {len(commands)} 个 command")
 ```
 
 一些编程式 Pattern 的使用建议：
@@ -225,6 +251,12 @@ records = collect(read_burst, timeout=64)
   避免每周期反复构造。
 - 函数开头用 `if ctx.value(fire): ...` 判断当前周期是不是事务起点，
   不是起点就 `return None`。
+- 如果你需要的是“非阻塞轮询”或多个候选通道之间的仲裁，可以用
+  `ctx.try_consume(...)`。像这种线性的 burst 例子，`ctx.consume(...)`
+  更直接。
+- 如果某个阻塞步骤必须限制等待时间，再加 `timeout=<cycles>`。
+  在 `match()` 里 timeout 会变成 `MatchStatus.Timeout(...)`；在 `collect()`
+  里会抛出 `PatternError`。
 
 
 ## API 参考
@@ -332,8 +364,8 @@ changed = wave != wave.back(3)
 | API | 说明 |
 |-----|------|
 | `Pattern()` | 创建声明式 Pattern。继续调用 `.wait()`、`.capture()` 等方法添加步骤；执行参数放在 `match()` / `collect()`。 |
-| `match(pattern_or_body, *, axis=None, timeout=None, start_cycle=None, end_cycle=None)` | 运行声明式 Pattern 或编程式检查函数，返回 `MatchRecords`。检查函数中 `return ctx.OK` 表示匹配成功，`return None` 表示跳过。 |
-| `collect(body, *, axis=None, timeout=None, start_cycle=None, end_cycle=None)` | 运行编程式提取函数，收集所有非 `None` Python 对象。 |
+| `match(pattern_or_body, *, axis=None, timeout=None, timeout_message=None, start_cycle=None, end_cycle=None)` | 运行声明式 Pattern 或编程式检查函数，返回 `MatchRecords`。检查函数中 `return ctx.OK` 表示匹配成功，`return None` 表示跳过。 |
+| `collect(body, *, axis=None, timeout=None, timeout_message=None, start_cycle=None, end_cycle=None)` | 运行编程式提取函数，收集所有非 `None` Python 对象。 |
 
 **声明式步骤**
 
@@ -360,15 +392,19 @@ changed = wave != wave.back(3)
 | `ctx.time(waveform, offset=0)` | 读取当前采样点的时间戳，可带 `offset`。 |
 | `ctx.wait(cond, require=None, require_message=None)` | 等到条件为真；只观察，不消费事件。 |
 | `ctx.consume(cond, channel, require=None, require_message=None)` | 等到条件为真，并从 `channel` 独占消费这个事件。 |
+| `ctx.try_consume(cond, channel)` | 非阻塞地轮询 `channel`。只有条件和通道都可用时才返回 `True`。 |
 | `ctx.delay(n, require=None, require_message=None)` | 前进 n 个周期。 |
 | `ctx.capture(name, value, mode='last')` | 在编程式 `match()` 中记录捕获值。 |
 | `ctx.OK` | 在编程式 `match()` 中返回，表示这次匹配成功。 |
 
 **动态回调**
 
-声明式 Pattern 的动态回调写成 `callable(index, captures)`。这里的 `index`
-是当前波形数组采样下标，可直接索引 `waveform.value/clock/time`，不是 cycle；
-即使使用 `match(start_cycle=...)` 缩小扫描范围，它也不会从窗口起点重新计数。
+声明式 Pattern 的动态回调写成 `callable(index, captures)`。传给
+`ctx.wait()`、`ctx.consume()`、`ctx.try_consume()`、`ctx.delay()` 或
+`ctx.require()` 的编程式动态回调用零参数 callable，通过闭包访问 `ctx`。
+`index` / `ctx.index` 是当前波形数组采样下标，可直接索引
+`waveform.value/clock/time`，不是 cycle；即使使用 `match(start_cycle=...)`
+缩小扫描范围，它也不会从窗口起点重新计数。
 
 **Channel 与 consume 的关系**
 
@@ -376,9 +412,9 @@ changed = wave != wave.back(3)
 属于它的响应配对——所有实例都会看到同一个事件。`consume()` 解决了
 这个问题：每个周期只把事件交给一个实例，按 FIFO 顺序。
 
-`Channel` 就是 `consume()` 用的 FIFO 队列。可以传 `Channel` 对象、
+`Channel` 是 `consume()` 的逻辑占用键。可以传 `Channel` 对象、
 hashable key，或者动态回调给 `consume(..., channel=...)`。
-共享同一个 channel key 的实例会从同一个队列里消费。
+共享同一个 channel key 的实例会竞争同一个逻辑通道。
 
 ```python
 from collections import defaultdict
@@ -416,6 +452,8 @@ result = match(pattern)
 | `.filter_ok()` | 只保留状态为 `OK` 的匹配实例。 |
 | `.filter_status(status)` | 只保留指定 status 对象或 status class 的匹配实例。 |
 | `.filter_failed()` | 只保留非 OK 的匹配实例。 |
+
+`MatchRecords[i]` 返回单个 `MatchRecord`，切片则返回新的 `MatchRecords`。
 
 ## 开发
 

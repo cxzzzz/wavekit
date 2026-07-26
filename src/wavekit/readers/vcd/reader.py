@@ -22,16 +22,21 @@ class VcdSignal(Signal):
 
     @property
     def children(self) -> tuple[Node, ...]:
+        """Return no children; VCD signals are leaf hierarchy nodes."""
         return ()
 
 
 @dataclass(frozen=True, eq=False)
 class VcdScope(Scope):
+    """Scope node from a VCD hierarchy."""
+
     vcdvcd_scope: VcdVcdScope = field(repr=False, compare=False)
     reader: VcdReader = field(repr=False, compare=False)
 
     @cached_property
     def children(self) -> tuple[Node, ...]:
+        """Return direct child scopes and signals from this VCD scope."""
+
         def signal_list() -> list[Signal]:
             range_re = re.compile(r'\[(\d+):(\d+)\]$')
             full_scope_name = self.full_name
@@ -77,6 +82,13 @@ class VcdScope(Scope):
 
 
 class VcdReader(Reader[VcdSignal]):
+    """Read VCD waveform files via :mod:`vcdvcd`.
+
+    Supports the common :class:`~wavekit.readers.base.Reader` APIs, including
+    hierarchy traversal, expression evaluation, and clock-synchronised waveform
+    loading.
+    """
+
     def __init__(self, file: str):
         super().__init__()
         self.file = file
@@ -84,6 +96,7 @@ class VcdReader(Reader[VcdSignal]):
 
     @cached_property
     def top_scopes(self) -> tuple[Scope, ...]:
+        """Return immutable top-level scopes in the VCD hierarchy."""
         return tuple(
             VcdScope(base_name=k, parent=None, vcdvcd_scope=v, reader=self)
             for k, v in self.file_handle.scopes.items()
@@ -92,10 +105,12 @@ class VcdReader(Reader[VcdSignal]):
 
     @property
     def begin_time(self) -> int:
+        """Return the first timestamp stored in the VCD file."""
         return self.file_handle.begintime
 
     @property
     def end_time(self) -> int:
+        """Return the last timestamp stored in the VCD file."""
         return self.file_handle.endtime
 
     def _load_value_changes(
@@ -155,4 +170,9 @@ class VcdReader(Reader[VcdSignal]):
         return np.empty((0, 2), dtype=dtype)
 
     def close(self):
+        """Close this VCD reader.
+
+        The underlying :mod:`vcdvcd` reader keeps data in memory and does not
+        expose an explicit close operation, so this method is a no-op.
+        """
         pass

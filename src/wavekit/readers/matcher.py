@@ -51,6 +51,18 @@ class Capture:
     definition: str | None = None
 
     def with_prefix(self, prefix: str) -> Capture:
+        """Return a copy with *prefix* prepended to ``path``.
+
+        Parameters
+        ----------
+        prefix:
+            Hierarchical prefix to prepend, without a trailing dot.
+
+        Returns
+        -------
+        Capture
+            New capture with ``path`` rewritten as ``f'{prefix}.{path}'``.
+        """
         return replace(self, path=f'{prefix}.{self.path}')
 
 
@@ -85,6 +97,7 @@ class ExactMatcher(Matcher):
         self.name, self.suffix, self.range = split_trailing_range(pattern)
 
     def match(self, node: Node) -> tuple[Capture, Range | None] | None:
+        """Match a single node by exact name or module definition."""
         # Definition regexes ($/regex/ and $$/regex/) match the FSDB module
         # definition name rather than the hierarchy node name.
         if self.target == 'definition':
@@ -128,6 +141,7 @@ class BraceMatcher(Matcher):
         }
 
     def match(self, node: Node) -> tuple[Capture, Range | None] | None:
+        """Match a node against every brace-expanded alternative."""
         for key, matcher in self.matchers.items():
             matched = matcher.match(node)
             if matched is not None:
@@ -192,6 +206,7 @@ class WildcardMatcher(Matcher):
         self.target = target
 
     def match(self, node: Node) -> tuple[Capture, Range | None] | None:
+        """Match any node allowed by the wildcard syntax."""
         assert self.target != 'definition'
         return WildcardCapture(path=node.name), None
 
@@ -213,6 +228,7 @@ class RegexMatcher(Matcher):
         self.regex = re.compile(regex)
 
     def match(self, node: Node) -> tuple[Capture, Range | None] | None:
+        """Match a node against a compiled regex and optional range suffix."""
         # Definition regexes ($/regex/ and $$/regex/) match the FSDB module
         # definition name rather than the hierarchy node name.
         if self.target == 'definition':
@@ -275,6 +291,16 @@ class RegexMatcher(Matcher):
 
 @dataclass(frozen=True)
 class PathStep:
+    """One parsed query-path segment.
+
+    Attributes
+    ----------
+    matcher:
+        Matcher for this segment.
+    recursive:
+        Whether this segment should traverse recursively through descendants.
+    """
+
     matcher: Matcher
     recursive: bool = False
 

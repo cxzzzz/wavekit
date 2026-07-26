@@ -1,16 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Hashable
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Protocol, Union, get_args, runtime_checkable
+from typing import Any, Callable, Literal, Union, get_args
 
 from typing_extensions import TypeAlias
 
 from ..waveform import Waveform
-
-
-@runtime_checkable
-class HashableKey(Protocol):
-    def __hash__(self) -> int: ...
 
 
 class Channel:
@@ -34,9 +30,9 @@ IntValue = Union[int, Callable[[int, dict], int]]
 SignalValue = Union[Waveform, Callable[[int, dict], Any]]
 MessageValue = Union[str, Callable[[int, dict], str]]
 ChannelValue: TypeAlias = Union[
-    HashableKey,
+    Hashable,
     Channel,
-    Callable[[int, dict], Union[HashableKey, Channel]],
+    Callable[[int, dict], Union[Hashable, Channel]],
 ]
 
 CaptureMode = Literal['last', 'first', 'list']

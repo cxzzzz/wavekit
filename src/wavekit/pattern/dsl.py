@@ -296,7 +296,7 @@ class Pattern:
 
 
 def match(
-    body: Pattern | Callable[[PatternContext], object],
+    body: Pattern | Callable[[PatternContext], Any],
     *,
     axis: Waveform | None = None,
     timeout: int | None = None,
@@ -360,7 +360,7 @@ def match(
 
 
 def collect(
-    body: Callable[[PatternContext], object],
+    body: Callable[[PatternContext], Any],
     *,
     axis: Waveform | None = None,
     timeout: int | None = None,

@@ -24,9 +24,6 @@ class _SearchRoot(Node):
     parent: Node | None = field(default=None, init=False, repr=False)
     top_scopes: tuple[Scope, ...] = field(default_factory=tuple)
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, 'top_scopes', tuple(self.top_scopes))
-
     @property
     def children(self) -> tuple[Scope, ...]:
         return self.top_scopes
@@ -661,6 +658,12 @@ class Reader(Generic[SignalT]):
 
     @abstractmethod
     def close(self):
+        """Close the underlying waveform file handle.
+
+        Subclasses should make this method idempotent when the backing library
+        exposes an explicit close operation. Prefer using readers as context
+        managers so ``close()`` is called automatically.
+        """
         pass
 
     # ------------------------------------------------------------------

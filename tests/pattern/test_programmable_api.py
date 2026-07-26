@@ -62,6 +62,71 @@ def test_collect_records_non_none_values_including_ok():
     assert repr(records[1]) == 'MatchStatus.OK()'
 
 
+def test_collect_timeout_message_is_reported():
+    fire = _bool_wf([1, 0, 0])
+    never = _bool_wf([0, 0, 0])
+
+    def tx(ctx):
+        if ctx.value(fire):
+            ctx.wait(never)
+        return None
+
+    with pytest.raises(PatternError, match='missing done'):
+        collect(tx, timeout=1, timeout_message='missing done')
+
+
+def test_collect_dma_command_stream_example():
+    cmd_fire = _bool_wf([1, 1, 0, 0, 0, 0, 0, 0])
+    w_fire = _bool_wf([0, 0, 1, 1, 0, 0, 0, 0])
+    rsp_fire = _bool_wf([0, 0, 0, 0, 1, 1, 0, 0])
+    r_fire = _bool_wf([0, 0, 0, 0, 0, 0, 1, 1])
+
+    cmd_op = _wf([1, 0, 0, 0, 0, 0, 0, 0], width=8)
+    cmd_addr = _wf([0x100, 0x200, 0, 0, 0, 0, 0, 0], width=32)
+    cmd_len = _wf([2, 2, 0, 0, 0, 0, 0, 0], width=8)
+    w_data = _wf([0, 0, 11, 22, 0, 0, 0, 0], width=32)
+    rsp_status = _wf([0, 0, 0, 0, 7, 0, 0, 0], width=8)
+    r_data = _wf([0, 0, 0, 0, 0, 0, 33, 44], width=32)
+
+    op_read = 0
+    op_write = 1
+
+    def read_dma_cmd(ctx):
+        if not ctx.value(cmd_fire):
+            return None
+
+        op = int(ctx.value(cmd_op))
+        addr = int(ctx.value(cmd_addr))
+        length = int(ctx.value(cmd_len))
+
+        if op == op_write:
+            data = []
+            for _ in range(length):
+                ctx.consume(w_fire, channel='wdata')
+                data.append(int(ctx.value(w_data)))
+
+            ctx.consume(rsp_fire, channel='rsp')
+            return {'op': 'write', 'addr': addr, 'data': data, 'status': int(ctx.value(rsp_status))}
+
+        if op == op_read:
+            ctx.consume(rsp_fire, channel='rsp')
+            data = []
+            for _ in range(length):
+                ctx.consume(r_fire, channel='rdata')
+                data.append(int(ctx.value(r_data)))
+
+            return {'op': 'read', 'addr': addr, 'data': data}
+
+        ctx.require(False, message=f'unknown DMA op {op}')
+        return None
+
+    commands = collect(read_dma_cmd)
+    assert commands == [
+        {'op': 'write', 'addr': 0x100, 'data': [11, 22], 'status': 7},
+        {'op': 'read', 'addr': 0x200, 'data': [33, 44]},
+    ]
+
+
 def test_context_value_cycle_time_and_offsets():
     fire = _bool_wf([0, 1, 0])
     data = _wf([10, 20, 30], width=8)
@@ -255,8 +320,8 @@ def test_program_dynamic_consume_channel_resolves_once_on_commit():
         if ctx.value(fire):
             ctx.capture('key', 7)
 
-            def dynamic_channel(index, captures):
-                calls.append((index, captures['key']))
+            def dynamic_channel():
+                calls.append((ctx.index, ctx.captures['key']))
                 return channel
 
             ctx.consume(ready, channel=dynamic_channel)
@@ -278,7 +343,7 @@ def test_program_dynamic_consume_channel_exception_propagates():
     def tx(ctx):
         if ctx.value(fire):
 
-            def bad_channel(_index, _captures):
+            def bad_channel():
                 raise CustomChannelError('program channel boom')
 
             ctx.consume(ready, channel=bad_channel)
@@ -295,7 +360,7 @@ def test_program_dynamic_consume_channel_invalid_unhashable_raises_pattern_error
 
     def tx(ctx):
         if ctx.value(fire):
-            ctx.consume(ready, channel=lambda _index, _captures: [])
+            ctx.consume(ready, channel=lambda: [])
             return ctx.OK
         return None
 
@@ -490,7 +555,7 @@ def test_stage2_entrypoints_and_status_messages():
 
     def tx(ctx):
         if ctx.value(fire):
-            ctx.wait(never, require=never, require_message=lambda _ctx: 'ctx guard')
+            ctx.wait(never, require=never, require_message=lambda: 'ctx guard')
             return ctx.OK
         return None
 

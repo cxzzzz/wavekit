@@ -45,7 +45,20 @@ class MatchPoint:
 
 @dataclass(frozen=True)
 class MatchRecord:
-    """One pattern match record."""
+    """One pattern match record.
+
+    Attributes
+    ----------
+    start, end:
+        Inclusive match boundary points. ``MatchPoint.index`` is the waveform-array
+        sample index, ``MatchPoint.cycle`` is the absolute clock cycle, and
+        ``MatchPoint.time`` is the simulation timestamp.
+    status:
+        Terminal status object: ``MatchStatus.OK()``, ``MatchStatus.Timeout(...)``,
+        or ``MatchStatus.RequireViolated(...)``.
+    captures:
+        Per-record captured Python values.
+    """
 
     start: MatchPoint
     end: MatchPoint
@@ -54,6 +67,13 @@ class MatchRecord:
 
     @property
     def duration(self) -> int:
+        """Return the inclusive duration in sampled cycles.
+
+        Returns
+        -------
+        int
+            ``end.index - start.index + 1``.
+        """
         return self.end.index - self.start.index + 1
 
 
@@ -81,6 +101,14 @@ class MatchRecords(Sequence[MatchRecord]):
 
     @property
     def ok(self) -> Waveform:
+        """Return a boolean result-row mask for successful matches.
+
+        Returns
+        -------
+        Waveform
+            One-bit waveform aligned to result rows. ``value`` is true where
+            ``status`` is ``MatchStatus.OK``.
+        """
         value = np.array(
             [isinstance(status, MatchStatus.OK) for status in self.status.value], dtype=bool
         )
@@ -88,15 +116,43 @@ class MatchRecords(Sequence[MatchRecord]):
 
     @property
     def failed(self) -> Waveform:
+        """Return a boolean result-row mask for failed matches.
+
+        Returns
+        -------
+        Waveform
+            One-bit waveform aligned to result rows. ``value`` is true where
+            ``status`` is not ``MatchStatus.OK``.
+        """
         value = np.array(
             [not isinstance(status, MatchStatus.OK) for status in self.status.value], dtype=bool
         )
         return Waveform(value, self.start.clock.copy(), self.start.time.copy(), width=1)
 
     def filter_ok(self) -> MatchRecords:
+        """Return records whose status is ``MatchStatus.OK``.
+
+        Returns
+        -------
+        MatchRecords
+            A row-masked batch with all fields and captures filtered together.
+        """
         return self.filter_status(MatchStatus.OK)
 
     def filter_status(self, status: MatchStatusValue | type) -> MatchRecords:
+        """Return records matching a concrete status object or status class.
+
+        Parameters
+        ----------
+        status:
+            Either a concrete status value such as ``MatchStatus.Timeout('msg')``
+            or a status class such as ``MatchStatus.Timeout``.
+
+        Returns
+        -------
+        MatchRecords
+            A row-masked batch with all fields and captures filtered together.
+        """
         if isinstance(status, type):
             mask = np.array([isinstance(value, status) for value in self.status.value], dtype=bool)
         else:
@@ -104,6 +160,13 @@ class MatchRecords(Sequence[MatchRecord]):
         return self._mask(mask)
 
     def filter_failed(self) -> MatchRecords:
+        """Return records whose status is not ``MatchStatus.OK``.
+
+        Returns
+        -------
+        MatchRecords
+            A row-masked batch with all fields and captures filtered together.
+        """
         return self._mask(self.failed.value.astype(np.bool_))
 
     def _mask(self, mask: np.ndarray) -> MatchRecords:
@@ -122,6 +185,19 @@ class MatchRecords(Sequence[MatchRecord]):
     def __getitem__(self, index: slice) -> MatchRecords: ...
 
     def __getitem__(self, index: int | slice) -> MatchRecord | MatchRecords:
+        """Return one row or a sliced batch.
+
+        Parameters
+        ----------
+        index:
+            Integer row index or Python slice.
+
+        Returns
+        -------
+        MatchRecord or MatchRecords
+            Integer indexing returns a row object; slicing returns another
+            ``MatchRecords`` with all columns sliced together.
+        """
         if isinstance(index, slice):
             indices = np.arange(len(self))[index]
             return MatchRecords(

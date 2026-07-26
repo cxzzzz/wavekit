@@ -15,10 +15,13 @@ from ..range import Range
 
 @dataclass(frozen=True, eq=False)
 class FstSignal(Signal):
+    """FST-backed signal descriptor carrying the FST facility handle."""
+
     _handle: int = field(default=0, repr=False, compare=False)
 
     @property
     def children(self) -> tuple[Node, ...]:
+        """Return no children; FST signals are leaf hierarchy nodes."""
         return ()
 
 
@@ -30,6 +33,7 @@ class FstScope(Scope):
 
     @property
     def children(self) -> tuple[Node, ...]:
+        """Return direct child scopes and signals from this FST scope."""
         return self._children
 
 
@@ -182,14 +186,17 @@ class FstReader(Reader[FstSignal]):
 
     @property
     def top_scopes(self) -> tuple[FstScope, ...]:
+        """Return immutable top-level scopes in the FST hierarchy."""
         return self._top_scopes
 
     @cached_property
     def begin_time(self) -> int:
+        """Return the first timestamp stored in the FST file."""
         return int(pylibfst.lib.fstReaderGetStartTime(self.file_handle))
 
     @cached_property
     def end_time(self) -> int:
+        """Return the last timestamp stored in the FST file."""
         return int(pylibfst.lib.fstReaderGetEndTime(self.file_handle))
 
     def close(self):

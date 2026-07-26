@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 from typing import Any
 
 from ..waveform import Waveform
@@ -9,6 +9,8 @@ from .runtime import PatternContext
 from .steps import (
     BranchStep,
     CaptureStep,
+    Channel,
+    ChannelValue,
     Condition,
     ConsumeStep,
     DelayStep,
@@ -21,8 +23,6 @@ from .steps import (
     Step,
     WaitStep,
 )
-
-PatternBody = Callable[[PatternContext], object]
 
 
 def infer_declarative_axis(steps: list[Step]) -> Waveform | None:
@@ -71,7 +71,7 @@ def infer_declarative_axis(steps: list[Step]) -> Waveform | None:
     return None
 
 
-def compile_declarative_pattern(steps: list[Step]) -> PatternBody:
+def compile_declarative_pattern(steps: list[Step]) -> Callable[[PatternContext], Any]:
     """Compile declarative pattern steps into a program body."""
     first_step = steps[0] if steps else None
 
@@ -111,7 +111,14 @@ def compile_declarative_pattern(steps: list[Step]) -> PatternBody:
     def adapt_message(message: MessageValue | None, ctx: PatternContext):
         if message is None:
             return None
-        return lambda _ctx, message=message: eval_message(message, ctx)
+        return lambda message=message: eval_message(message, ctx)
+
+    def adapt_channel(
+        channel: ChannelValue, ctx: PatternContext
+    ) -> Channel | Hashable | Callable[[], Channel | Hashable]:
+        if callable(channel):
+            return lambda channel=channel: channel(ctx.index, ctx.captures)
+        return channel
 
     def run_steps(ctx: PatternContext, step_list: list[Step]) -> None:
         for step in step_list:
@@ -126,7 +133,7 @@ def compile_declarative_pattern(steps: list[Step]) -> PatternBody:
             elif isinstance(step, ConsumeStep):
                 ctx.consume(
                     lambda step=step: eval_condition(step.cond, ctx),
-                    channel=step.channel,
+                    channel=adapt_channel(step.channel, ctx),
                     require=None
                     if step.require is None
                     else lambda step=step: eval_condition(step.require, ctx),

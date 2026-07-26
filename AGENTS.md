@@ -275,6 +275,9 @@ Use Pattern for declarative step construction, and module-level `match()` /
 one candidate per eligible cycle and runs that candidate to completion before
 trying the next start cycle. Matches may still overlap in time.
 
+`match(pattern)` returns `MatchRecords`; `collect(body)` returns a Python list
+of extracted values.
+
 ### Declarative usage
 
 ```python
@@ -297,27 +300,65 @@ context calls and return `ctx.OK` for a successful check row, or `None` to skip
 the current start cycle.
 
 ```python
-fire = valid & ready
+cmd_fire = cmd_valid & cmd_ready
+w_fire = w_valid & w_ready
+rsp_fire = rsp_valid & rsp_ready
+r_fire = r_valid & r_ready
 
-def tx(ctx):
-    if ctx.value(fire):
-        ctx.consume(lambda: ctx.value(done), channel='done')
-        return ctx.OK
+OP_READ = 0
+OP_WRITE = 1
+
+def read_dma_cmd(ctx):
+    if not ctx.value(cmd_fire):
+        return None
+
+    op = int(ctx.value(cmd_op))
+    addr = int(ctx.value(cmd_addr))
+    length = int(ctx.value(cmd_len))
+
+    if op == OP_WRITE:
+        data = []
+        for _ in range(length):
+            ctx.consume(w_fire, channel='wdata')
+            data.append(int(ctx.value(w_data)))
+
+        ctx.consume(rsp_fire, channel='rsp')
+        return {
+            'op': 'write',
+            'addr': addr,
+            'data': data,
+            'status': int(ctx.value(rsp_status)),
+        }
+
+    if op == OP_READ:
+        ctx.consume(rsp_fire, channel='rsp')
+        data = []
+        for _ in range(length):
+            ctx.consume(r_fire, channel='rdata')
+            data.append(int(ctx.value(r_data)))
+
+        return {'op': 'read', 'addr': addr, 'data': data}
+
+    ctx.require(False, message=f'unknown DMA op {op}')
     return None
 
-result = match(tx, timeout=64)
+result = collect(read_dma_cmd)
 ```
 
 For extraction, use `collect(body)`. It records every non-`None` Python return
 value and raises `PatternError` on timeout or require failure. `collect(pattern)`
-is intentionally unsupported.
+is intentionally unsupported. Both `match(...)` and `collect(...)` accept
+`timeout_message=` for execution-level timeout reporting.
+Use `timeout=<cycles>` only when a blocking step should be bounded; `match()`
+reports timeout rows and `collect()` raises `PatternError`.
 
 ### Step reference
 
 | Step | Blocking? | Description |
 |------|-----------|-------------|
 | `.wait(cond, require=None, require_message=None)` | yes | Block until `cond` is true without consuming the event. |
-| `.consume(cond, channel, require=None, require_message=None)` | yes | Block until `cond` is true and exclusively consume `(channel, cycle)`. |
+| `.consume(cond, channel, require=None, require_message=None)` | yes | Block until `cond` is true and exclusively consume the current `(channel, cycle)`. |
+| `.try_consume(cond, channel)` | no | Poll `channel` without blocking; returns `True` only when the condition and channel are both available. |
 | `.delay(n, require=None, require_message=None)` | yes for n≥1 / epsilon for n=0 | Advance exactly `n` cycles. |
 | `.capture(name, signal, mode='last')` | no | Record a value. `mode='list'` appends to a Python list. |
 | `.require(cond, message=None)` | no | Assert a condition; failure produces `MatchStatus.RequireViolated(message)`. |
@@ -326,10 +367,14 @@ is intentionally unsupported.
 | `.branch(cond, true_body, false_body)` | — | Epsilon conditional branch. |
 
 Declarative dynamic callbacks use `callable(index, captures)`. Programmable
-conditions passed to `ctx.wait()` / `ctx.consume()` are zero-argument callables
-that close over `ctx`. In both cases `index` / `ctx.index` is the current
-waveform-array sample index, not a cycle number and not rebased by
-`match(start_cycle=...)`.
+callbacks passed to `ctx.wait()`, `ctx.consume()`, `ctx.try_consume()`,
+`ctx.delay()`, or `ctx.require()` are zero-argument callables that close over
+`ctx`. In both cases `index` / `ctx.index` is the current waveform-array sample
+index, not a cycle number and not rebased by `match(start_cycle=...)`.
+
+Use `ctx.try_consume(...)` when you need non-blocking polling or arbitration
+across multiple candidate channels. For a linear burst, `ctx.consume(...)` is
+usually the clearer choice.
 
 ### `MatchRecords` fields
 
@@ -357,6 +402,9 @@ example, `result.filter_status(MatchStatus.Timeout)` keeps all timeout rows.
 `cond` is true and that event is free. It does not reserve a channel while
 waiting. A successful consume remains committed even if the candidate later
 fails or times out.
+
+`MatchRecords[i]` returns a `MatchRecord`, and slices return another
+`MatchRecords` batch.
 
 ```python
 def match_id(idx, cap):

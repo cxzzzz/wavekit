@@ -3,10 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable, Hashable
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Any, Union
+from typing import Any
 
 import numpy as np
-from typing_extensions import TypeAlias
 
 from ..waveform import Waveform
 from .errors import PatternError
@@ -14,9 +13,6 @@ from .result import MatchRecords, MatchStatus, MatchStatusValue
 from .steps import CaptureMode, Channel
 
 _MAX_SAME_CYCLE_STEPS = 100_000
-
-PatternBody: TypeAlias = Callable[['PatternContext'], object]
-Message: TypeAlias = Union[str, Callable[[Any], str]]
 
 
 class _StopPattern(PatternError):
@@ -37,6 +33,14 @@ class PatternInstance:
 
 @dataclass
 class PatternContext:
+    """Runtime context passed to programmable pattern bodies.
+
+    Programmable bodies run once per scanned start cycle. Use ``ctx.value(...)``
+    to read waveforms, ``ctx.wait(...)`` / ``ctx.consume(...)`` / ``ctx.delay(...)``
+    to move through time, and return ``ctx.OK`` from :func:`wavekit.pattern.match`
+    bodies to record a successful match.
+    """
+
     _runtime: PatternRuntime
     _instance: PatternInstance
     _index: int
@@ -57,19 +61,19 @@ class PatternContext:
     def _touch(self) -> None:
         self._instance.end_index = self._index
 
-    def _message_text(self, message: Message | None) -> str | None:
+    def _message_text(self, message: str | Callable[[], str] | None) -> str | None:
         if message is None:
             return None
         if isinstance(message, str):
             return message
         if callable(message):
-            return str(message(self))
+            return str(message())
         raise PatternError(f'message must be a str or callable, got {type(message).__name__}')
 
-    def _timeout_status(self, message: Message | None) -> MatchStatusValue:
+    def _timeout_status(self, message: str | Callable[[], str] | None) -> MatchStatusValue:
         return MatchStatus.Timeout(self._message_text(message) or self._runtime._timeout_message)
 
-    def _require_status(self, message: Message | None) -> MatchStatusValue:
+    def _require_status(self, message: str | Callable[[], str] | None) -> MatchStatusValue:
         return MatchStatus.RequireViolated(self._message_text(message))
 
     def _guard_operation(self) -> None:
@@ -96,7 +100,7 @@ class PatternContext:
     def _wait_next(
         self,
         require: Waveform | Callable[[], bool] | bool | None,
-        require_message: Message | None,
+        require_message: str | Callable[[], str] | None,
     ) -> None:
         if self._runtime.eval_condition(require, self):
             self._advance_cycle()
@@ -104,18 +108,63 @@ class PatternContext:
         raise _StopPattern(self._require_status(require_message))
 
     def value(self, waveform: Waveform, offset: int = 0) -> Any:
+        """Return a waveform value at the current sample plus *offset*.
+
+        Parameters
+        ----------
+        waveform:
+            Waveform to read. It must share the same clock axis as other observed
+            pattern waveforms.
+        offset:
+            Relative sample offset from ``ctx.index``. ``0`` reads the current
+            sample, ``1`` reads the next sample, and ``-1`` reads the previous
+            sample.
+
+        Returns
+        -------
+        Any
+            Scalar value from ``waveform.value[ctx.index + offset]``.
+        """
         index = self._index + offset
         self._runtime.note_waveform(waveform)
         self._touch()
         return waveform.value[index]
 
     def cycle(self, waveform: Waveform, offset: int = 0) -> Any:
+        """Return a waveform cycle number at the current sample plus *offset*.
+
+        Parameters
+        ----------
+        waveform:
+            Waveform whose clock axis is read and validated.
+        offset:
+            Relative sample offset from ``ctx.index``.
+
+        Returns
+        -------
+        Any
+            Scalar value from ``waveform.clock[ctx.index + offset]``.
+        """
         index = self._index + offset
         self._runtime.note_waveform(waveform)
         self._touch()
         return waveform.clock[index]
 
     def time(self, waveform: Waveform, offset: int = 0) -> Any:
+        """Return a waveform timestamp at the current sample plus *offset*.
+
+        Parameters
+        ----------
+        waveform:
+            Waveform whose time axis is read and validated.
+        offset:
+            Relative sample offset from ``ctx.index``.
+
+        Returns
+        -------
+        Any
+            Scalar value from ``waveform.time[ctx.index + offset]``.
+        """
         index = self._index + offset
         self._runtime.note_waveform(waveform)
         self._touch()
@@ -126,8 +175,28 @@ class PatternContext:
         cond: Waveform | Callable[[], bool] | bool,
         *,
         require: Waveform | Callable[[], bool] | bool | None = None,
-        require_message: Message | None = None,
+        require_message: str | Callable[[], str] | None = None,
     ) -> None:
+        """Block until *cond* is true without consuming an event.
+
+        Parameters
+        ----------
+        cond:
+            ``Waveform``, ``bool``, or zero-argument callable returning a truthy
+            value. A true condition at the current cycle completes immediately.
+        require:
+            Optional guard checked only while ``cond`` is false. It is not checked
+            on the cycle where ``cond`` becomes true.
+        require_message:
+            Optional human-readable message for ``MatchStatus.RequireViolated``.
+            A callable takes no arguments and is evaluated only on failure.
+
+        Raises
+        ------
+        PatternError
+            If the condition type is invalid, a require guard fails, timeout is
+            reached, or no scan axis can be determined for blocking.
+        """
         while True:
             self._guard_operation()
             if self._runtime.eval_condition(cond, self):
@@ -137,15 +206,40 @@ class PatternContext:
     def consume(
         self,
         cond: Waveform | Callable[[], bool] | bool,
-        channel: Channel | Hashable | Callable[[int, dict[str, Any]], Channel | Hashable],
+        channel: Channel | Hashable | Callable[[], Channel | Hashable],
         *,
         require: Waveform | Callable[[], bool] | bool | None = None,
-        require_message: Message | None = None,
+        require_message: str | Callable[[], str] | None = None,
     ) -> None:
+        """Block until *cond* is true and the current channel event is free.
+
+        Parameters
+        ----------
+        cond:
+            ``Waveform``, ``bool``, or zero-argument callable returning a truthy
+            value. When true, this method tries to consume the current cycle.
+        channel:
+            ``Channel``, hashable key, or zero-argument callable returning one.
+            The resolved ``(channel, cycle)`` can be consumed by at most one match;
+            earlier start cycles win.
+        require:
+            Optional guard checked while ``cond`` is false, or while the current
+            channel event is already consumed. It is not checked on a successful
+            consume cycle.
+        require_message:
+            Optional human-readable message for ``MatchStatus.RequireViolated``.
+            A callable takes no arguments and is evaluated only on failure.
+
+        Raises
+        ------
+        PatternError
+            If the condition/channel type is invalid, a require guard fails,
+            timeout is reached, or no scan axis can be determined for blocking.
+        """
         while True:
             self._guard_operation()
             if self._runtime.eval_condition(cond, self):
-                resolved = self._runtime.resolve_channel(channel, self)
+                resolved = self._runtime.resolve_channel(channel)
                 if self._runtime.channel_free(resolved, self._index):
                     self._runtime.consume_channel(resolved, self._index)
                     return
@@ -154,12 +248,25 @@ class PatternContext:
     def try_consume(
         self,
         cond: Waveform | Callable[[], bool] | bool,
-        channel: Channel | Hashable | Callable[[int, dict[str, Any]], Channel | Hashable],
+        channel: Channel | Hashable | Callable[[], Channel | Hashable],
     ) -> bool:
+        """Try to consume the current channel event without blocking.
+
+        Returns
+        -------
+        bool
+            ``True`` when ``cond`` is true and the resolved channel is free at the
+            current cycle; otherwise ``False``.
+
+        Raises
+        ------
+        PatternError
+            If the condition or channel type is invalid.
+        """
         self._guard_operation()
         if not self._runtime.eval_condition(cond, self):
             return False
-        resolved = self._runtime.resolve_channel(channel, self)
+        resolved = self._runtime.resolve_channel(channel)
         if not self._runtime.channel_free(resolved, self._index):
             return False
         self._runtime.consume_channel(resolved, self._index)
@@ -170,8 +277,27 @@ class PatternContext:
         n: int,
         *,
         require: Waveform | Callable[[], bool] | bool | None = None,
-        require_message: Message | None = None,
+        require_message: str | Callable[[], str] | None = None,
     ) -> None:
+        """Advance exactly *n* sampled cycles.
+
+        Parameters
+        ----------
+        n:
+            Non-negative integer cycle count. ``0`` is a no-op and does not check
+            ``require``.
+        require:
+            Optional guard checked before each cycle advance.
+        require_message:
+            Optional human-readable message for ``MatchStatus.RequireViolated``.
+            A callable takes no arguments and is evaluated only on failure.
+
+        Raises
+        ------
+        PatternError
+            If ``n`` is invalid, a require guard fails, timeout is reached, or no
+            scan axis can be determined.
+        """
         if isinstance(n, bool) or not isinstance(n, int):
             raise PatternError('ctx.delay(n) requires an integer cycle count')
         if n < 0:
@@ -184,6 +310,24 @@ class PatternContext:
             self._wait_next(require, require_message)
 
     def capture(self, name: str, value: Any, mode: CaptureMode = 'last') -> None:
+        """Store a value in the current match's capture dictionary.
+
+        Parameters
+        ----------
+        name:
+            Capture key.
+        value:
+            Python value or ``Waveform``. Waveforms are read at the current sample
+            before storage.
+        mode:
+            ``'last'`` overwrites, ``'first'`` keeps the first value, and
+            ``'list'`` appends each value to a Python list.
+
+        Raises
+        ------
+        PatternError
+            If ``mode`` is invalid.
+        """
         self._guard_operation()
         if isinstance(value, Waveform):
             value = self.value(value)
@@ -197,8 +341,27 @@ class PatternContext:
             raise PatternError("ctx.capture() mode must be 'last', 'first', or 'list'")
 
     def require(
-        self, cond: Waveform | Callable[[], bool] | bool, *, message: Message | None = None
+        self,
+        cond: Waveform | Callable[[], bool] | bool,
+        *,
+        message: str | Callable[[], str] | None = None,
     ) -> None:
+        """Assert *cond* at the current cycle.
+
+        Parameters
+        ----------
+        cond:
+            ``Waveform``, ``bool``, or zero-argument callable returning a truthy
+            value.
+        message:
+            Optional human-readable message for ``MatchStatus.RequireViolated``.
+            A callable takes no arguments and is evaluated only on failure.
+
+        Raises
+        ------
+        PatternError
+            If the condition type is invalid or the condition is false.
+        """
         self._guard_operation()
         if not self._runtime.eval_condition(cond, self):
             raise _StopPattern(self._require_status(message))
@@ -209,7 +372,7 @@ class PatternRuntime:
 
     def __init__(
         self,
-        program: PatternBody,
+        program: Callable[[PatternContext], Any],
         *,
         axis: Waveform | None = None,
         timeout_cycles: int | None = None,
@@ -336,11 +499,10 @@ class PatternRuntime:
 
     def resolve_channel(
         self,
-        key: Channel | Hashable | Callable[[int, dict[str, Any]], Channel | Hashable],
-        ctx: PatternContext,
+        key: Channel | Hashable | Callable[[], Channel | Hashable],
     ) -> Hashable:
         if callable(key) and not isinstance(key, Channel):
-            key = key(ctx.index, ctx.captures)
+            key = key()
         if isinstance(key, Channel):
             return key
         if not isinstance(key, Hashable):

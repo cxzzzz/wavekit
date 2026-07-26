@@ -77,6 +77,7 @@ class FsdbSignal(Signal):
 
     @cached_property
     def children(self) -> tuple[Node, ...]:
+        """Return composite member nodes, or an empty tuple for scalar signals."""
         if self.composite_type is None:
             return ()
 
@@ -97,6 +98,7 @@ class FsdbScope(Scope):
 
     @cached_property
     def children(self) -> tuple[Node, ...]:
+        """Return direct child scopes and signals from this FSDB scope."""
         scopes = tuple(
             FsdbScope(base_name=scope.name(), parent=self, _npi_scope=scope)
             for scope in self._npi_scope.child_scope_list()
@@ -113,6 +115,13 @@ class FsdbScope(Scope):
 
 
 class FsdbReader(Reader[FsdbSignal]):
+    """Read FSDB waveform files through the Verdi NPI runtime.
+
+    ``FsdbReader`` requires the Verdi runtime library (``libNPI.so``). Configure
+    it with ``WAVEKIT_NPI_LIB``, ``VERDI_HOME``, or ``LD_LIBRARY_PATH`` before
+    opening FSDB files.
+    """
+
     pynpi: dict[str, Any] = {}
 
     @classmethod
@@ -211,6 +220,7 @@ class FsdbReader(Reader[FsdbSignal]):
 
     @cached_property
     def top_scopes(self) -> tuple[FsdbScope, ...]:
+        """Return immutable top-level scopes in the FSDB hierarchy."""
         return tuple(
             FsdbScope(base_name=scope.name(), parent=None, _npi_scope=scope)
             for scope in self.file_handle.top_scope_list()
@@ -218,11 +228,14 @@ class FsdbReader(Reader[FsdbSignal]):
 
     @property
     def begin_time(self) -> int:
+        """Return the first timestamp stored in the FSDB file."""
         return self.file_handle.min_time()
 
     @property
     def end_time(self) -> int:
+        """Return the last timestamp stored in the FSDB file."""
         return self.file_handle.max_time()
 
     def close(self) -> None:
+        """Close the underlying FSDB/NPI reader handle."""
         self.file_handle.close()

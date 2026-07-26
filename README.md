@@ -135,7 +135,9 @@ with VcdReader("fifo_tb.vcd") as f:
 There are two ways to describe a pattern:
 
 - **Declarative** — chain steps like `.wait()`, `.consume()`, `.capture()`, `.loop()`. Best for fixed transaction flows.
-- **Programmable** — pass a normal handler function to `match(...)` or `collect(...)`. Best for dynamic branches, per-ID routing, and other complex flows.
+- **Programmable** — pass a handler function to `match(...)` or `collect(...)`. Best for dynamic branches, per-ID routing, and other complex flows.
+
+`match(pattern)` returns `MatchRecords`, while `collect(body)` returns a Python `list` of extracted values.
 
 #### Declarative examples
 
@@ -159,7 +161,7 @@ with VcdReader("axi_tb.vcd") as f:
         .wait(rvalid  & rready)    # R  handshake → transaction ends
         .capture("rdata", rdata)
     )
-    result = match(pattern, timeout=256)
+    result = match(pattern)
 
     ok = result.filter_ok()
     print(f"Read latencies (cycles): {ok.duration.value}")
@@ -176,7 +178,7 @@ pattern = (
     .wait(awvalid & awready)   # AW handshake → burst starts
     .loop(beat, until=wlast)   # collect each beat until wlast
 )
-result = match(pattern, timeout=512)
+result = match(pattern)
 
 for i, inst in enumerate(result.filter_ok()):
     print(f"Burst {i}: {len(inst.captures['beats'])} beats")
@@ -200,32 +202,57 @@ print(f"Stall durations: {stalls.duration.value} cycles")
 
 #### Programmable example
 
-**Out-of-order AXI reads by ID**
+**DMA-style command stream**
 
-When R beats from different IDs interleave on the bus, match each AR to its response beats by `arid` and collect results as Python dicts.
+Use programmable control flow when a command's opcode changes the following
+timing shape. This example handles writes with a data burst plus status response,
+and reads with a response plus data burst.
 
 ```python
-arfire = arvalid & arready   # precompute outside the handler
-rfire = rvalid & rready
+cmd_fire = cmd_valid & cmd_ready   # precompute outside the handler
+w_fire = w_valid & w_ready
+rsp_fire = rsp_valid & rsp_ready
+r_fire = r_valid & r_ready
 
-def read_burst(ctx):
-    if ctx.value(arfire):
-        my_id = ctx.value(arid)
-        beats = []
+OP_READ = 0
+OP_WRITE = 1
 
-        while True:
-            ctx.consume(
-                lambda: ctx.value(rfire) and ctx.value(rid) == my_id,
-                channel=("r", my_id),
-            )
-            beats.append(int(ctx.value(rdata)))
-            if ctx.value(rlast):
-                break
+def read_dma_cmd(ctx):
+    if not ctx.value(cmd_fire):
+        return None
 
-        return {"arid": my_id, "beats": beats}
+    op = int(ctx.value(cmd_op))
+    addr = int(ctx.value(cmd_addr))
+    length = int(ctx.value(cmd_len))
+
+    if op == OP_WRITE:
+        data = []
+        for _ in range(length):
+            ctx.consume(w_fire, channel="wdata")
+            data.append(int(ctx.value(w_data)))
+
+        ctx.consume(rsp_fire, channel="rsp")
+        return {
+            "op": "write",
+            "addr": addr,
+            "data": data,
+            "status": int(ctx.value(rsp_status)),
+        }
+
+    if op == OP_READ:
+        ctx.consume(rsp_fire, channel="rsp")
+        data = []
+        for _ in range(length):
+            ctx.consume(r_fire, channel="rdata")
+            data.append(int(ctx.value(r_data)))
+
+        return {"op": "read", "addr": addr, "data": data}
+
+    ctx.require(False, message=f"unknown DMA op {op}")
     return None
 
-records = collect(read_burst, timeout=64)
+commands = collect(read_dma_cmd)
+print(f"Captured {len(commands)} commands")
 ```
 
 Some tips for programmable patterns:
@@ -234,6 +261,12 @@ Some tips for programmable patterns:
   the handler function so they aren't rebuilt every cycle.
 - Start the handler with `if ctx.value(fire): ...` and `return None`
   otherwise — this tells the runtime which cycles begin a transaction.
+- Use `ctx.try_consume(...)` when you need non-blocking polling or arbitration
+  across multiple candidate channels. For a straight burst, `ctx.consume(...)`
+  is the clearer fit.
+- Add `timeout=<cycles>` when a blocking step should be bounded. In `match()`,
+  timeouts become `MatchStatus.Timeout(...)`; in `collect()`, they raise
+  `PatternError`.
 
 ---
 
@@ -348,8 +381,8 @@ changed = wave != wave.back(3)
 | API | Description |
 |-----|-------------|
 | `Pattern()` | Create a declarative Pattern. Add steps with builder methods; execution options live on `match()` / `collect()`. |
-| `match(pattern_or_body, *, axis=None, timeout=None, start_cycle=None, end_cycle=None)` | Run a declarative Pattern or programmable check body and return `MatchRecords`. Check bodies return `ctx.OK` or `None`. |
-| `collect(body, *, axis=None, timeout=None, start_cycle=None, end_cycle=None)` | Run a programmable extraction body and collect each non-`None` Python return value. |
+| `match(pattern_or_body, *, axis=None, timeout=None, timeout_message=None, start_cycle=None, end_cycle=None)` | Run a declarative Pattern or programmable check body and return `MatchRecords`. Check bodies return `ctx.OK` or `None`. |
+| `collect(body, *, axis=None, timeout=None, timeout_message=None, start_cycle=None, end_cycle=None)` | Run a programmable extraction body and collect each non-`None` Python return value. |
 
 **Declarative Steps**
 
@@ -376,15 +409,18 @@ patterns as `ctx.wait(...)`, `ctx.consume(...)`, and `ctx.delay(...)`.
 | `ctx.time(waveform, offset=0)` | Read the timestamp at the current sample plus optional offset. |
 | `ctx.wait(cond, require=None, require_message=None)` | Observe cycles until `cond` is true; does not consume the event. |
 | `ctx.consume(cond, channel, require=None, require_message=None)` | Wait for `cond` and exclusively consume from `channel`. |
+| `ctx.try_consume(cond, channel)` | Poll `channel` without blocking. Returns `True` only when both the condition and channel are available. |
 | `ctx.delay(n, require=None, require_message=None)` | Advance `n` cycles. |
 | `ctx.capture(name, value, mode='last')` | Record a capture for programmable `match()`. |
 | `ctx.OK` | Return from programmable `match()` to record a successful match. |
 
 **Dynamic callbacks**
 
-Declarative callbacks use `callable(index, captures)`. `index` is the current
-sample index into `waveform.value/clock/time`, not a cycle number, and is not
-rebased when `match(start_cycle=...)` is used.
+Declarative callbacks use `callable(index, captures)`. Programmable callbacks
+passed to `ctx.wait()`, `ctx.consume()`, `ctx.try_consume()`, `ctx.delay()`, or
+`ctx.require()` use zero-argument callables that close over `ctx`. `index` /
+`ctx.index` is the current sample index into `waveform.value/clock/time`, not a
+cycle number, and is not rebased when `match(start_cycle=...)` is used.
 
 **Channels and consume vs. wait**
 
@@ -393,9 +429,9 @@ When multiple in-flight instances are waiting for the same kind of event, plain
 every event. `consume()` solves this: it hands the event to exactly one instance
 per cycle, in FIFO order.
 
-A `Channel` is the FIFO queue that `consume()` uses. Pass a `Channel` object, a
-hashable key, or a dynamic callback to `consume(..., channel=...)`. All
-instances sharing the same channel key consume from the same queue.
+A `Channel` is an identity token for consume ownership. Pass a `Channel` object,
+a hashable key, or a dynamic callback to `consume(..., channel=...)`. All
+instances sharing the same channel key compete for the same logical channel.
 
 ```python
 from collections import defaultdict
@@ -433,6 +469,9 @@ result = match(pattern)
 | `.filter_ok()` | Return only `OK` matches. |
 | `.filter_status(status)` | Return only matches with the given status object or status class. |
 | `.filter_failed()` | Return only non-OK matches. |
+
+`MatchRecords[i]` returns a single `MatchRecord`, and slices return another
+`MatchRecords` batch.
 
 ---
 

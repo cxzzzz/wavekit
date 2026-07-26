@@ -6,7 +6,7 @@ import pytest
 from helpers import bool_wf as _bool_wf
 from helpers import wf as _wf
 from wavekit import Waveform
-from wavekit.pattern import MatchRecords, MatchStatus, Pattern, match
+from wavekit.pattern import MatchRecord, MatchRecords, MatchStatus, Pattern, match
 
 
 class TestSingleWait:
@@ -351,6 +351,19 @@ class TestMatchRecords:
         assert record.end.cycle == 20
         assert record.end.time == 200
         assert record.duration == 2
+
+    def test_row_access_and_slicing(self):
+        result = self._mixed_status_result()
+        first = result[0]
+        assert isinstance(first, MatchRecord)
+        assert first.start.index == 0
+        assert first.end.cycle == 10
+
+        sliced = result[1:]
+        assert isinstance(sliced, MatchRecords)
+        np.testing.assert_array_equal(sliced.start.value, [1, 2])
+        np.testing.assert_array_equal(sliced.end.value, [4, 3])
+        assert isinstance(list(sliced)[0], MatchRecord)
 
     def test_repr(self):
         trigger = _bool_wf([1, 0])

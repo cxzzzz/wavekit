@@ -8,6 +8,9 @@ and this project follows [Semantic Versioning](https://semver.org/).
 ## Unreleased
 
 ### Changed
+- Refactor Pattern execution to a start-major synchronous runtime and remove async/await from programmable bodies.
+- Move pattern execution to module-level `match(...)` / `collect(...)` entry points and keep `Pattern` as a declarative builder.
+- Replace the old batch result surface with `MatchRecord` / `MatchRecords` and structured `MatchStatus` objects.
 - Replace the legacy `scope.py`, `signal.py`, and `pattern_parser.py` modules with
   immutable hierarchy types and the unified query matcher.
 - Standardize matched-reader results on typed `CaptureKey` tuples and remove

@@ -243,6 +243,14 @@ class Waveform:
         )
 
     def copy(self) -> Waveform:
+        """Return a deep copy of this waveform.
+
+        Returns
+        -------
+        Waveform
+            New waveform with copied ``value``, ``clock``, and ``time`` arrays and
+            the same ``width`` / ``signed`` metadata.
+        """
         return self.vectorized_map(lambda x: np.copy(x), width=self.width, signed=self.signed)
 
     @staticmethod
