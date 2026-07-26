@@ -139,24 +139,24 @@ class MatchRecords(Sequence[MatchRecord]):
         """
         return self.filter_status(MatchStatus.OK)
 
-    def filter_status(self, status: MatchStatusValue | type) -> MatchRecords:
-        """Return records matching a concrete status object or status class.
+    def filter_status(self, status: type[MatchStatusValue]) -> MatchRecords:
+        """Return records matching a status class.
 
         Parameters
         ----------
         status:
-            Either a concrete status value such as ``MatchStatus.Timeout('msg')``
-            or a status class such as ``MatchStatus.Timeout``.
+            Status class such as ``MatchStatus.Timeout``.
 
         Returns
         -------
         MatchRecords
             A row-masked batch with all fields and captures filtered together.
         """
-        if isinstance(status, type):
-            mask = np.array([isinstance(value, status) for value in self.status.value], dtype=bool)
-        else:
-            mask = np.array([value == status for value in self.status.value], dtype=bool)
+        if not isinstance(status, type):
+            raise TypeError('filter_status() requires a status class')
+        if not issubclass(status, MatchStatusValue):
+            raise TypeError('filter_status() requires a MatchStatus class')
+        mask = np.array([isinstance(value, status) for value in self.status.value], dtype=bool)
         return self._mask(mask)
 
     def filter_failed(self) -> MatchRecords:
@@ -209,6 +209,8 @@ class MatchRecords(Sequence[MatchRecord]):
             )
         if index < 0:
             index += len(self)
+        if index < 0 or index >= len(self):
+            raise IndexError('MatchRecords index out of range')
         captures = {name: waveform.value[index] for name, waveform in self.captures.items()}
         return MatchRecord(
             start=MatchPoint(

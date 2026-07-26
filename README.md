@@ -164,7 +164,8 @@ with VcdReader("axi_tb.vcd") as f:
     result = match(pattern)
 
     ok = result.filter_ok()
-    print(f"Read latencies (cycles): {ok.duration.value}")
+    latency = ok.end.clock - ok.start.clock
+    print(f"Read latencies (cycles): {latency}")
     print(f"Read data: {ok.captures['rdata'].value}")
 ```
 
@@ -197,7 +198,8 @@ pattern = (
 result = match(pattern)
 
 stalls = result.filter_ok()
-print(f"Stall durations: {stalls.duration.value} cycles")
+stall_cycles = stalls.duration.value - 1
+print(f"Stall durations: {stall_cycles} cycles")
 ```
 
 #### Programmable example
@@ -381,7 +383,7 @@ changed = wave != wave.back(3)
 | Method | Description |
 |--------|-------------|
 | `.wait(cond, *, require=None, require_message=None)` | Block until `cond` is True without consuming the event. Resumes in the same cycle when already true; use `.delay(1)` for next-cycle behavior. `require` is checked each waiting cycle (failure → `MatchStatus.RequireViolated`). |
-| `.consume(cond, channel, *, require=None, require_message=None)` | Block until `cond` is True and this instance can exclusively consume from `channel`. Resumes in the same cycle on success. Use this for FIFO request/response pairing and per-key routing. |
+| `.consume(cond, channel, *, require=None, require_message=None)` | Block until `cond` is True and this instance can exclusively consume from `channel`. Resumes in the same cycle on success. Use this for request/response pairing and per-key routing. |
 | `.delay(n, *, require=None, require_message=None)` | Advance `n` cycles. `delay(0)` is a no-op. `require` must hold every cycle. |
 | `.capture(name, signal, *, mode='last')` | Record signal value at current cycle. `mode='last'` (default) overwrites; `'first'` keeps the first write; `'list'` appends to a list. |
 | `.require(cond)` | Assert condition; fail with `MatchStatus.RequireViolated` if False. |
@@ -416,8 +418,8 @@ Callback arguments depend on whether the callback is used in the declarative API
 **Channels and consume vs. wait**
 
 `wait()` is observational: every matching instance can see the same event.
-`consume()` adds ownership: only one instance can claim a given `(channel, cycle)`,
-so it can pair requests with responses in FIFO order.
+`consume()` adds ownership: only one instance can claim a given `(channel, cycle)`.
+On the same channel, matches with earlier start cycles claim available events first.
 
 A `Channel` is an identity token for consume ownership. Pass a `Channel` object,
 a hashable key, or a dynamic callback to `consume(..., channel=...)`. All
@@ -427,9 +429,9 @@ instances sharing the same channel key compete for the same logical channel.
 from collections import defaultdict
 from wavekit.pattern import Channel, Pattern, match
 
-# Multi-bank cache: each bank has its own response port, so two banks
-# can return data in the *same* cycle. A per-bank Channel lets each in-flight
-# read consume from its own bank while preserving FIFO order within that bank.
+# Multi-bank cache: each bank has its own response port, so two banks can return
+# data in the same cycle. Per-bank channels let independent requests consume
+# independent response streams.
 banks = defaultdict(Channel)
 
 pattern = (
@@ -457,7 +459,7 @@ result = match(pattern)
 | `.ok` | Boolean Waveform where `status == MatchStatus.OK()`. |
 | `.failed` | Boolean Waveform where `status != MatchStatus.OK()`. |
 | `.filter_ok()` | Return only `OK` matches. |
-| `.filter_status(status)` | Return only matches with the given status object or status class. |
+| `.filter_status(status_class)` | Return only matches with the given status class, such as `MatchStatus.Timeout`. |
 | `.filter_failed()` | Return only non-OK matches. |
 
 `MatchRecords[i]` returns a single `MatchRecord`, and slices return another

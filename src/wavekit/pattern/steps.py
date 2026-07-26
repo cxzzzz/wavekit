@@ -10,13 +10,11 @@ from ..waveform import Waveform
 
 
 class Channel:
-    """Identity object for explicit FIFO consumption.
+    """Identity object for explicit consume ownership.
 
     A ``Channel`` represents a logical event stream from which at most one
-    pattern instance may consume per cycle.  Multiple consume steps that bind to
-    the same ``Channel`` instance form a single FIFO consumer group (oldest
-    in-flight instance wins).  Plain ``wait`` steps are observational and do not
-    consume channels.
+    pattern instance may consume per cycle. Plain ``wait`` steps are
+    observational and do not consume channels.
 
     """
 
@@ -65,7 +63,7 @@ class WaitStep(Step):
 
 @dataclass
 class ConsumeStep(Step):
-    """Blocking: wait for *cond* and consume an explicit FIFO channel.
+    """Blocking: wait for *cond* and consume an explicit channel.
 
     Attributes
     ----------
@@ -74,7 +72,7 @@ class ConsumeStep(Step):
         waveform-array sample index, not a cycle number.
     channel:
         Explicit ``Channel`` / hashable key (or ``callable`` returning one) for
-        FIFO consumption. Callable ``index`` is the absolute waveform sample
+        consume ownership. Callable ``index`` is the absolute waveform sample
         index.
     require:
         Optional condition that must hold every cycle while waiting or blocked

@@ -73,8 +73,8 @@ brace, regex, wildcard, and module-definition matches are retained.
 
 **Clock assignment:**
 - If `clock_path` matches **one** signal -> that clock is shared by all.
-- If `clock_path` matches **multiple** signals -> keys must match signal keys
-  exactly (per-signal clock).
+- If `clock_path` matches **multiple** signals -> each signal uses the matched
+  clock whose key is the longest prefix of the signal key.
 
 ```python
 # Single clock broadcast
@@ -97,8 +97,7 @@ bitmask; bit `1` means the corresponding source bit was selected by
 | `sample_on_posedge` / windows | | same as `load_waveform` | Align masks exactly with value waveforms. |
 
 When both flags are `False`, the returned mask is all zero.  The returned mask
-is always unsigned, has the requested signal width after range selection, and is
-named `unknown_mask(<signal>)`.
+is always unsigned and has the requested signal width after range selection.
 
 ```python
 data = r.load_waveform("tb.dut.data[7:0]", clock="tb.clk", xz_value=0)
@@ -195,7 +194,7 @@ Every operation returns a **new** `Waveform`; none mutate in place.
 | `.time` | `ndarray` | Simulation timestamp per sample |
 | `.width` | `int\|None` | Bit-width of the signal |
 | `.signed` | `bool` | Whether values are two's-complement signed |
-| `.name` | `str` | Full signal path string |
+| `.signal` | `Signal\|None` | Source signal metadata; use `.signal.full_name` for the full path when present |
 | `.data` | `np.recarray` | All three arrays as `("time","clock","value")` |
 
 ### Filtering
@@ -390,7 +389,7 @@ usually the clearer choice.
 | `.captures` | `dict[str, Waveform]` | Named captures aligned to result rows. |
 | `.ok` / `.failed` | `Waveform[bool]` | Boolean result-row masks. |
 
-Use `filter_ok()`, `filter_failed()`, and `filter_status(status_or_class)`. For
+Use `filter_ok()`, `filter_failed()`, and `filter_status(status_class)`. For
 example, `result.filter_status(MatchStatus.Timeout)` keeps all timeout rows.
 
 **`end` is inclusive**: to extract a waveform slice for a match use
@@ -400,7 +399,8 @@ example, `result.filter_status(MatchStatus.Timeout)` keeps all timeout rows.
 
 `consume(cond, channel)` claims only the current `(logical_channel, cycle)` when
 `cond` is true and that event is free. It does not reserve a channel while
-waiting. A successful consume remains committed even if the candidate later
+waiting. On the same channel, matches with earlier start cycles claim available
+events first. A successful consume remains committed even if the candidate later
 fails or times out.
 
 `MatchRecords[i]` returns a `MatchRecord`, and slices return another
@@ -432,8 +432,8 @@ result = match(pattern)
    (high index first, matching Verilog convention).
 4. **`take()` vs `mask()`**: `take` needs integer indices; `mask` needs a
    boolean array or 1-bit Waveform.
-5. **Width > 64**: stored as Python `object` arrays; arithmetic still works but
-   is slower.
+5. **Width > 64**: stored as Python `object` arrays; many operations still work
+   but are slower.
 6. **Time units**: `begin_time` / `end_time` are in the file's native simulator
    time unit (no automatic conversion).  Use `begin_cycle` / `end_cycle` for
    clock-cycle-based windowing (mutually exclusive with time parameters).

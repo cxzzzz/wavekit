@@ -1,12 +1,22 @@
 """Declarative Pattern builder/API and compiler control-flow tests."""
 
+import signal
+
 import numpy as np
 import pytest
 
 from helpers import bool_wf as _bool_wf
 from helpers import wf as _wf
 from wavekit import Waveform
-from wavekit.pattern import MatchRecord, MatchRecords, MatchStatus, Pattern, match
+from wavekit.pattern import (
+    MatchRecord,
+    MatchRecords,
+    MatchStatus,
+    Pattern,
+    PatternError,
+    collect,
+    match,
+)
 
 
 class TestSingleWait:
@@ -157,7 +167,7 @@ class TestRepeatDynamic:
             .capture('len', len_sig)
             .repeat(
                 Pattern().wait(beat).capture('d', data, mode='list').delay(1),
-                n=lambda idx, cap: cap['len'],
+                n=lambda idx, cap: int(cap['len']),
             )
         )
         ok = result.filter_ok()
@@ -219,6 +229,58 @@ class TestBranch:
         assert len(ok) == 1
         assert ok.captures['always'].value[0] == 42
         assert 'optional' not in ok.captures
+
+
+class TestPatternRegressionEdges:
+    def test_zero_time_loop_is_guarded(self):
+        trigger = _bool_wf([1])
+        pattern = Pattern().wait(trigger).loop(Pattern().delay(0), when=True)
+
+        def fail_on_alarm(_signum, _frame):
+            raise AssertionError('zero-time loop did not stop')
+
+        old_handler = signal.signal(signal.SIGALRM, fail_on_alarm)
+        signal.setitimer(signal.ITIMER_REAL, 1.0)
+        try:
+            with pytest.raises(PatternError, match='same-cycle'):
+                match(pattern)
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0.0)
+            signal.signal(signal.SIGALRM, old_handler)
+
+    def test_first_unguarded_wait_callback_runs_once_per_start(self):
+        fire = _bool_wf([1, 0, 1])
+        calls = []
+
+        def trigger(index, _captures):
+            calls.append(index)
+            return bool(fire.value[index])
+
+        result = match(Pattern().wait(trigger), axis=fire)
+        assert len(result) == 2
+        assert calls == [0, 1, 2]
+
+    @pytest.mark.parametrize('timeout', [0, -1, 1.5])
+    def test_timeout_requires_positive_integer(self, timeout):
+        fire = _bool_wf([1])
+        with pytest.raises(PatternError, match='timeout'):
+            match(Pattern().wait(fire), timeout=timeout)
+        with pytest.raises(PatternError, match='timeout'):
+
+            def collect_body(ctx):
+                return ctx.OK if ctx.value(fire) else None
+
+            collect(collect_body, timeout=timeout)
+
+    def test_declarative_delay_dynamic_count_is_not_coerced(self):
+        fire = _bool_wf([1, 0])
+        with pytest.raises(PatternError, match='integer value'):
+            match(Pattern().wait(fire).delay(lambda _idx, _cap: '1'))
+
+    def test_declarative_repeat_dynamic_count_is_not_coerced(self):
+        fire = _bool_wf([1])
+        with pytest.raises(PatternError, match='integer value'):
+            match(Pattern().wait(fire).repeat(Pattern(), lambda _idx, _cap: '2'))
 
 
 class TestMatchRecords:
@@ -283,11 +345,21 @@ class TestMatchRecords:
         assert result.failed.width == 1
         assert result.failed.signed is False
 
-    @pytest.mark.parametrize('status', [MatchStatus.Timeout(), MatchStatus.Timeout])
-    def test_filter_status_keeps_exact_status_and_capture_alignment(self, status):
+    def test_filter_status_rejects_concrete_status_object(self):
         result = self._mixed_status_result()
-        timeout = result.filter_status(status)
-        np.testing.assert_array_equal(timeout.status.value, [MatchStatus.Timeout()])
+        with pytest.raises(TypeError, match='status class'):
+            result.filter_status(MatchStatus.Timeout())
+
+    def test_filter_status_rejects_unrelated_class(self):
+        result = self._mixed_status_result()
+        with pytest.raises(TypeError, match='MatchStatus'):
+            result.filter_status(object)
+
+    def test_filter_status_accepts_status_class(self):
+        result = self._mixed_status_result()
+        timeout = result.filter_status(MatchStatus.Timeout)
+        assert len(timeout) == 1
+        assert timeout[0].status == MatchStatus.Timeout()
         np.testing.assert_array_equal(timeout.start.value, [1])
         np.testing.assert_array_equal(timeout.end.value, [4])
         np.testing.assert_array_equal(timeout.duration.value, [4])
@@ -296,11 +368,10 @@ class TestMatchRecords:
         assert list(timeout.captures['samples'].value[0]) == [2, 3]
         np.testing.assert_array_equal(timeout.captures['samples'].clock, timeout.start.clock)
 
-    def test_filter_status_accepts_status_class(self):
+    def test_integer_index_too_negative_raises_index_error(self):
         result = self._mixed_status_result()
-        timeout = result.filter_status(MatchStatus.Timeout)
-        assert len(timeout) == 1
-        assert timeout[0].status == MatchStatus.Timeout()
+        with pytest.raises(IndexError):
+            _ = result[-len(result) - 1]
 
     def test_filter_failed_keeps_non_ok_statuses(self):
         result = self._mixed_status_result()

@@ -20,6 +20,13 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - Add canonical `/regex/` query syntax while retaining `@regex` as a compatibility
   spelling.
 
+### Fixed
+- Guard Pattern zero-time declarative loops against infinite same-cycle execution.
+- Avoid double-evaluating the first unguarded declarative `wait(...)` trigger.
+- Preserve non-integer Python capture values in `MatchRecords.captures`.
+- Reject invalid Pattern timeout and dynamic integer values instead of coercing them.
+- Check programmable `ctx.value/cycle/time(..., offset=...)` bounds before reading waveform arrays.
+
 ## 0.7.0a1 - 2026-06-19
 
 ### Added

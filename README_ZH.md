@@ -155,7 +155,8 @@ with VcdReader("axi_tb.vcd") as f:
     result = match(pattern)
 
     ok = result.filter_ok()
-    print(f"读延迟（周期）: {ok.duration.value}")
+    latency = ok.end.clock - ok.start.clock
+    print(f"读延迟（周期）: {latency}")
     print(f"读数据: {ok.captures['rdata'].value}")
 ```
 
@@ -188,7 +189,8 @@ pattern = (
 result = match(pattern)
 
 stalls = result.filter_ok()
-print(f"Stall 持续时间: {stalls.duration.value} 周期")
+stall_cycles = stalls.duration.value - 1
+print(f"Stall 持续时间: {stall_cycles} 周期")
 ```
 
 #### 编程式示例
@@ -367,7 +369,7 @@ changed = wave != wave.back(3)
 | 方法 | 说明 |
 |------|------|
 | `.wait(cond, *, require=None, require_message=None)` | 等到 `cond` 为真，但不占用这个事件。如果当前周期已经满足条件，会在同一周期继续；如果想等到下一周期，显式写 `.delay(1)`。`require` 会在等待期间每周期检查，失败则标记为 `MatchStatus.RequireViolated`。 |
-| `.consume(cond, channel, *, require=None, require_message=None)` | 等到 `cond` 为真，并从 `channel` 独占消费这个事件。适合把请求和响应按 FIFO 顺序配对，或按 key 分流。 |
+| `.consume(cond, channel, *, require=None, require_message=None)` | 等到 `cond` 为真，并从 `channel` 独占消费这个事件。适合把请求和响应配对，或按 key 分流。 |
 | `.delay(n, *, require=None, require_message=None)` | 前进 n 个周期。`delay(0)` 不做任何事。`require` 在延迟期间必须一直为真。 |
 | `.capture(name, signal, *, mode='last')` | 在当前周期记录信号值。`mode='last'` 默认覆盖旧值；`'first'` 只保留第一次；`'list'` 追加到列表。 |
 | `.require(cond)` | 检查当前周期必须满足 `cond`，否则标记为 `MatchStatus.RequireViolated`。 |
@@ -404,7 +406,7 @@ changed = wave != wave.back(3)
 
 `wait()` 只是观察事件，所以多个匹配实例可以看到同一个响应。
 `consume()` 会记录所有权：同一个 `(channel, cycle)` 只能被一个实例占用，
-因此可以按 FIFO 顺序把请求和响应配对。
+在同一个 channel 上，较早 start 的匹配会优先占用可用事件。
 
 `Channel` 是 `consume()` 的逻辑占用键。可以传 `Channel` 对象、
 hashable key，或者动态回调给 `consume(..., channel=...)`。
@@ -415,8 +417,7 @@ from collections import defaultdict
 from wavekit.pattern import Channel, Pattern, match
 
 # 多 Bank Cache：每个 bank 有独立的响应端口，多个 bank 可以在同一周期返回数据。
-# 按 bank 分 Channel 可以让每个在飞读请求各自消费对应 bank 的响应，
-# 同时保留同一 bank 内的 FIFO 顺序。
+# 按 bank 分 channel 后，不同 bank 的请求可以消费各自独立的响应流。
 banks = defaultdict(Channel)
 
 pattern = (
@@ -444,7 +445,7 @@ result = match(pattern)
 | `.ok` | 布尔 Waveform，表示 `status == MatchStatus.OK()`。 |
 | `.failed` | 布尔 Waveform，表示 `status != MatchStatus.OK()`。 |
 | `.filter_ok()` | 只保留状态为 `OK` 的匹配实例。 |
-| `.filter_status(status)` | 只保留指定 status 对象或 status class 的匹配实例。 |
+| `.filter_status(status_class)` | 只保留指定 status class 的匹配实例，例如 `MatchStatus.Timeout`。 |
 | `.filter_failed()` | 只保留非 OK 的匹配实例。 |
 
 `MatchRecords[i]` 返回单个 `MatchRecord`，切片则返回新的 `MatchRecords`。

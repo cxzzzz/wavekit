@@ -75,9 +75,9 @@ class Reader(Generic[SignalT]):
     * ``$<module>`` / ``$$<module>`` — match direct or recursive FSDB module
       definitions; module captures are retained as :class:`~wavekit.ExactCapture`.
 
-    All pattern expansions produce ``dict[CaptureKey, Signal]``. Ordinary exact-name
-    components are omitted from keys; binding matchers retain typed ``Capture`` objects,
-    and each value is the matched :class:`~wavekit.Signal` object.
+    Matching APIs use ``CaptureKey`` dictionary keys. Ordinary exact-name components
+    are omitted from keys; binding matchers retain typed ``Capture`` objects. The
+    dictionary value type depends on the API.
     """
 
     def __init__(self):
@@ -151,8 +151,8 @@ class Reader(Generic[SignalT]):
         Waveform:
             One sample per clock edge within the requested window.  The
             ``.clock`` array contains absolute cycle numbers from the start
-            of simulation.  The waveform's ``name`` and ``signal.full_name``
-            are set to the user-provided *signal* path.
+            of simulation.  ``waveform.signal.full_name`` records the resolved
+            signal path when source metadata is available.
 
         Raises
         ------
@@ -222,7 +222,7 @@ class Reader(Generic[SignalT]):
         Returns
         -------
         Waveform:
-            Unsigned mask waveform named ``unknown_mask(<signal>)``.
+            Unsigned mask waveform.
         """
         resolved_signal = self._resolve_signal(signal)
         resolved_clock = self._resolve_signal(clock)

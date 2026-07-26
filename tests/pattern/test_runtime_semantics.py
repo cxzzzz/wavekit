@@ -70,7 +70,7 @@ class TestDelay:
             Pattern()
             .wait(trigger)
             .capture('n', len_sig)
-            .delay(lambda idx, cap: cap['n'])
+            .delay(lambda idx, cap: int(cap['n']))
             .capture('val', data)
         )
         assert len(result) == 1

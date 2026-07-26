@@ -73,7 +73,6 @@ def infer_declarative_axis(steps: list[Step]) -> Waveform | None:
 
 def compile_declarative_pattern(steps: list[Step]) -> Callable[[PatternContext], Any]:
     """Compile declarative pattern steps into a program body."""
-    first_step = steps[0] if steps else None
 
     def eval_condition(cond: Condition, ctx: PatternContext) -> bool:
         if isinstance(cond, Waveform):
@@ -94,11 +93,10 @@ def compile_declarative_pattern(steps: list[Step]) -> Callable[[PatternContext],
         raise PatternError(f'signal must be a Waveform or callable, got {type(signal).__name__}')
 
     def eval_int(value: IntValue, ctx: PatternContext) -> int:
+        if callable(value):
+            value = value(ctx.index, ctx.captures)
         if isinstance(value, int):
             return value
-        if callable(value):
-            result = value(ctx.index, ctx.captures)
-            return int(result)
         raise PatternError(f'integer value must be an int or callable, got {type(value).__name__}')
 
     def eval_message(message: MessageValue | None, ctx: PatternContext) -> str | None:
@@ -169,9 +167,11 @@ def compile_declarative_pattern(steps: list[Step]) -> Callable[[PatternContext],
             elif isinstance(step, LoopStep):
                 if step.when is not None:
                     while eval_condition(step.when, ctx):
+                        ctx._guard_operation()
                         run_steps(ctx, step.body_template)
                 elif step.until is not None:
                     while True:
+                        ctx._guard_operation()
                         run_steps(ctx, step.body_template)
                         if eval_condition(step.until, ctx):
                             break
@@ -181,16 +181,19 @@ def compile_declarative_pattern(steps: list[Step]) -> Callable[[PatternContext],
                 raise PatternError(f'Unknown step type: {type(step).__name__}')
 
     def body(ctx: PatternContext) -> object:
+        first_step = steps[0] if steps else None
         if isinstance(first_step, WaitStep) and first_step.require is None:
             # Treat the first unguarded wait as the trigger: candidates whose
             # first condition is false are discarded immediately instead of
             # accumulating as blocked instances. Guarded first waits cannot use
             # this shortcut because require must be evaluated while blocked.
             # Consume steps are not trigger-shortcut candidates because they
-            # need FIFO/ownership arbitration through the runtime.
+            # need channel ownership arbitration through the runtime.
             if not eval_condition(first_step.cond, ctx):
                 return None
-        run_steps(ctx, steps)
+            run_steps(ctx, steps[1:])
+        else:
+            run_steps(ctx, steps)
         return ctx.OK
 
     return body

@@ -147,6 +147,36 @@ def test_context_value_cycle_time_and_offsets():
     assert result.captures['scalar'].value[0] == 123
 
 
+def test_context_offset_before_start_raises_pattern_error():
+    fire = _bool_wf([1, 0])
+    data = _wf([10, 20], width=8)
+
+    def tx(ctx):
+        if ctx.value(fire):
+            ctx.value(data, offset=-1)
+            return ctx.OK
+        return None
+
+    with pytest.raises(PatternError, match='out of range'):
+        match(tx)
+
+
+def test_capture_preserves_non_integer_python_values():
+    fire = _bool_wf([1])
+
+    def tx(ctx):
+        if ctx.value(fire):
+            ctx.capture('ratio', 1.5)
+            ctx.capture('label', '2')
+            return ctx.OK
+        return None
+
+    result = match(tx)
+    assert result.captures['ratio'].value[0] == 1.5
+    assert result[0].captures['ratio'] == 1.5
+    assert result.captures['label'].value[0] == '2'
+
+
 def test_program_waveform_axes_must_be_aligned():
     fire = _bool_wf([1, 0, 1])
     misaligned = Waveform(
@@ -175,7 +205,7 @@ def test_condition_and_delay_validation():
 
     def bad_delay(ctx):
         if ctx.value(fire):
-            ctx.delay(True)
+            ctx.delay(1.5)
 
     with pytest.raises(PatternError, match='integer'):
         match(bad_delay)

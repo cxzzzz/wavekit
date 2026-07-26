@@ -23,7 +23,7 @@ def test_axi_read_latency():
     result = match(Pattern().wait(arvalid & arready).wait(rvalid & rready).capture('rdata', rdata))
     ok = result.filter_ok()
     assert len(ok) == 2
-    np.testing.assert_array_equal(ok.duration.value, [4, 3])
+    np.testing.assert_array_equal(ok.end.clock - ok.start.clock, [3, 2])
     np.testing.assert_array_equal(ok.captures['rdata'].value, [57005, 48879])
 
 
@@ -51,7 +51,7 @@ def test_stall_detection():
     stalls = result.filter_ok()
     assert len(stalls) == 2
     np.testing.assert_array_equal(stalls.start.value, [1, 7])
-    np.testing.assert_array_equal(stalls.duration.value, [5, 3])
+    np.testing.assert_array_equal(stalls.duration.value - 1, [4, 2])
 
 
 def test_dma_command_stream_collect():

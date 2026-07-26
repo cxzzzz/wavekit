@@ -80,7 +80,7 @@ class PatternContext:
         self._same_cycle_steps += 1
         if self._same_cycle_steps > _MAX_SAME_CYCLE_STEPS:
             raise PatternError('programmable Pattern exceeded same-cycle step limit')
-        timeout = self._runtime._timeout_cycles
+        timeout = self._runtime._timeout
         if timeout is not None and self._index - self._instance.start_index + 1 > timeout:
             raise _StopPattern(self._timeout_status(None))
         self._touch()
@@ -107,6 +107,14 @@ class PatternContext:
             return
         raise _StopPattern(self._require_status(require_message))
 
+    def _waveform_index(self, waveform: Waveform, offset: int) -> int:
+        index = self._index + offset
+        self._runtime.note_waveform(waveform)
+        if index < 0 or index >= len(waveform.value):
+            raise PatternError(f'waveform offset {offset} is out of range at index {self._index}')
+        self._touch()
+        return index
+
     def value(self, waveform: Waveform, offset: int = 0) -> Any:
         """Return a waveform value at the current sample plus *offset*.
 
@@ -125,9 +133,7 @@ class PatternContext:
         Any
             Scalar value from ``waveform.value[ctx.index + offset]``.
         """
-        index = self._index + offset
-        self._runtime.note_waveform(waveform)
-        self._touch()
+        index = self._waveform_index(waveform, offset)
         return waveform.value[index]
 
     def cycle(self, waveform: Waveform, offset: int = 0) -> Any:
@@ -145,9 +151,7 @@ class PatternContext:
         Any
             Scalar value from ``waveform.clock[ctx.index + offset]``.
         """
-        index = self._index + offset
-        self._runtime.note_waveform(waveform)
-        self._touch()
+        index = self._waveform_index(waveform, offset)
         return waveform.clock[index]
 
     def time(self, waveform: Waveform, offset: int = 0) -> Any:
@@ -165,9 +169,7 @@ class PatternContext:
         Any
             Scalar value from ``waveform.time[ctx.index + offset]``.
         """
-        index = self._index + offset
-        self._runtime.note_waveform(waveform)
-        self._touch()
+        index = self._waveform_index(waveform, offset)
         return waveform.time[index]
 
     def wait(
@@ -298,7 +300,7 @@ class PatternContext:
             If ``n`` is invalid, a require guard fails, timeout is reached, or no
             scan axis can be determined.
         """
-        if isinstance(n, bool) or not isinstance(n, int):
+        if not isinstance(n, int):
             raise PatternError('ctx.delay(n) requires an integer cycle count')
         if n < 0:
             raise PatternError(f'ctx.delay(n) requires n >= 0, got {n}')
@@ -375,11 +377,14 @@ class PatternRuntime:
         program: Callable[[PatternContext], Any],
         *,
         axis: Waveform | None = None,
-        timeout_cycles: int | None = None,
+        timeout: int | None = None,
         timeout_message: str | None = None,
     ) -> None:
+        if timeout is not None:
+            if not isinstance(timeout, int) or timeout <= 0:
+                raise PatternError('timeout must be a positive integer')
         self._program = program
-        self._timeout_cycles = timeout_cycles
+        self._timeout = timeout
         self._timeout_message = timeout_message
         self._axis: Waveform | None = axis
         self._start_cycle: int | None = None
@@ -452,10 +457,7 @@ class PatternRuntime:
         captures: dict[str, Waveform] = {}
         for name in sorted(all_keys):
             vals = [inst.captures.get(name) for inst in completed]
-            try:
-                arr = np.array(vals, dtype=np.int64)
-            except (ValueError, TypeError, OverflowError):
-                arr = np.array(vals, dtype=object)
+            arr = np.array(vals, dtype=object)
             captures[name] = row_wf(arr)
 
         return MatchRecords(

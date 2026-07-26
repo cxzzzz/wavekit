@@ -318,7 +318,7 @@ def match(
         Pass ``axis`` when the body may not observe a waveform before blocking, or
         when using ``start_cycle`` / ``end_cycle`` without an inferable waveform.
     timeout:
-        Optional per-start maximum duration in cycles. Exceeding it records
+        Optional positive integer per-start maximum duration in cycles. Exceeding it records
         ``MatchStatus.Timeout(timeout_message)``.
     timeout_message:
         Optional human-readable message stored in timeout statuses.
@@ -344,7 +344,7 @@ def match(
         return PatternRuntime(
             compile_declarative_pattern(body._steps),
             axis=runtime_axis,
-            timeout_cycles=timeout,
+            timeout=timeout,
             timeout_message=timeout_message,
         ).match(start_cycle=start_cycle, end_cycle=end_cycle)
 
@@ -354,7 +354,7 @@ def match(
     return PatternRuntime(
         body,
         axis=axis,
-        timeout_cycles=timeout,
+        timeout=timeout,
         timeout_message=timeout_message,
     ).match(start_cycle=start_cycle, end_cycle=end_cycle)
 
@@ -380,7 +380,7 @@ def collect(
         Optional waveform that defines the scan axis. Pass it when the body may not
         observe a waveform before blocking, or when using a scan window.
     timeout:
-        Optional per-start maximum duration in cycles. Timeout raises
+        Optional positive integer per-start maximum duration in cycles. Timeout raises
         ``PatternError`` instead of returning a status row.
     timeout_message:
         Optional human-readable timeout message.
@@ -406,6 +406,6 @@ def collect(
     return PatternRuntime(
         body,
         axis=axis,
-        timeout_cycles=timeout,
+        timeout=timeout,
         timeout_message=timeout_message,
     ).collect(start_cycle=start_cycle, end_cycle=end_cycle)
