@@ -7,40 +7,71 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
-### Changed
-- Refactor Pattern execution to a start-major synchronous runtime and remove async/await from programmable bodies.
-- Move pattern execution to module-level `match(...)` / `collect(...)` entry points and keep `Pattern` as a declarative builder.
-- Replace the old batch result surface with `MatchRecord` / `MatchRecords` and structured `MatchStatus` objects.
-- Treat the first declarative blocking step as the transaction-start selector, including `wait(..., require=...)` and `consume(...)`.
-- Replace the legacy `scope.py`, `signal.py`, and `pattern_parser.py` modules with
-  immutable hierarchy types and the unified query matcher.
-- Standardize matched-reader results on typed `CaptureKey` tuples and remove
-  ordinary exact-name captures from public keys.
-- Expose immutable reader roots through `Reader.top_scopes` and use
-  `signal_path` / `clock_path` for matched loading APIs.
-- Add canonical `/regex/` query syntax while retaining `@regex` as a compatibility
-  spelling.
+## v0.7.0 - 2026-07-26
 
-### Fixed
-- Guard Pattern zero-time declarative loops against infinite same-cycle execution.
-- Avoid double-evaluating the first unguarded declarative `wait(...)` trigger.
-- Preserve non-integer Python capture values in `MatchRecords.captures`.
-- Reject invalid Pattern timeout and dynamic integer values instead of coercing them.
-- Check programmable `ctx.value/cycle/time(..., offset=...)` bounds before reading waveform arrays.
-- Make `Waveform.compress()` preserve value-change points and the final sample.
+### Breaking Changes
+- Redesign Pattern imports and execution. Pattern APIs now live under
+  `wavekit.pattern`, and execution uses module-level `match(...)` /
+  `collect(...)` instead of `Pattern().match()` / `Pattern().timeout(...)`.
 
-## 0.7.0a1 - 2026-06-19
+- Replace `MatchResult` with `MatchRecords` / `MatchRecord`. Results now support
+  row access with `records[i]`, slicing, structured start/end points, status
+  objects, and capture columns.
+
+- Replace enum-style Pattern statuses and `valid` helpers. Use
+  `MatchStatus.OK()`, `MatchStatus.Timeout(message)`,
+  `MatchStatus.RequireViolated(message)`, plus `ok`, `failed`,
+  `filter_ok()`, `filter_failed()`, and `filter_status(...)`.
+
+- Update Pattern timing and blocking semantics. `wait(...)` observes events,
+  `consume(...)` claims events exclusively for channel-based pairing, and
+  successful blocking steps continue in the same cycle. Use `delay(1)` for
+  next-cycle behavior.
+
+- Rename matched-reader parameters from `pattern` / `clock_pattern` to
+  `signal_path` / `clock_path`.
+
+- Change matched-reader keys from plain captured values to typed `CaptureKey`
+  tuples containing capture objects such as `BraceCapture` and `RegexCapture`.
+
+- Replace legacy `wavekit.scope`, `wavekit.signal`, and
+  `wavekit.readers.pattern_parser` modules with the unified hierarchy/query
+  model under `wavekit.readers`.
 
 ### Added
-- Programmable Pattern API (async body + declarative builder unified runtime)
-- Unknown-mask waveform loading (`load_unknown_mask`, `load_matched_unknown_masks`)
-- Pattern result status filters (`filter_ok`, `filter_failed`, `filter_status`)
+- Add programmable Pattern execution with normal Python functions through
+  `match(body)` for checks and `collect(body)` for extraction.
+
+- Add Pattern failure diagnostics with `require_message=` and
+  `timeout_message=`.
+
+- Add experimental unknown-mask loading APIs:
+  `load_unknown_mask(...)` and `load_matched_unknown_masks(...)`.
+
+- Add unified query matcher support for canonical `/regex/` syntax, `*` / `**`
+  wildcards, and typed capture objects.
 
 ### Changed
-- Unify declarative/programmable pattern runtime into single engine
-- Remove legacy pattern engine and tick compatibility
-- Simplify reader backend hook docstrings; mark unknown-mask API experimental
-- Unify value-change loading across readers
+- Unify reader hierarchy, signal resolution, query matching, and matched loading
+  across VCD, FST, and FSDB readers.
+
+- Improve range handling for native ranges, non-zero ranges, scalar bit selects,
+  packed ranges, and FSDB leaf signals.
+
+- Improve `Waveform.__repr__` / `__str__`.
+
+- Make `Waveform.compress()` preserve value-change points and the final sample.
+
+### Fixed
+- Fix Pattern zero-time declarative loops so they cannot run forever in the same
+  cycle.
+
+- Avoid double-evaluating the first unguarded declarative `wait(...)` trigger.
+
+- Improve VCD/FST/FSDB reader behavior for empty signals, invalid ranges,
+  composite signals, and X/Z handling.
+
+- Validate `xz_value` consistently.
 
 ## v0.6.1 - 2026-05-23
 
