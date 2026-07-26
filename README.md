@@ -8,29 +8,29 @@
 
 English | [中文](README_ZH.md)
 
-**Wavekit** is a fundamental Python library for digital waveform analysis. By seamlessly converting VCD, FST, and FSDB data into Numpy arrays, it empowers engineers to perform high-performance signal processing, protocol analysis, and automated verification with ease.
+**wavekit** is a high-performance Python library for digital waveform analysis. It loads VCD, FST, and FSDB signals into NumPy-backed `Waveform` objects, and builds on them with efficient signal processing, protocol analysis, and automated verification APIs.
 
-> 🤖 **AI Integration**: [wavekit-mcp](https://github.com/cxzzzz/wavekit-mcp) — MCP server for AI-assisted waveform analysis. Let AI load signals and run pattern matching — no manual coding required.
+> 🤖 **AI integration**: [wavekit-mcp](https://github.com/cxzzzz/wavekit-mcp) provides an MCP server for AI-assisted waveform analysis: load signals and run pattern matching from AI tools without hand-written scripts.
 
-## ✨ Features
+## Features
 
-- **Flexible Signal Extraction**: Flexible batch signal extraction via brace expansion, integer ranges, and regular expressions — load groups of related signals in one call.
-- **Rich Analysis Tools**: Numpy-like API for arithmetic, masking, bit-field manipulation, edge detection, and time/cycle slicing — compose complex signal queries in just a few lines.
-- **Pattern Matching**: Unified temporal pattern runtime that scans waveforms in a single pass to extract protocol transactions, measure latencies, and detect timing violations.
-- **High-Performance Parsing & Storage**: VCD, FST, and FSDB readers with Numpy-backed storage for fast loading and memory efficiency, handling large simulation files with ease.
+- **Batch signal extraction**: use brace expansion, integer ranges, regex, and wildcards to load related signals in one call.
+- **Rich analysis API**: use NumPy-style arithmetic, masking, bit slicing, edge detection, and time/cycle slicing to build signal queries in a few lines.
+- **Temporal pattern matching**: use declarative and programmable Pattern APIs to extract protocol transactions, measure handshake latency, and detect timeout or hang failures.
+- **High-performance waveform processing**: read VCD, FST, and FSDB files into compact NumPy-backed arrays for fast loading and efficient memory use.
 
-## 📦 Installation
+## Installation
 
 ```bash
 pip install wavekit
 ```
 
 **Note**: To read FSDB files, the Verdi runtime library (`libNPI.so`) must be available at runtime. Configure via:
-- `WAVEKIT_NPI_LIB` — direct path to `libNPI.so`
-- `VERDI_HOME` — Verdi installation directory (searches `$VERDI_HOME/share/NPI/lib/...`)
-- `LD_LIBRARY_PATH` — system library search path
+- `WAVEKIT_NPI_LIB`: direct path to `libNPI.so`
+- `VERDI_HOME`: Verdi installation directory (searches `$VERDI_HOME/share/NPI/lib/...`)
+- `LD_LIBRARY_PATH`: system library search path
 
-## 🚀 Quick Start
+## Quick start
 
 > The examples below use placeholder filenames such as `sim.vcd`. Replace them with the path to your own VCD, FST, or FSDB file, and adjust signal paths to match your design hierarchy.
 
@@ -59,7 +59,7 @@ with VcdReader("jtag.vcd") as f:
 
 ### 2. Signal Analysis
 
-Waveforms support Numpy-style arithmetic, masking, and edge detection out of the box.
+Waveforms support NumPy-style arithmetic, masking, and edge detection.
 
 ```python
 import numpy as np
@@ -130,12 +130,12 @@ with VcdReader("fifo_tb.vcd") as f:
 
 ### 4. Pattern Matching
 
-`Pattern` scans a waveform and extracts all matching transactions — a request/response pair, a burst, a stall interval, or any other repeating timing pattern.
+`Pattern` scans a waveform and extracts matching transactions, such as a request/response pair, a burst, a stall interval, or another repeating timing pattern.
 
-There are two ways to describe a pattern:
+Choose the form that matches the transaction shape:
 
-- **Declarative** — chain steps like `.wait()`, `.consume()`, `.capture()`, `.loop()`. Best for fixed transaction flows.
-- **Programmable** — pass a handler function to `match(...)` or `collect(...)`. Best for dynamic branches, per-ID routing, and other complex flows.
+- **Declarative**: use `.wait()`, `.consume()`, `.capture()`, and `.loop()` steps to describe fixed flows.
+- **Programmable**: use a normal Python function when the flow depends on waveform values, such as dynamic branches or per-ID routing.
 
 `match(pattern)` returns `MatchRecords`, while `collect(body)` returns a Python `list` of extracted values.
 
@@ -204,9 +204,7 @@ print(f"Stall durations: {stalls.duration.value} cycles")
 
 **DMA-style command stream**
 
-Use programmable control flow when a command's opcode changes the following
-timing shape. This example handles writes with a data burst plus status response,
-and reads with a response plus data burst.
+Use programmable control flow when a command's opcode changes the following timing shape.
 
 ```python
 cmd_fire = cmd_valid & cmd_ready   # precompute outside the handler
@@ -257,20 +255,14 @@ print(f"Captured {len(commands)} commands")
 
 Some tips for programmable patterns:
 
-- Precompute fixed waveform expressions (like `fire = valid & ready`) outside
-  the handler function so they aren't rebuilt every cycle.
-- Start the handler with `if ctx.value(fire): ...` and `return None`
-  otherwise — this tells the runtime which cycles begin a transaction.
-- Use `ctx.try_consume(...)` when you need non-blocking polling or arbitration
-  across multiple candidate channels. For a straight burst, `ctx.consume(...)`
-  is the clearer fit.
-- Add `timeout=<cycles>` when a blocking step should be bounded. In `match()`,
-  timeouts become `MatchStatus.Timeout(...)`; in `collect()`, they raise
-  `PatternError`.
+- Precompute fixed waveform expressions, such as `fire = valid & ready`, outside the handler so they are not rebuilt every cycle.
+- Start the handler with `if ctx.value(fire): ...` to test whether the current cycle starts a transaction, and `return None` otherwise.
+- Use `ctx.try_consume(...)` for non-blocking polling or arbitration between candidate channels. For a linear burst, `ctx.consume(...)` is more direct.
+- Add `timeout=<cycles>` only when a blocking step needs a wait bound. In `match()`, timeout becomes `MatchStatus.Timeout(...)`; in `collect()`, it raises `PatternError`.
 
 ---
 
-## 📖 API Reference
+## API reference
 
 ### Reader
 
@@ -416,18 +408,16 @@ patterns as `ctx.wait(...)`, `ctx.consume(...)`, and `ctx.delay(...)`.
 
 **Dynamic callbacks**
 
-Declarative callbacks use `callable(index, captures)`. Programmable callbacks
-passed to `ctx.wait()`, `ctx.consume()`, `ctx.try_consume()`, `ctx.delay()`, or
-`ctx.require()` use zero-argument callables that close over `ctx`. `index` /
-`ctx.index` is the current sample index into `waveform.value/clock/time`, not a
-cycle number, and is not rebased when `match(start_cycle=...)` is used.
+Callback arguments depend on whether the callback is used in the declarative API or the programmable API:
+
+- In declarative APIs such as `Pattern().wait(...)` and `Pattern().consume(...)`, callbacks receive `(index, captures)`.
+- In programmable functions, callbacks passed to methods such as `ctx.wait(...)` and `ctx.consume(...)` take no arguments. If they need the current index, captures, or signal values, close over `ctx`.
 
 **Channels and consume vs. wait**
 
-When multiple in-flight instances are waiting for the same kind of event, plain
-`wait()` won't pair each request with its own response — every instance sees
-every event. `consume()` solves this: it hands the event to exactly one instance
-per cycle, in FIFO order.
+`wait()` is observational: every matching instance can see the same event.
+`consume()` adds ownership: only one instance can claim a given `(channel, cycle)`,
+so it can pair requests with responses in FIFO order.
 
 A `Channel` is an identity token for consume ownership. Pass a `Channel` object,
 a hashable key, or a dynamic callback to `consume(..., channel=...)`. All
@@ -475,7 +465,7 @@ result = match(pattern)
 
 ---
 
-## 🛠️ Development
+## Development
 
 This project uses [Poetry](https://python-poetry.org/) for dependency management and packaging.
 
@@ -523,9 +513,9 @@ poetry run ruff format .
 poetry run mypy .
 ```
 
-## 🤝 Contributing
+## Contributing
 
-Contributions are welcome! Please open an issue to discuss a bug or feature request before submitting a pull request. When contributing code, make sure all tests pass and the linter reports no errors:
+Issues and pull requests are welcome. Before sending a pull request, run the tests and format checks:
 
 ```bash
 poetry run pytest
@@ -533,6 +523,6 @@ poetry run ruff check .
 poetry run ruff format --check .
 ```
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for details.

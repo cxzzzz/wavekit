@@ -6,16 +6,16 @@
 [![Downloads](https://pepy.tech/badge/wavekit)](https://pepy.tech/project/wavekit)
 [![License](https://img.shields.io/github/license/cxzzzz/wavekit.svg)](LICENSE)
 
-**wavekit** 是一个面向数字电路波形分析的 Python 基础库。它将 VCD / FST / FSDB 仿真数据无缝转换为 Numpy 数组，让工程师能够高效地进行信号处理、协议分析和自动化验证。
+**wavekit** 是一个面向数字电路波形分析的高性能 Python 库。它把 VCD / FST / FSDB 信号加载成基于 NumPy 的 `Waveform` 对象，并在此基础上提供高效的信号处理、协议分析和自动化验证能力。
 
-> 🤖 **AI 集成**：配套的 [wavekit-mcp](https://github.com/cxzzzz/wavekit-mcp) 提供了 MCP 服务器，支持 AI 辅助波形分析——自动加载信号、运行模式匹配，无需手写脚本。
+> 🤖 **AI 集成**：[wavekit-mcp](https://github.com/cxzzzz/wavekit-mcp) 提供了 MCP 服务器，支持 AI 辅助波形分析——自动加载信号、运行模式匹配，无需手写脚本。
 
 ## 特性
 
-- **灵活的信号提取**：支持大括号展开、整数范围、正则表达式等多种匹配模式，一次加载一批相关信号，省去逐个手写的繁琐。
-- **丰富的分析能力**：提供类 Numpy 的 API，支持算术运算、掩码过滤、位域截取、边沿检测、时间/时钟切片等操作，几行代码即可组合出复杂的信号查询逻辑。
-- **强大的时序模式匹配**：内置基于 NFA 的时序模式引擎，单次扫描即可从波形中提取协议事务、测量握手延迟、检测超时或挂死等异常。
-- **高性能波形处理**：支持 VCD、FST 与 FSDB 波形，数据以 Numpy 数组为后端，加载快、内存省，轻松应对大容量仿真文件。
+- **批量信号提取**：支持大括号展开、整数范围、正则表达式等匹配方式，可以一次加载一组相关信号。
+- **波形分析 API**：提供类 NumPy 的接口，支持算术运算、掩码过滤、位域截取、边沿检测、时间/时钟切片等常用操作。
+- **时序模式匹配**：内置声明式和编程式 Pattern 引擎，可从波形中提取协议事务、测量握手延迟、检测 timeout 或挂死等异常。
+- **高性能波形处理**：支持 VCD、FST 与 FSDB，采样数据存储在紧凑的 NumPy 数组中，适合处理较大的仿真波形。
 
 ## 安装
 
@@ -25,9 +25,9 @@ pip install wavekit
 
 **FSDB 支持说明**：读取 FSDB 文件需要 Verdi 运行时库（`libNPI.so`）在运行时可访问。可通过以下任一方式配置：
 
-- `WAVEKIT_NPI_LIB` — 直接指定 `libNPI.so` 的路径
-- `VERDI_HOME` — Verdi 安装目录（库文件会在 `$VERDI_HOME/share/NPI/lib/...` 下自动查找）
-- `LD_LIBRARY_PATH` — 系统库搜索路径
+- `WAVEKIT_NPI_LIB`：直接指定 `libNPI.so` 的路径
+- `VERDI_HOME`：Verdi 安装目录（库文件会在 `$VERDI_HOME/share/NPI/lib/...` 下自动查找）
+- `LD_LIBRARY_PATH`：系统库搜索路径
 
 ## 快速上手
 
@@ -56,7 +56,7 @@ with VcdReader("jtag.vcd") as f:
 
 ### 2. 信号分析
 
-Waveform 支持 Numpy 风格的算术运算、掩码过滤和边沿检测。
+Waveform 支持 NumPy 风格的算术运算、掩码过滤和边沿检测。
 
 ```python
 import numpy as np
@@ -121,12 +121,12 @@ with VcdReader("fifo_tb.vcd") as f:
 
 ### 4. 时序模式匹配
 
-`Pattern` 用来在波形里扫描并提取所有匹配的事务——一次请求/响应、一个 burst、一段 stall，或者任何重复出现的时序过程。
+`Pattern` 用来在波形里扫描并提取匹配的事务，比如一次请求/响应、一个 burst、一段 stall，或者其他重复出现的时序过程。
 
-它有两种写法：
+根据事务特点选择写法：
 
-- **声明式** — 用 `.wait()`、`.consume()`、`.capture()`、`.loop()`等步骤串成链式调用。适合固定流程。
-- **编程式** — 把处理函数传给 `match(...)` 或 `collect(...)`。适合动态分支、按 ID 路由等复杂流程。
+- **声明式**：用 `.wait()`、`.consume()`、`.capture()`、`.loop()` 等步骤描述事务，适合固定流程。
+- **编程式**：用普通 Python 函数描述事务，适合依赖波形值的动态流程，比如动态分支或按 ID 路由。
 
 `match(pattern)` 返回 `MatchRecords`，而 `collect(body)` 返回 Python `list`，用于保存提取出的值。
 
@@ -196,7 +196,6 @@ print(f"Stall 持续时间: {stalls.duration.value} 周期")
 **DMA 风格命令流**
 
 当命令的 opcode 会改变后续时序形状时，用编程式控制流更自然。
-这个例子里，写命令包含一个数据 burst 和状态响应；读命令则包含响应和读数据 burst。
 
 ```python
 cmd_fire = cmd_valid & cmd_ready   # 在函数外预先算好
@@ -247,13 +246,9 @@ print(f"捕获到 {len(commands)} 个 command")
 
 一些编程式 Pattern 的使用建议：
 
-- 固定的波形表达式（比如 `fire = valid & ready`）在函数外先算好，
-  避免每周期反复构造。
-- 函数开头用 `if ctx.value(fire): ...` 判断当前周期是不是事务起点，
-  不是起点就 `return None`。
-- 如果你需要的是“非阻塞轮询”或多个候选通道之间的仲裁，可以用
-  `ctx.try_consume(...)`。像这种线性的 burst 例子，`ctx.consume(...)`
-  更直接。
+- 固定的波形表达式（比如 `fire = valid & ready`）在函数外先算好，避免每周期反复构造。
+- 函数开头用 `if ctx.value(fire): ...` 判断当前周期是不是事务起点，不是起点就 `return None`。
+- 如果你需要的是“非阻塞轮询”或多个候选通道之间的仲裁，可以用 `ctx.try_consume(...)`。像这种线性的 burst 例子，`ctx.consume(...)` 更直接。
 - 如果某个阻塞步骤必须限制等待时间，再加 `timeout=<cycles>`。
   在 `match()` 里 timeout 会变成 `MatchStatus.Timeout(...)`；在 `collect()`
   里会抛出 `PatternError`。
@@ -298,7 +293,7 @@ print(f"捕获到 {len(commands)} 个 command")
 
 ### Waveform
 
-`Waveform` 内部封装了三个平行的 Numpy 数组（`.value`、`.clock`、`.time`）。所有操作均返回新的 `Waveform` 实例。
+`Waveform` 内部封装了三个平行的 NumPy 数组（`.value`、`.clock`、`.time`）。所有操作均返回新的 `Waveform` 实例。
 
 **算术与比较**：`+`、`-`、`*`、`//`、`%`、`**`、`/`、`&`、`|`、`^`、`~`、`==`、`!=`、`<<`、`>>`
 
@@ -399,18 +394,17 @@ changed = wave != wave.back(3)
 
 **动态回调**
 
-声明式 Pattern 的动态回调写成 `callable(index, captures)`。传给
-`ctx.wait()`、`ctx.consume()`、`ctx.try_consume()`、`ctx.delay()` 或
-`ctx.require()` 的编程式动态回调用零参数 callable，通过闭包访问 `ctx`。
-`index` / `ctx.index` 是当前波形数组采样下标，可直接索引
-`waveform.value/clock/time`，不是 cycle；即使使用 `match(start_cycle=...)`
-缩小扫描范围，它也不会从窗口起点重新计数。
+回调函数的参数取决于它用在声明式 API 还是编程式 API 中：
+
+- 在 `Pattern().wait(...)`、`Pattern().consume(...)` 这类声明式 API 中，回调接收 `(index, captures)`。
+- 在编程式函数中，传给 `ctx.wait(...)`、`ctx.consume(...)` 等方法的回调不接收参数。需要当前下标、
+  captures 或信号值时，直接在闭包里使用 `ctx`。
 
 **Channel 与 consume 的关系**
 
-当多个在飞实例都在等同一类响应时，普通的 `wait()` 没法把每个请求和
-属于它的响应配对——所有实例都会看到同一个事件。`consume()` 解决了
-这个问题：每个周期只把事件交给一个实例，按 FIFO 顺序。
+`wait()` 只是观察事件，所以多个匹配实例可以看到同一个响应。
+`consume()` 会记录所有权：同一个 `(channel, cycle)` 只能被一个实例占用，
+因此可以按 FIFO 顺序把请求和响应配对。
 
 `Channel` 是 `consume()` 的逻辑占用键。可以传 `Channel` 对象、
 hashable key，或者动态回调给 `consume(..., channel=...)`。
@@ -505,7 +499,7 @@ poetry run mypy .
 
 ## 参与贡献
 
-欢迎提交 Issue 和 PR！在提交代码前，请确保测试通过且代码检查无报错：
+欢迎提交 Issue 和 PR！提交 PR 前请先运行测试和格式检查：
 
 ```bash
 poetry run pytest
