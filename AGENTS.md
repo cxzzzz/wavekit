@@ -215,7 +215,8 @@ Every operation returns a **new** `Waveform`; none mutate in place.
 |--------|-------------|
 | `wave.map(fn, width, signed)` | Apply scalar `fn` element-wise |
 | `wave.vectorized_map(fn, width, signed)` | Apply vectorized `fn` to entire array |
-| `wave.unique_consecutive()` | Remove consecutive duplicate values (alias: `.compress()`) |
+| `wave.unique_consecutive()` | Remove consecutive duplicate values |
+| `wave.compress()` | Compact a waveform while preserving value changes and the final sample |
 | `wave.downsample(chunk, fn)` | Aggregate into chunks (default: mean) |
 | `wave.as_signed()` / `.as_unsigned()` | Reinterpret signedness |
 

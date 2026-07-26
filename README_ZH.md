@@ -316,6 +316,7 @@ print(f"捕获到 {len(commands)} 个 command")
 |------|------|
 | `wave.map(fn, width, signed)` | 逐元素变换 |
 | `wave.unique_consecutive()` | 去除连续的重复值 |
+| `wave.compress()` | 压缩波形，同时保留值变化点和末尾采样点 |
 | `wave.downsample(chunk, fn)` | 按块聚合降采样 |
 | `wave.as_signed()` / `wave.as_unsigned()` | 重新解释有符号/无符号 |
 

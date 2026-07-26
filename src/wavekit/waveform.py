@@ -141,13 +141,18 @@ class Waveform:
     __repr__ = __str__
 
     def unique_consecutive(self) -> Waveform:
-        """Remove consecutive duplicate values, keeping the first occurrence.
+        """Remove consecutive duplicate values.
 
-        Equivalent to run-length encoding compression.  Useful for reducing a
-        dense sampled waveform to just the value-change events.
+        Equivalent to run-length deduplication: each run of equal consecutive
+        values is represented by its first sample. This matches the usual
+        ``unique_consecutive`` semantics and is useful when only the sequence of
+        observed values matters.
 
-        Returns a new :class:`Waveform` where no two adjacent entries have the
-        same value.  Behavior matches :func:`numpy.unique_consecutive`.
+        Returns
+        -------
+        Waveform
+            A new waveform with consecutive duplicate values removed. The final
+            timestamp may be dropped when the last value spans multiple samples.
         """
         if len(self.value) <= 1:
             return self.copy()
@@ -155,18 +160,27 @@ class Waveform:
         return self.take(np.where(mask)[0])
 
     def compress(self) -> Waveform:
-        """Remove consecutive duplicate values, keeping the last occurrence.
+        """Compact a waveform while preserving value changes and the final sample.
 
-        Unlike :meth:`unique_consecutive`, this preserves the final timestamp
-        and value, which is useful for waveforms where the end time matters.
+        This removes redundant samples inside each stable run, but keeps the
+        first sample of each value run and always keeps the final sample. The
+        result still records both where values change and where the original
+        sampled window ends.
 
-        Returns a new :class:`Waveform` where no two adjacent entries have the
-        same value, except the last sample is always preserved.
+        Use this when reducing waveform size for display, export, or quick
+        inspection without losing the final sample.
+
+        Returns
+        -------
+        Waveform
+            A compacted waveform. It may still contain one repeated final value
+            when the last stable run has more than one sample, because the final
+            sample is preserved intentionally.
         """
         if len(self.value) <= 1:
             return self.copy()
-        diff_mask = np.diff(self.value) != 0
-        mask = np.concatenate((diff_mask, [True]))
+        mask = np.concatenate(([True], np.diff(self.value) != 0))
+        mask[-1] = True
         return self.take(np.where(mask)[0])
 
     def vectorized_filter(

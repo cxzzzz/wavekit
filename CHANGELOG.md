@@ -26,6 +26,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - Preserve non-integer Python capture values in `MatchRecords.captures`.
 - Reject invalid Pattern timeout and dynamic integer values instead of coercing them.
 - Check programmable `ctx.value/cycle/time(..., offset=...)` bounds before reading waveform arrays.
+- Make `Waveform.compress()` preserve value-change points and the final sample.
 
 ## 0.7.0a1 - 2026-06-19
 

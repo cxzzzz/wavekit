@@ -268,12 +268,11 @@ def test_vectorized_filter():
 
 
 def test_compress():
-    # compress keeps last occurrence (preserves end time)
-    wave = build_waveform([1, 1, 2, 2, 3], width=8)
+    # compress keeps value-change points and always preserves the final sample.
+    wave = build_waveform([1, 1, 2, 2, 3, 3], width=8)
     compressed = wave.compress()
-    assert np.all(compressed.value == np.array([1, 2, 3]))
-    # compress keeps last timestamp of each group
-    assert np.all(compressed.time == np.array([10, 30, 40]))
+    assert np.all(compressed.value == np.array([1, 2, 3, 3]))
+    assert np.all(compressed.time == np.array([0, 20, 40, 50]))
 
 
 def test_unique_consecutive():

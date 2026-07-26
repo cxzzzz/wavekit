@@ -327,7 +327,8 @@ A `Waveform` wraps three parallel numpy arrays (`.value`, `.clock`, `.time`). Al
 | Method | Description |
 |--------|-------------|
 | `wave.map(fn, width, signed)` | Element-wise transform |
-| `wave.unique_consecutive()` | Remove consecutive duplicates |
+| `wave.unique_consecutive()` | Remove consecutive duplicate values |
+| `wave.compress()` | Compact a waveform while preserving value changes and the final sample |
 | `wave.downsample(chunk, fn)` | Aggregate into chunks |
 | `wave.as_signed()` / `wave.as_unsigned()` | Reinterpret signedness |
 
