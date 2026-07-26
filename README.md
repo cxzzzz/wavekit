@@ -137,6 +137,8 @@ Choose the form that matches the transaction shape:
 - **Declarative**: use `.wait()`, `.consume()`, `.capture()`, and `.loop()` steps to describe fixed flows.
 - **Programmable**: use a normal Python function when the flow depends on waveform values, such as dynamic branches or per-ID routing.
 
+In declarative patterns, the first blocking step selects transaction start cycles; later blocking steps describe timing within each matched transaction.
+
 `match(pattern)` returns `MatchRecords`, while `collect(body)` returns a Python `list` of extracted values.
 
 #### Declarative examples

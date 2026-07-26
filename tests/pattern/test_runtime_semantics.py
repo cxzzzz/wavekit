@@ -267,20 +267,49 @@ class TestConsumeWithChannel:
         np.testing.assert_array_equal(ok.captures['rsp_data'].value, [111, 222])
 
     def test_consume_as_first_step(self):
-        """consume as first step: no trigger optimization,
-        channel is consumed.
-
-        When the first step consumes a channel, the engine must not use it as a
-        trigger (which would skip channel consumption).  Instead, instances are
-        forked every cycle and the consume step processes normally.
-        """
+        """First consume selects start cycles and consumes the trigger event."""
         rsp = _bool_wf([0, 0, 1, 0, 1, 0])
         rsp_data = _wf([0, 0, 111, 0, 222, 0], width=8)
         rsp_chan = Channel()
         result = match(Pattern().consume(rsp, channel=rsp_chan).capture('rsp_data', rsp_data))
         ok = result.filter_ok()
         assert len(ok) == 2
+        np.testing.assert_array_equal(ok.start.value, [2, 4])
         np.testing.assert_array_equal(ok.captures['rsp_data'].value, [111, 222])
+
+    def test_first_wait_with_require_selects_start_cycles(self):
+        trigger = _bool_wf([0, 1, 0])
+        guard = _bool_wf([1, 1, 1])
+        result = match(Pattern().wait(trigger, require=guard))
+        ok = result.filter_ok()
+        assert len(ok) == 1
+        assert ok.start.value[0] == 1
+        assert ok.end.value[0] == 1
+
+    def test_first_wait_with_require_reports_violation(self):
+        trigger = _bool_wf([0, 1])
+        guard = _bool_wf([0, 1])
+        result = match(Pattern().wait(trigger, require=guard, require_message='bad'))
+        assert len(result) == 2
+        assert result[0].status == MatchStatus.RequireViolated('bad')
+        assert result[1].status == MatchStatus.OK()
+
+    def test_first_consume_with_require_selects_start_cycles(self):
+        fire = _bool_wf([0, 1, 0])
+        guard = _bool_wf([1, 1, 1])
+        result = match(Pattern().consume(fire, channel='fire', require=guard))
+        ok = result.filter_ok()
+        assert len(ok) == 1
+        assert ok.start.value[0] == 1
+        assert ok.end.value[0] == 1
+
+    def test_first_consume_with_require_reports_violation(self):
+        fire = _bool_wf([0, 1])
+        guard = _bool_wf([0, 1])
+        result = match(Pattern().consume(fire, channel='fire', require=guard))
+        assert len(result) == 2
+        assert result[0].status == MatchStatus.RequireViolated()
+        assert result[1].status == MatchStatus.OK()
 
     def test_require_with_channel(self):
         """require violation while consuming with channel → REQUIRE_VIOLATED."""

@@ -290,8 +290,8 @@ pattern = (
 result = match(pattern)
 ```
 
-If the first step is an unguarded `wait`, that condition is the trigger. If the
-first step is not `wait`, the pattern is attempted at every scanned cycle.
+The first blocking step selects transaction start cycles; later blocking steps
+describe timing within each matched transaction.
 
 ### Programmable usage
 

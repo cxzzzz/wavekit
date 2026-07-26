@@ -182,14 +182,27 @@ def compile_declarative_pattern(steps: list[Step]) -> Callable[[PatternContext],
 
     def body(ctx: PatternContext) -> object:
         first_step = steps[0] if steps else None
-        if isinstance(first_step, WaitStep) and first_step.require is None:
-            # Treat the first unguarded wait as the trigger: candidates whose
-            # first condition is false are discarded immediately instead of
-            # accumulating as blocked instances. Guarded first waits cannot use
-            # this shortcut because require must be evaluated while blocked.
-            # Consume steps are not trigger-shortcut candidates because they
-            # need channel ownership arbitration through the runtime.
+        if isinstance(first_step, WaitStep):
+            # The first blocking step selects candidate start cycles; later
+            # blocking steps describe timing inside a matched transaction.
             if not eval_condition(first_step.cond, ctx):
+                if first_step.require is not None:
+                    ctx.require(
+                        lambda first_step=first_step: eval_condition(first_step.require, ctx),
+                        message=adapt_message(first_step.require_message, ctx),
+                    )
+                return None
+            run_steps(ctx, steps[1:])
+        elif isinstance(first_step, ConsumeStep):
+            if not ctx.try_consume(
+                lambda first_step=first_step: eval_condition(first_step.cond, ctx),
+                adapt_channel(first_step.channel, ctx),
+            ):
+                if first_step.require is not None:
+                    ctx.require(
+                        lambda first_step=first_step: eval_condition(first_step.require, ctx),
+                        message=adapt_message(first_step.require_message, ctx),
+                    )
                 return None
             run_steps(ctx, steps[1:])
         else:

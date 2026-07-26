@@ -128,6 +128,8 @@ with VcdReader("fifo_tb.vcd") as f:
 - **声明式**：用 `.wait()`、`.consume()`、`.capture()`、`.loop()` 等步骤描述事务，适合固定流程。
 - **编程式**：用普通 Python 函数描述事务，适合依赖波形值的动态流程，比如动态分支或按 ID 路由。
 
+声明式 Pattern 中，第一个阻塞步骤用于筛选事务起点；后续阻塞步骤用于描述匹配事务内部的时序。
+
 `match(pattern)` 返回 `MatchRecords`，而 `collect(body)` 返回 Python `list`，用于保存提取出的值。
 
 #### 声明式示例

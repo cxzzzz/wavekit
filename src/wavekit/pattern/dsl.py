@@ -31,6 +31,9 @@ class Pattern:
     module-level :func:`match`. ``Pattern`` stores only the declarative step AST;
     programmable checking/extraction uses :func:`match(body)` or :func:`collect(body)`.
 
+    The first blocking step selects candidate start cycles. Later blocking steps
+    wait within a matched transaction.
+
     Declarative callbacks receive ``(index, captures)``. ``index`` is the
     current sample index into waveform arrays, not a cycle number and not rebased
     by ``start_cycle``. ``captures`` is the current match's capture dict.
