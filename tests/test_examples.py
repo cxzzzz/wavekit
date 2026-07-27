@@ -66,3 +66,30 @@ def test_fifo_latency(example_dir, project_root):
 
     if result.returncode != 0:
         pytest.fail(f'Make all failed with stderr:\n{result.stderr}\nStdout:\n{result.stdout}')
+
+
+def test_axi_lite_read_latency(example_dir, project_root):
+    target_dir = os.path.join(example_dir, 'axi_lite_read_latency')
+
+    result = run_make_all(target_dir, project_root)
+
+    if result.returncode != 0:
+        pytest.fail(f'Make all failed with stderr:\n{result.stderr}\nStdout:\n{result.stdout}')
+
+
+def test_axi_id_matching(example_dir, project_root):
+    target_dir = os.path.join(example_dir, 'axi_id_matching')
+
+    result = run_make_all(target_dir, project_root)
+
+    if result.returncode != 0:
+        pytest.fail(f'Make all failed with stderr:\n{result.stderr}\nStdout:\n{result.stdout}')
+
+
+def test_dma_command_stream(example_dir, project_root):
+    target_dir = os.path.join(example_dir, 'dma_command_stream')
+
+    result = run_make_all(target_dir, project_root)
+
+    if result.returncode != 0:
+        pytest.fail(f'Make all failed with stderr:\n{result.stderr}\nStdout:\n{result.stdout}')
