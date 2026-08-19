@@ -1,3 +1,5 @@
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -92,6 +94,43 @@ def compare_xz_fsdb(compare_xz_fsdb_path):
 
 def test_fsdb_reader_exported(fsdb_runtime):
     assert FsdbReader.__name__ == 'FsdbReader'
+
+
+def _run_quiet_reader(fsdb_path, quiet=None):
+    kwargs = '' if quiet is None else f', quiet={quiet}'
+    code = (
+        'from wavekit import FsdbReader\n'
+        f'r = FsdbReader({str(fsdb_path)!r}{kwargs})\n'
+        'print("OPENED")\n'
+        'r.close()\n'
+    )
+    return subprocess.run(
+        [sys.executable, '-c', code],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def test_fsdb_reader_quiet_suppresses_banner(compare_fsdb):
+    result = _run_quiet_reader(compare_fsdb, quiet=True)
+    assert result.returncode == 0, result.stderr
+    assert 'OPENED' in result.stdout
+    assert 'Native Programming Interface' not in result.stdout
+
+
+def test_fsdb_reader_default_suppresses_banner(compare_fsdb):
+    result = _run_quiet_reader(compare_fsdb)
+    assert result.returncode == 0, result.stderr
+    assert 'OPENED' in result.stdout
+    assert 'Native Programming Interface' not in result.stdout
+
+
+def test_fsdb_reader_quiet_false_prints_banner(compare_fsdb):
+    result = _run_quiet_reader(compare_fsdb, quiet=False)
+    assert result.returncode == 0, result.stderr
+    assert 'OPENED' in result.stdout
+    assert 'Native Programming Interface' in result.stdout
 
 
 def test_fsdb_reader_top_scopes(compare_fsdb):

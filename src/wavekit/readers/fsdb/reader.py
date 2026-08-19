@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import importlib
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Any
 
 import numpy as np
 
@@ -120,58 +118,29 @@ class FsdbReader(Reader[FsdbSignal]):
     ``FsdbReader`` requires the Verdi runtime library (``libNPI.so``). Configure
     it with ``WAVEKIT_NPI_LIB``, ``VERDI_HOME``, or ``LD_LIBRARY_PATH`` before
     opening FSDB files.
+
+    ``quiet`` (default ``True``) suppresses the NPI console banner via the
+    ``-quiet`` initialization argument. Pass ``quiet=False`` to keep the banner.
+    NPI initialization is process-global, so ``quiet`` only takes effect on the
+    first ``FsdbReader`` created in the process; later readers cannot reliably
+    re-enable the banner.
     """
 
-    pynpi: dict[str, Any] = {}
-
-    @classmethod
-    def _maybe_init_pynpi(cls) -> Exception | None:
-        if cls.pynpi:
-            return None
-
-        import os
-        import sys
-
-        verdi_home = os.environ.get('VERDI_HOME')
-        if verdi_home is None:
-            return None
-
-        rel_lib_path = os.path.abspath(os.path.join(verdi_home, 'share', 'NPI', 'python'))
-        if rel_lib_path not in sys.path:
-            sys.path.append(rel_lib_path)
-
-        try:
-            cls.pynpi['npisys'] = importlib.import_module('pynpi.npisys')
-            cls.pynpi['waveform'] = importlib.import_module('pynpi.waveform')
-            cls.pynpi['npisys'].init([''])
-        except Exception as exc:
-            cls.pynpi.clear()
-            return exc
-        return None
-
-    @staticmethod
-    def _runtime_error(init_error: Exception | None, open_error: Exception) -> RuntimeError:
-        details = [
-            'Failed to initialize FSDB runtime.',
-            'FsdbReader requires the Verdi runtime library (libNPI.so). Configure via:',
-            '  - WAVEKIT_NPI_LIB — direct path to libNPI.so',
-            '  - VERDI_HOME — Verdi installation directory',
-            '  - LD_LIBRARY_PATH — system library search path',
-            f'Open error: {open_error}',
-        ]
-        if init_error is not None:
-            details.append(f'Optional pynpi bootstrap error: {init_error}')
-        return RuntimeError('\n'.join(details))
-
-    def __init__(self, file: str):
+    def __init__(self, file: str, *, quiet: bool = True):
         super().__init__()
-        init_error = self._maybe_init_pynpi()
-
         self.file = file
         try:
-            self.file_handle = NpiFsdbReader(file)
+            self.file_handle = NpiFsdbReader(file, quiet=quiet)
         except Exception as exc:
-            raise self._runtime_error(init_error, exc) from exc
+            details = [
+                'Failed to initialize FSDB runtime.',
+                'FsdbReader requires the Verdi runtime library (libNPI.so). Configure via:',
+                '  - WAVEKIT_NPI_LIB — direct path to libNPI.so',
+                '  - VERDI_HOME — Verdi installation directory',
+                '  - LD_LIBRARY_PATH — system library search path',
+                f'Open error: {exc}',
+            ]
+            raise RuntimeError('\n'.join(details)) from exc
 
     def _load_value_changes(
         self,

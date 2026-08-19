@@ -69,5 +69,5 @@ else:
     _fsdb_available = True
 
     def has_fsdb_support() -> bool:
-        """Check whether the Verdi FSDB runtime is available right now."""
+        """Check whether the Verdi FSDB runtime library is installed."""
         return _fsdb_runtime_available()

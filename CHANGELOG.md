@@ -7,6 +7,14 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+- Suppress the NPI startup banner by default when reading FSDB files.
+  Pass `FsdbReader(..., quiet=False)` to re-enable it.
+
+### Changed
+- Remove the pynpi bootstrap; FSDB runtime initialization now calls
+  `npi_init` directly through the Cython reader.
+
 ## v0.7.0 - 2026-07-26
 
 ### Breaking Changes
