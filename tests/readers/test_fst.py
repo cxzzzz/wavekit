@@ -425,19 +425,23 @@ def test_fst_load_matched_waveforms_regex(compare_fst_path):
     assert all(wave.width == 8 for wave in waves.values())
 
 
-def test_fst_reader_load_matched_waveforms_regex(fst_path):
+def test_fst_reader_load_matched_waveforms_regex_does_not_match_native_ranges(fst_path):
     with FstReader(str(fst_path)) as reader:
         waves = reader.load_matched_waveforms(r'tb.dut./(counter\[3:0\]|overflow)/', 'tb.clk')
 
-    assert _capture_groups(waves) == {('counter[3:0]',), ('overflow',)}
-    assert {wave.width for wave in waves.values()} == {1, 4}
+    assert _capture_groups(waves) == {('overflow',)}
+    assert {wave.width for wave in waves.values()} == {1}
 
 
-def test_fst_reader_load_matched_waveforms_regex_without_groups(fst_path):
-    # RegexCapture.path keeps matches distinct even when the regex has no groups.
+def test_fst_reader_load_matched_waveforms_regex_without_groups_does_not_match_native_ranges(
+    fst_path,
+):
     with FstReader(str(fst_path)) as reader:
-        waves = reader.load_matched_waveforms(r'tb.dut./(?:counter\[3:0\]|overflow)/', 'tb.clk')
-        assert len(waves) > 1
+        waves = reader.load_matched_waveforms(
+            r'tb.dut./(?:counter\[3:0\]|overflow)/',
+            'tb.clk',
+        )
+        assert len(waves) == 1
 
 
 def test_fst_load_matched_waveforms_uses_signal_range(compare_fst_path):

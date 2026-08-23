@@ -463,11 +463,14 @@ def test_vcd_reader_load_matched_waveforms_regex(vcd_path):
     assert all(wave.width == 4 for wave in j_regex.values())
 
 
-def test_vcd_reader_load_matched_waveforms_regex_without_groups(vcd_path):
+def test_vcd_reader_load_matched_waveforms_regex_does_not_match_native_ranges(vcd_path):
     vcd_reader = VcdReader(str(vcd_path))
 
-    waves = vcd_reader.load_matched_waveforms(r'tb.u0./(?:J_state\[3:0\]|J_next\[3:0\])/', 'tb.tck')
-    assert len(waves) > 1
+    waves = vcd_reader.load_matched_waveforms(
+        r'tb.u0./(?:J_state\[3:0\]|J_next\[3:0\])/',
+        'tb.tck',
+    )
+    assert waves == {}
 
 
 def test_vcd_load_matched_waveforms_uses_signal_range(compare_vcd_path):

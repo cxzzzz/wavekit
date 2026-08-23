@@ -53,6 +53,11 @@ class Node(ABC):
             return f'{self.base_name}{self.range}'
         return self.base_name
 
+    @property
+    def is_range_selectable(self) -> bool:
+        """Return whether this node supports a trailing bit-range selection."""
+        return False
+
     @cached_property
     def full_name(self) -> str:
         """Return this node's fully-qualified real hierarchy name."""
@@ -109,55 +114,39 @@ class Node(ABC):
                     add_match(key, node)
             return results
 
-        cached_parents: dict[Node, None] = {}
+        candidate_parents: dict[Node, None] = {}
 
         for child in self.children:
-            matched = step.matcher.match(child)
+            matched = step.matcher.match(child, anchor_node=step_anchor_node)
             if recursive_cache_key is not None and matched is not None:
-                cached_parents.setdefault(self, None)
+                candidate_parents.setdefault(self, None)
 
-            # A. A direct base-name match always wins. In particular, an ARRAY
-            # element such as ``arr[0]`` wins over interpreting ``[0]`` as a
-            # range on its ARRAY parent.
-            if matched is not None and matched[1] is None and node_filter(child, steps):
-                capture, _ = matched
-                capture = capture.with_anchor_node(step_anchor_node)
-                if len(steps) == 1:
-                    add_match((capture,), child)
-                else:
-                    for key, node in child._match_path(steps[1:], node_filter).items():
-                        add_match((capture, *key), node)
-
-            # B. A range suffix is only a bit-range selection on an ordinary
-            # leaf Signal. ARRAY composite signals are deliberately excluded:
-            # `[i]` may denote an ARRAY member, while a partial ARRAY range is
-            # not loadable consistently across the supported backends.
-            if (
-                matched is not None
-                and matched[1] is not None
-                and isinstance(child, Signal)
-                and child.composite_type is None
-            ):
-                capture, selected_range = matched
-                if not node_filter(child, steps):
-                    continue
-                if len(steps) != 1:
+            # Consume both direct and range-view matches uniformly. The matcher
+            # has already resolved suffix/range semantics; a different matched
+            # node means it produced a terminal range view.
+            if matched is not None:
+                assert matched.node is not None
+                matched_node = matched.node
+                if matched_node is not child and len(steps) != 1:
                     raise ValueError(
                         f'Range-selected signal {child.full_name!r} cannot be followed '
                         'by another hierarchy path component'
                     )
-                selected_node = child.with_range(selected_range)
-                capture = capture.with_node(selected_node).with_anchor_node(step_anchor_node)
-                add_match((capture,), selected_node)
+                if node_filter(matched_node, steps):
+                    if len(steps) == 1:
+                        add_match((matched,), matched_node)
+                    else:
+                        for key, node in child._match_path(steps[1:], node_filter).items():
+                            add_match((matched, *key), node)
 
-            # C. Both recursive steps and transparent ARRAY containers search a
-            # child with the current step. ARRAY descent preserves `arr[0]` as a
-            # concrete member match; recursive descent extends that same search
+            # Both recursive steps and transparent ARRAY containers search a
+            # child with the current step. ARRAY descent preserves ``arr[0]`` as
+            # a concrete member match; recursive descent extends that same search
             # to all ordinary hierarchy children. Run the shared descent once.
             if step.recursive or (
                 isinstance(child, Signal)
                 and child.composite_type == SignalCompositeType.ARRAY
-                and not (matched is not None and matched[1] is None)
+                and not (matched is not None and matched.node is child)
             ):
                 for key, node in child._match_path(
                     steps,
@@ -170,10 +159,10 @@ class Node(ABC):
                 # inherit the candidate parents discovered in this child subtree.
                 if recursive_cache_key is not None:
                     for parent in child._recursive_match_cache[recursive_cache_key]:
-                        cached_parents.setdefault(parent, None)
+                        candidate_parents.setdefault(parent, None)
 
         if recursive_cache_key is not None:
-            self._recursive_match_cache[recursive_cache_key] = tuple(cached_parents)
+            self._recursive_match_cache[recursive_cache_key] = tuple(candidate_parents)
 
         return results
 
@@ -221,6 +210,7 @@ class Node(ABC):
                 # Split the internal recursive capture at the matched node's logical
                 # parent: ``**`` consumes anchor -> parent, and the matcher consumes
                 # parent -> node. Physical ARRAY containers are transparent here.
+                assert capture.node is not None
                 parent = capture.node.parent
                 while (
                     isinstance(parent, Signal)
@@ -229,9 +219,7 @@ class Node(ABC):
                     parent = parent.parent
 
                 if parent is None:
-                    raise ValueError(
-                        f'Recursive match has no parent: {capture.node.full_name!r}'
-                    )
+                    raise ValueError(f'Recursive match has no parent: {capture.node.full_name!r}')
                 key.extend(
                     (
                         WildcardCapture(anchor_node=capture.anchor_node, node=parent),
@@ -296,8 +284,8 @@ class Signal(Node):
 
     @property
     def is_range_selectable(self) -> bool:
-        """Return whether this signal supports a trailing range selection."""
-        return self.composite_type in (None, SignalCompositeType.ARRAY)
+        """Return whether this signal supports a trailing bit-range selection."""
+        return self.composite_type is None
 
     @property
     def is_leaf(self) -> bool:

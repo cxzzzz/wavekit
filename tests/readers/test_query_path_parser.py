@@ -17,7 +17,8 @@ def test_matcher_parser_splits_hierarchy_and_range():
 
     assert len(steps) == 3
     assert all(isinstance(step.matcher, ExactMatcher) for step in steps)
-    assert steps[-1].matcher.name == 'J_state'
+    assert steps[-1].matcher.pattern == 'J_state'
+    assert steps[-1].matcher.suffix == '[3:0]'
     assert steps[-1].matcher.range == Range(3, 0)
 
 
@@ -34,6 +35,8 @@ def test_matcher_parser_distinguishes_regex_range_from_escaped_brackets():
     escaped = parse_query_path(r'/data\[7:0\]/')[0].matcher
 
     assert isinstance(selected, RegexMatcher)
+    assert selected.pattern == 'data'
+    assert selected.suffix == '[1:0]'
     assert selected.regex.pattern == 'data'
     assert selected.range == Range(1, 0)
     assert isinstance(escaped, RegexMatcher)
@@ -81,8 +84,8 @@ def test_matcher_parser_allows_native_recursive_suffixes():
 
 
 def test_matchers_have_value_semantics():
-    first = ExactMatcher(target='name', pattern='data[7:0]')
-    second = ExactMatcher(target='name', pattern='data[7:0]')
+    first = ExactMatcher(target='name', pattern='data', suffix='[7:0]', range=Range(7, 0))
+    second = ExactMatcher(target='name', pattern='data', suffix='[7:0]', range=Range(7, 0))
 
     assert first == second
     assert hash(first) == hash(second)
