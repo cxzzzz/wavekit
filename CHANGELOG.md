@@ -7,13 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
-### Added
-- Add cached recursive query-path matching for `**` and `$$`, including typed
-  recursive captures and capture-path restoration across hierarchy and ARRAY nodes.
-- Suppress the NPI startup banner by default when reading FSDB files.
-  Pass `FsdbReader(..., quiet=False)` to re-enable it.
+## v0.7.1 - 2026-08-23
 
 ### Changed
+- Improve repeated recursive query-path matching performance for `**` and `$$`
+  by caching reusable hierarchy candidates.
+- Refactor recursive capture restoration and matcher range-selection handling
+  while keeping ordinary query-path behavior unchanged.
+- Suppress the NPI startup banner by default when reading FSDB files.
+  Pass `FsdbReader(..., quiet=False)` to re-enable it.
 - Remove the pynpi bootstrap; FSDB runtime initialization now calls
   `npi_init` directly through the Cython reader.
 
