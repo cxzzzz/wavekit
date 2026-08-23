@@ -272,7 +272,7 @@ Some tips for programmable patterns:
 
 | Method | Description |
 |--------|-------------|
-| `VcdReader(file)` / `FstReader(file)` / `FsdbReader(file)` | Open a waveform file. Use as a context manager. `FsdbReader` requires Verdi runtime (`WAVEKIT_NPI_LIB`, `VERDI_HOME`, or `LD_LIBRARY_PATH`). |
+| `VcdReader(file)` / `FstReader(file)` / `FsdbReader(file, *, quiet=True)` | Open a waveform file. Use as a context manager. `FsdbReader` requires Verdi runtime (`WAVEKIT_NPI_LIB`, `VERDI_HOME`, or `LD_LIBRARY_PATH`) and suppresses the NPI startup banner by default; pass `quiet=False` to keep it. |
 | `reader.load_waveform(signal, clock, ...)` | Load one signal sampled on every clock edge. Returns `Waveform`. |
 | `reader.load_unknown_mask(signal, clock, ...)` | **Experimental.** Load X/Z bit presence as an unsigned mask `Waveform`. |
 | `reader.load_matched_waveforms(signal_path, clock_path, ...)` | Batch-load matching signals. Returns `dict[CaptureKey, Waveform]`. |
@@ -297,9 +297,8 @@ Some tips for programmable patterns:
 | `$ModName` | `tb.$fifo_unit.ptr` | Match a direct-child scope by module/definition name (FSDB only) | `ExactCapture(path=..., definition=...)` |
 | `$$ModName` | `tb.$$fifo_unit.ptr` | Match any-depth descendant scope by module/definition name (FSDB only) | `ExactCapture(path=..., definition=...)` |
 
-`$` and `$$` are path-step modifiers: they can combine with exact names, brace
-expansion, regex, and a trailing range selector in the same query.
-For example: `tb.$/fifo_(in|out)/.data_{0..3}[7:0]`.
+`$` and `$$` are path-step modifiers that can combine with exact-name, brace,
+and regex matchers. For example: `tb.$/fifo_(in|out)/.data_{0..3}[7:0]`.
 
 Matched-reader and hierarchy query APIs return dictionaries keyed by
 `CaptureKey = tuple[Capture, ...]`. Exact-name components are omitted, so a

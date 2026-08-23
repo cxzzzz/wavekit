@@ -264,7 +264,7 @@ print(f"捕获到 {len(commands)} 个 command")
 
 | 方法 | 说明 |
 |------|------|
-| `VcdReader(file)` / `FstReader(file)` / `FsdbReader(file)` | 打开波形文件。建议作为上下文管理器使用。`FsdbReader` 需要 Verdi 运行时环境（通过 `WAVEKIT_NPI_LIB`、`VERDI_HOME` 或 `LD_LIBRARY_PATH` 配置）。 |
+| `VcdReader(file)` / `FstReader(file)` / `FsdbReader(file, *, quiet=True)` | 打开波形文件。建议作为上下文管理器使用。`FsdbReader` 需要 Verdi 运行时环境（通过 `WAVEKIT_NPI_LIB`、`VERDI_HOME` 或 `LD_LIBRARY_PATH` 配置），默认抑制 NPI 启动 banner；传入 `quiet=False` 可保留。 |
 | `reader.load_waveform(signal, clock, ...)` | 加载单个信号，按时钟边沿采样，返回 `Waveform`。 |
 | `reader.load_unknown_mask(signal, clock, ...)` | **实验性**。加载 X/Z 位存在性为无符号掩码 `Waveform`。 |
 | `reader.load_matched_waveforms(signal_path, clock_path, ...)` | 批量加载匹配信号，返回 `dict[CaptureKey, Waveform]`。 |
@@ -289,9 +289,8 @@ print(f"捕获到 {len(commands)} 个 command")
 | `$ModName` | `tb.$fifo_unit.ptr` | 按模块名匹配直接子层级（仅 FSDB） | `ExactCapture(path=..., definition=...)` |
 | `$$ModName` | `tb.$$fifo_unit.ptr` | 按模块名匹配任意深度后代（仅 FSDB） | `ExactCapture(path=..., definition=...)` |
 
-`$` 和 `$$` 是路径段级修饰符：它们可以与普通名称、brace、regex，
-以及末尾的 range 选择继续组合。
-例如：`tb.$/fifo_(in|out)/.data_{0..3}[7:0]`。
+`$` 和 `$$` 是路径段级修饰符，可以与 exact name、brace 和 regex
+matcher 组合。例如：`tb.$/fifo_(in|out)/.data_{0..3}[7:0]`。
 
 匹配与层级查询 API 返回以 `CaptureKey = tuple[Capture, ...]` 为 key 的字典。普通精确路径段不会进入 key，因此纯精确查询使用 `()`。
 
