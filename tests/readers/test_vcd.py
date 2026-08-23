@@ -977,3 +977,14 @@ def test_vcd_cycle_slice_include_end(vcd_path):
     sliced = full.cycle_slice(10, 20, include_end=True)
     assert len(sliced.value) == 11
     assert sliced.clock[-1] == 20
+
+
+def test_vcd_recursive_wildcard_lowering_preserves_capture(compare_vcd_path):
+    with VcdReader(str(compare_vcd_path)) as reader:
+        matched = reader.get_matched_signals('compare_tb.**.data[7:0]')
+
+    assert {capture.path for (capture,) in matched} == {'dut.unit_a', 'dut.unit_b'}
+    assert {signal.full_name for signal in matched.values()} == {
+        'compare_tb.dut.unit_a.data[7:0]',
+        'compare_tb.dut.unit_b.data[7:0]',
+    }

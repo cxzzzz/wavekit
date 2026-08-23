@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 from abc import abstractmethod
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -47,23 +47,24 @@ def split_trailing_range(segment: str) -> tuple[str, str, Range | None]:
 class Capture:
     """Base class for typed bindings returned in a :data:`CaptureKey`."""
 
-    path: str
+    anchor_node: Node = field(repr=False, compare=False)
+    node: Node = field(repr=False, compare=False)
     definition: str | None = None
+    path: str = field(init=False)
 
-    def with_prefix(self, prefix: str) -> Capture:
-        """Return a copy with *prefix* prepended to ``path``.
+    def __post_init__(self) -> None:
+        start_name = self.anchor_node.full_name
+        end_name = self.node.full_name
+        suffix = end_name[len(start_name) :]
+        object.__setattr__(self, 'path', suffix.removeprefix('.'))
 
-        Parameters
-        ----------
-        prefix:
-            Hierarchical prefix to prepend, without a trailing dot.
+    def with_anchor_node(self, anchor_node: Node) -> Capture:
+        """Return a copy rebased to *anchor_node*."""
+        return replace(self, anchor_node=anchor_node)
 
-        Returns
-        -------
-        Capture
-            New capture with ``path`` rewritten as ``f'{prefix}.{path}'``.
-        """
-        return replace(self, path=f'{prefix}.{self.path}')
+    def with_node(self, node: Node) -> Capture:
+        """Return a copy ending at *node*."""
+        return replace(self, node=node)
 
 
 CaptureKey = tuple[Capture, ...]
@@ -88,13 +89,21 @@ class ExactCapture(Capture):
     """Exact-name binding; only module-definition matches are public."""
 
 
+@dataclass(frozen=True)
 class ExactMatcher(Matcher):
     """Exact name or module-definition matcher."""
 
-    def __init__(self, target: MatchTarget, pattern: str):
-        self.target = target
-        self.pattern = pattern
-        self.name, self.suffix, self.range = split_trailing_range(pattern)
+    target: MatchTarget
+    pattern: str
+    name: str = field(init=False, compare=False)
+    suffix: str = field(init=False, compare=False)
+    range: Range | None = field(init=False, compare=False)
+
+    def __post_init__(self) -> None:
+        name, suffix, selected_range = split_trailing_range(self.pattern)
+        object.__setattr__(self, 'name', name)
+        object.__setattr__(self, 'suffix', suffix)
+        object.__setattr__(self, 'range', selected_range)
 
     def match(self, node: Node) -> tuple[Capture, Range | None] | None:
         """Match a single node by exact name or module definition."""
@@ -109,17 +118,17 @@ class ExactMatcher(Matcher):
                 )
             definition = node.definition
             if self.pattern == definition:
-                return ExactCapture(path=node.name, definition=definition), None
+                return ExactCapture(anchor_node=node, node=node, definition=definition), None
             return None
 
         if node.base_name == self.pattern:
-            return ExactCapture(path=node.base_name), None
+            return ExactCapture(anchor_node=node, node=node), None
         if (
             self.range is not None
             and getattr(node, 'is_range_selectable', False)
             and node.base_name == self.name
         ):
-            return ExactCapture(path=self.pattern), self.range
+            return ExactCapture(anchor_node=node, node=node), self.range
         return None
 
 
@@ -130,15 +139,23 @@ class BraceCapture(Capture):
     groups: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
 class BraceMatcher(Matcher):
     """Brace expansion matcher delegated to exact matchers."""
 
-    def __init__(self, target: MatchTarget, pattern: str):
-        self.target = target
-        self.pattern = pattern
-        self.matchers = {
-            key: ExactMatcher(target, expanded) for key, expanded in self.expand(pattern).items()
-        }
+    target: MatchTarget
+    pattern: str
+    matchers: dict[tuple[str, ...], ExactMatcher] = field(init=False, compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            'matchers',
+            {
+                key: ExactMatcher(self.target, expanded)
+                for key, expanded in self.expand(self.pattern).items()
+            },
+        )
 
     def match(self, node: Node) -> tuple[Capture, Range | None] | None:
         """Match a node against every brace-expanded alternative."""
@@ -148,7 +165,8 @@ class BraceMatcher(Matcher):
                 capture, selected_range = matched
                 return (
                     BraceCapture(
-                        path=capture.path,
+                        anchor_node=capture.anchor_node,
+                        node=capture.node,
                         definition=capture.definition,
                         groups=key,
                     ),
@@ -199,16 +217,16 @@ class WildcardCapture(Capture):
     """Binding produced by ``*`` or ``**`` wildcard matching."""
 
 
+@dataclass(frozen=True)
 class WildcardMatcher(Matcher):
     """Single-level (``*``) or recursive (``**``) wildcard."""
 
-    def __init__(self, target: MatchTarget):
-        self.target = target
+    target: MatchTarget
 
     def match(self, node: Node) -> tuple[Capture, Range | None] | None:
         """Match any node allowed by the wildcard syntax."""
         assert self.target != 'definition'
-        return WildcardCapture(path=node.name), None
+        return WildcardCapture(anchor_node=node, node=node), None
 
 
 @dataclass(frozen=True)
@@ -218,14 +236,21 @@ class RegexCapture(Capture):
     groups: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
 class RegexMatcher(Matcher):
     """Regular-expression matcher for local names or module definitions."""
 
-    def __init__(self, target: MatchTarget, pattern: str):
-        self.target = target
-        self.pattern = pattern
-        regex, self.suffix, self.range = split_trailing_range(pattern)
-        self.regex = re.compile(regex)
+    target: MatchTarget
+    pattern: str
+    suffix: str = field(init=False, compare=False)
+    range: Range | None = field(init=False, compare=False)
+    regex: re.Pattern[str] = field(init=False, compare=False)
+
+    def __post_init__(self) -> None:
+        regex, suffix, selected_range = split_trailing_range(self.pattern)
+        object.__setattr__(self, 'suffix', suffix)
+        object.__setattr__(self, 'range', selected_range)
+        object.__setattr__(self, 'regex', re.compile(regex))
 
     def match(self, node: Node) -> tuple[Capture, Range | None] | None:
         """Match a node against a compiled regex and optional range suffix."""
@@ -247,7 +272,8 @@ class RegexMatcher(Matcher):
             if definition is not None and (matched := self.regex.fullmatch(definition)):
                 return (
                     RegexCapture(
-                        path=node.name,
+                        anchor_node=node,
+                        node=node,
                         definition=definition,
                         groups=matched.groups(),
                     ),
@@ -259,7 +285,7 @@ class RegexMatcher(Matcher):
         # try a direct match against the real local base name.
         if self.range is None:
             if matched := self.regex.fullmatch(node.base_name):
-                return RegexCapture(path=node.base_name, groups=matched.groups()), None
+                return RegexCapture(anchor_node=node, node=node, groups=matched.groups()), None
             # Compatibility case: the regex itself may contain a native range,
             # for example /(counter\[3:0\]|overflow)/. Match the displayed
             # name and return the node's existing range as the selection.
@@ -268,7 +294,10 @@ class RegexMatcher(Matcher):
                 and (selected_range := getattr(node, 'range', None)) is not None
                 and (matched := self.regex.fullmatch(node.name))
             ):
-                return RegexCapture(path=node.name, groups=matched.groups()), selected_range
+                return (
+                    RegexCapture(anchor_node=node, node=node, groups=matched.groups()),
+                    selected_range,
+                )
             return None
 
         # A parsed trailing suffix may already be part of a real ARRAY member's
@@ -277,14 +306,16 @@ class RegexMatcher(Matcher):
         if node.base_name.endswith(self.suffix) and (
             matched := self.regex.fullmatch(node.base_name[: -len(self.suffix)])
         ):
-            return RegexCapture(path=node.base_name, groups=matched.groups()), None
+            return RegexCapture(anchor_node=node, node=node, groups=matched.groups()), None
         # Otherwise the parsed suffix is a range selection on the current
         # signal, e.g. /data/[7:0] matching base_name == 'data'.
         if getattr(node, 'is_range_selectable', False) and (
             matched := self.regex.fullmatch(node.base_name)
         ):
             return RegexCapture(
-                path=f'{node.base_name}{self.suffix}', groups=matched.groups()
+                anchor_node=node,
+                node=node,
+                groups=matched.groups(),
             ), self.range
         return None
 
@@ -299,10 +330,14 @@ class PathStep:
         Matcher for this segment.
     recursive:
         Whether this segment should traverse recursively through descendants.
+    native_recursive:
+        Whether a recursive step came directly from ``$$`` rather than from
+        lowering a preceding ``**`` wildcard.
     """
 
     matcher: Matcher
     recursive: bool = False
+    native_recursive: bool = False
 
 
 def parse_query_path(path: str) -> list[PathStep]:
@@ -393,7 +428,7 @@ def parse_query_path(path: str) -> list[PathStep]:
                 if rest.startswith('/')
                 else parse_name(rest, 'definition')
             )
-            return PathStep(matcher=matcher, recursive=True)
+            return PathStep(matcher=matcher, recursive=True, native_recursive=True)
 
         if segment.startswith('$'):
             rest = segment[1:]
@@ -422,4 +457,12 @@ def parse_query_path(path: str) -> list[PathStep]:
             return PathStep(matcher=RegexMatcher(target='name', pattern=segment[1:]))
         return PathStep(matcher=parse_name(segment, 'name'))
 
-    return [parse_segment(segment) for segment in split_hierarchy(path) if segment]
+    raw_steps = [parse_segment(segment) for segment in split_hierarchy(path) if segment]
+    for step, next_step in zip(raw_steps, raw_steps[1:]):
+        if step.recursive and isinstance(step.matcher, WildcardMatcher) and (
+            next_step.recursive or isinstance(next_step.matcher, WildcardMatcher)
+        ):
+            raise ValueError(
+                'Recursive wildcard must be followed by a non-wildcard, non-recursive matcher'
+            )
+    return raw_steps

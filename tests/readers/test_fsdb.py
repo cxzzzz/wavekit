@@ -1,3 +1,4 @@
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -584,7 +585,7 @@ def test_fsdb_reader_module_regex_combines_with_signal_brace(compare_fsdb):
     assert {key[0].path for key in matched} == {'unit_a', 'unit_b'}
     assert {key[0].definition for key in matched} == {'compare_unit'}
     assert {key[0].groups for key in matched} == {('unit',)}
-    assert {key[1].path for key in matched} == {'data_0', 'data_1'}
+    assert {key[1].path for key in matched} == {'data_0[3:0]', 'data_1[3:0]'}
     assert {key[1].groups for key in matched} == {('0',), ('1',)}
 
 
@@ -838,22 +839,18 @@ def test_fsdb_reader_composite_metadata(fsdb_runtime):
         )
 
 
-def test_fsdb_reader_array_matching_prefers_elements_then_range_views(fsdb_runtime):
+def test_fsdb_reader_array_matching_prefers_elements_and_leaf_ranges(fsdb_runtime):
     with FsdbReader(str(fsdb_runtime)) as reader:
         packed_element = reader.get_matched_signals('simple_tb.packed_arr[0]')[()]
-        packed_range = reader.get_matched_signals('simple_tb.packed_arr[2:1]')[()]
         unpacked_element = reader.get_matched_signals('simple_tb.unpacked_arr[0]')[()]
         element_range = reader.get_matched_signals('simple_tb.unpacked_arr[0][8:7]')[()]
         struct_element = reader.get_matched_signals('simple_tb.pkt_arr[0]')[()]
         struct_member = reader.get_matched_signals('simple_tb.pkt_arr[0].valid')[()]
 
-        with pytest.raises(ValueError, match='cannot be followed'):
-            reader.get_matched_signals('simple_tb.pkt_arr[1:0].valid')
+        assert reader.get_matched_signals('simple_tb.pkt_arr[1:0].valid') == {}
 
     assert packed_element.base_name == 'packed_arr[0]'
     assert packed_element.range == Range(2, 0)
-    assert packed_range.base_name == 'packed_arr'
-    assert packed_range.range == Range(2, 1)
     assert unpacked_element.base_name == 'unpacked_arr[0]'
     assert unpacked_element.range == Range(10, 0)
     assert element_range.base_name == 'unpacked_arr[0]'
@@ -863,17 +860,15 @@ def test_fsdb_reader_array_matching_prefers_elements_then_range_views(fsdb_runti
     assert struct_member.full_name == 'simple_tb.pkt_arr[0].valid'
 
 
-def test_fsdb_reader_rejects_partial_array_range_load(fsdb_runtime):
+def test_fsdb_reader_rejects_array_range_load(fsdb_runtime):
     with FsdbReader(str(fsdb_runtime)) as reader:
-        complete = reader.load_waveform(
-            'simple_tb.packed_arr[10:0]', clock='simple_tb.clk', end_cycle=6
-        )
-
-        for path in ('simple_tb.packed_arr[2:1]', 'simple_tb.unpacked_arr[2:1]'):
-            with pytest.raises(NotImplementedError, match='partial range of FSDB array'):
+        for path in (
+            'simple_tb.packed_arr[10:0]',
+            'simple_tb.packed_arr[2:1]',
+            'simple_tb.unpacked_arr[2:1]',
+        ):
+            with pytest.raises(ValueError, match=re.escape(f"signal '{path}' not found")):
                 reader.load_waveform(path, clock='simple_tb.clk', end_cycle=6)
-
-    assert complete.width == 33
 
 
 def test_fsdb_reader_packed_struct_whole_and_fields(fsdb_runtime):

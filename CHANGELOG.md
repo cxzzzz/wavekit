@@ -8,6 +8,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 ## Unreleased
 
 ### Added
+- Add cached recursive query-path matching for `**` and `$$`, including typed
+  recursive captures and capture-path restoration across hierarchy and ARRAY nodes.
 - Suppress the NPI startup banner by default when reading FSDB files.
   Pass `FsdbReader(..., quiet=False)` to re-enable it.
 

@@ -3,12 +3,21 @@ from __future__ import annotations
 import dataclasses
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
 from typing import TypeVar, cast
 
-from .matcher import Capture, CaptureKey, ExactCapture, PathStep, parse_query_path
+from .matcher import (
+    Capture,
+    CaptureKey,
+    ExactCapture,
+    Matcher,
+    PathStep,
+    WildcardCapture,
+    WildcardMatcher,
+    parse_query_path,
+)
 from .range import Range
 
 NodeT = TypeVar('NodeT', bound='Node')
@@ -30,6 +39,12 @@ class Node(ABC):
 
     base_name: str
     parent: Node | None
+    _recursive_match_cache: dict[Matcher, tuple[Node, ...]] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     @property
     def name(self) -> str:
@@ -38,7 +53,7 @@ class Node(ABC):
             return f'{self.base_name}{self.range}'
         return self.base_name
 
-    @property
+    @cached_property
     def full_name(self) -> str:
         """Return this node's fully-qualified real hierarchy name."""
         parent = self.parent
@@ -53,15 +68,23 @@ class Node(ABC):
 
     def _match_path(
         self,
-        path: list[PathStep] | str,
+        path: list[PathStep],
         node_filter: Callable[[Node, list[PathStep]], bool],
+        *,
+        step_anchor_node: Node | None = None,
     ) -> dict[tuple[Capture, ...], Node]:
-        steps = parse_query_path(path) if isinstance(path, str) else path
+        steps = path
         if not steps:
             raise ValueError('query path must not be empty')
 
-        results: dict[tuple[Capture, ...], Node] = {}
         step = steps[0]
+        step_anchor_node = self if step_anchor_node is None else step_anchor_node
+        results: dict[tuple[Capture, ...], Node] = {}
+        recursive_cache_key = (
+            step.matcher
+            if step.recursive and not isinstance(step.matcher, WildcardMatcher)
+            else None
+        )
 
         def add_match(key: tuple[Capture, ...], node: Node) -> None:
             if key in results:
@@ -71,44 +94,50 @@ class Node(ABC):
                 )
             results[key] = node
 
+        if (
+            recursive_cache_key is not None
+            and (cached_parents := self._recursive_match_cache.get(recursive_cache_key)) is not None
+        ):
+            replay_step = dataclasses.replace(step, recursive=False)
+            replay_steps = [replay_step, *steps[1:]]
+            for parent in cached_parents:
+                for key, node in parent._match_path(
+                    replay_steps,
+                    node_filter,
+                    step_anchor_node=step_anchor_node,
+                ).items():
+                    add_match(key, node)
+            return results
+
+        cached_parents: dict[Node, None] = {}
+
         for child in self.children:
             matched = step.matcher.match(child)
+            if recursive_cache_key is not None and matched is not None:
+                cached_parents.setdefault(self, None)
 
-            # A. A direct base-name match always wins.  In particular, an ARRAY
-            # element such as ``arr[0]`` must win over interpreting ``[0]`` as
-            # a range on its ARRAY parent.
+            # A. A direct base-name match always wins. In particular, an ARRAY
+            # element such as ``arr[0]`` wins over interpreting ``[0]`` as a
+            # range on its ARRAY parent.
             if matched is not None and matched[1] is None and node_filter(child, steps):
                 capture, _ = matched
+                capture = capture.with_anchor_node(step_anchor_node)
                 if len(steps) == 1:
-                    results[(capture,)] = (
-                        child.with_range(None) if isinstance(child, Signal) else child
-                    )
+                    add_match((capture,), child)
                 else:
                     for key, node in child._match_path(steps[1:], node_filter).items():
-                        add_match((capture,) + key, node)
+                        add_match((capture, *key), node)
 
-            # B. If the current node is an ARRAY, try the same PathStep on its
-            # children.  FSDB array members carry the cumulative local name
-            # (``arr[0]``, ``arr[0][1]``, ...), so this makes ARRAY containers
-            # transparent for hierarchy matching.
-            array_matches: dict[tuple[Capture, ...], Node] = {}
+            # B. A range suffix is only a bit-range selection on an ordinary
+            # leaf Signal. ARRAY composite signals are deliberately excluded:
+            # `[i]` may denote an ARRAY member, while a partial ARRAY range is
+            # not loadable consistently across the supported backends.
             if (
-                isinstance(child, Signal)
-                and child.composite_type == SignalCompositeType.ARRAY
-                and not (matched is not None and matched[1] is None)
+                matched is not None
+                and matched[1] is not None
+                and isinstance(child, Signal)
+                and child.composite_type is None
             ):
-                array_matches = child._match_path(steps, node_filter)
-                for key, node in array_matches.items():
-                    add_match(key, node)
-
-            if array_matches:
-                continue
-
-            # C. If the current node matched through a range suffix, materialize
-            # a range view only when this is the terminal path step.  A range
-            # view is not a hierarchy node and therefore cannot be followed by
-            # another path component.
-            if matched is not None and matched[1] is not None:
                 capture, selected_range = matched
                 if not node_filter(child, steps):
                     continue
@@ -117,57 +146,131 @@ class Node(ABC):
                         f'Range-selected signal {child.full_name!r} cannot be followed '
                         'by another hierarchy path component'
                     )
-                if not isinstance(child, Signal):
-                    raise TypeError(f'Node type {child.__class__.__name__} does not support ranges')
-                results[(capture,)] = child.with_range(selected_range)
+                selected_node = child.with_range(selected_range)
+                capture = capture.with_node(selected_node).with_anchor_node(step_anchor_node)
+                add_match((capture,), selected_node)
 
-            if step.recursive:
-                for key, node in child._match_path(steps, node_filter).items():
-                    recursive_capture = key[0].with_prefix(child.name) if child.name else key[0]
-                    add_match((recursive_capture, *key[1:]), node)
+            # C. Both recursive steps and transparent ARRAY containers search a
+            # child with the current step. ARRAY descent preserves `arr[0]` as a
+            # concrete member match; recursive descent extends that same search
+            # to all ordinary hierarchy children. Run the shared descent once.
+            if step.recursive or (
+                isinstance(child, Signal)
+                and child.composite_type == SignalCompositeType.ARRAY
+                and not (matched is not None and matched[1] is None)
+            ):
+                for key, node in child._match_path(
+                    steps,
+                    node_filter,
+                    step_anchor_node=step_anchor_node,
+                ).items():
+                    add_match(key, node)
+
+                # Cache entries are replay parents, so a recursive parent must
+                # inherit the candidate parents discovered in this child subtree.
+                if recursive_cache_key is not None:
+                    for parent in child._recursive_match_cache[recursive_cache_key]:
+                        cached_parents.setdefault(parent, None)
+
+        if recursive_cache_key is not None:
+            self._recursive_match_cache[recursive_cache_key] = tuple(cached_parents)
 
         return results
 
-    @staticmethod
-    def _normalize_match_keys(matches: dict[CaptureKey, NodeT]) -> dict[CaptureKey, NodeT]:
-        """Remove non-binding exact-name captures from public result keys."""
-        results: dict[CaptureKey, NodeT] = {}
-        for captures, node in matches.items():
-            key = tuple(
+    def _match_query_path(
+        self,
+        path: str,
+        node_filter: Callable[[Node, list[PathStep]], bool],
+    ) -> dict[CaptureKey, Node]:
+        """Execute a public query path and return its public capture keys."""
+        raw_steps = parse_query_path(path)
+
+        # Lower public ``**.matcher`` syntax into the recursive execution form.
+        match_steps: list[PathStep] = []
+        steps = iter(raw_steps)
+        for step in steps:
+            if not (step.recursive and isinstance(step.matcher, WildcardMatcher)):
+                match_steps.append(step)
+                continue
+
+            next_step = next(steps, None)
+            if next_step is None:
+                match_steps.append(step)
+                break
+
+            match_steps.append(
+                dataclasses.replace(next_step, recursive=True, native_recursive=False)
+            )
+
+        internal_matches = self._match_path(match_steps, node_filter)
+
+        # Restore public ``**`` captures and remove non-binding exact captures.
+        results: dict[CaptureKey, Node] = {}
+        for captures, node in internal_matches.items():
+            key: list[Capture] = []
+            for step, capture in zip(match_steps, captures):
+                restore_wildcard = (
+                    step.recursive
+                    and not step.native_recursive
+                    and not isinstance(step.matcher, WildcardMatcher)
+                )
+                if not restore_wildcard:
+                    key.append(capture)
+                    continue
+
+                # Split the internal recursive capture at the matched node's logical
+                # parent: ``**`` consumes anchor -> parent, and the matcher consumes
+                # parent -> node. Physical ARRAY containers are transparent here.
+                parent = capture.node.parent
+                while (
+                    isinstance(parent, Signal)
+                    and parent.composite_type == SignalCompositeType.ARRAY
+                ):
+                    parent = parent.parent
+
+                if parent is None:
+                    raise ValueError(
+                        f'Recursive match has no parent: {capture.node.full_name!r}'
+                    )
+                key.extend(
+                    (
+                        WildcardCapture(anchor_node=capture.anchor_node, node=parent),
+                        capture.with_anchor_node(parent),
+                    )
+                )
+
+            public_key = tuple(
                 capture
-                for capture in captures
+                for capture in key
                 if not (isinstance(capture, ExactCapture) and capture.definition is None)
             )
-            if key in results:
+            if public_key in results:
                 raise ValueError(
-                    f'Query path matched more than one node for key {key!r}: '
-                    f'{results[key].full_name!r} vs {node.full_name!r}'
+                    f'Query path matched more than one node for key {public_key!r}: '
+                    f'{results[public_key].full_name!r} vs {node.full_name!r}'
                 )
-            results[key] = node
+            results[public_key] = node
         return results
 
-    def get_matched_nodes(self, path: list[PathStep] | str) -> dict[CaptureKey, Node]:
+    def get_matched_nodes(self, path: str) -> dict[CaptureKey, Node]:
         """Return matching descendant nodes keyed by binding captures."""
-        return self._normalize_match_keys(self._match_path(path, lambda _node, _steps: True))
+        return self._match_query_path(path, lambda _node, _steps: True)
 
-    def get_matched_signals(self, path: list[PathStep] | str) -> dict[CaptureKey, Signal]:
+    def get_matched_signals(self, path: str) -> dict[CaptureKey, Signal]:
         """Return matching descendant signals keyed by binding captures."""
         return cast(
             dict[CaptureKey, Signal],
-            self._normalize_match_keys(
-                self._match_path(
-                    path, lambda node, steps: len(steps) > 1 or isinstance(node, Signal)
-                )
+            self._match_query_path(
+                path,
+                lambda node, remaining_steps: len(remaining_steps) > 1 or isinstance(node, Signal),
             ),
         )
 
-    def get_matched_scopes(self, path: list[PathStep] | str) -> dict[CaptureKey, Scope]:
+    def get_matched_scopes(self, path: str) -> dict[CaptureKey, Scope]:
         """Return matching descendant scopes keyed by binding captures."""
         return cast(
             dict[CaptureKey, Scope],
-            self._normalize_match_keys(
-                self._match_path(path, lambda node, _steps: isinstance(node, Scope))
-            ),
+            self._match_query_path(path, lambda node, _steps: isinstance(node, Scope)),
         )
 
 

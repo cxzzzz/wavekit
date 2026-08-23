@@ -2,7 +2,13 @@
 
 import pytest
 
-from wavekit.readers.matcher import BraceMatcher, ExactMatcher, RegexMatcher, parse_query_path
+from wavekit.readers.matcher import (
+    BraceMatcher,
+    ExactMatcher,
+    RegexMatcher,
+    WildcardMatcher,
+    parse_query_path,
+)
 from wavekit.readers.range import Range
 
 
@@ -48,3 +54,41 @@ def test_matcher_parser_expands_braces():
 def test_matcher_parser_rejects_unmatched_brace():
     with pytest.raises(ValueError, match='Unmatched brace'):
         parse_query_path('unit_{a,b')
+
+
+def test_matcher_parser_keeps_recursive_wildcard_raw():
+    steps = parse_query_path('a.**.b')
+
+    assert len(steps) == 3
+    assert steps[0].recursive is False
+    assert isinstance(steps[1].matcher, WildcardMatcher)
+    assert steps[1].recursive is True
+    assert steps[1].native_recursive is False
+    assert isinstance(steps[2].matcher, ExactMatcher)
+    assert steps[2].recursive is False
+
+
+def test_matcher_parser_keeps_native_recursive_steps():
+    steps = parse_query_path('$$A.$$B')
+
+    assert len(steps) == 2
+    assert all(step.recursive and step.native_recursive for step in steps)
+
+
+def test_matcher_parser_allows_native_recursive_suffixes():
+    assert parse_query_path('$$A.**')[-1].recursive is True
+    assert isinstance(parse_query_path('$$A.**')[-1].matcher, WildcardMatcher)
+
+
+def test_matchers_have_value_semantics():
+    first = ExactMatcher(target='name', pattern='data[7:0]')
+    second = ExactMatcher(target='name', pattern='data[7:0]')
+
+    assert first == second
+    assert hash(first) == hash(second)
+
+
+def test_matcher_parser_rejects_ambiguous_recursive_wildcard():
+    for path in ('a.**.*', 'a.**.**', 'a.**.$$B'):
+        with pytest.raises(ValueError, match='Recursive wildcard'):
+            parse_query_path(path)

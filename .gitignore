@@ -21,8 +21,6 @@ example/**/*.vcd
 example/**/*.vvp
 
 tests/fsdb_work/
-tests/fsdb/*.local.sh
-tests/readers/fixtures/fsdb/*.local.sh
 tests/testdata/*_from_fsdb.vcd
 tests/readers/fixtures/fsdb/*_from_fsdb.vcd
 npiLog/
@@ -35,3 +33,19 @@ poetry.toml
 .claude/
 .opencode/
 .trellis/
+
+tests/readers/fixtures/fsdb/README.local.md
+
+# Local-only helper scripts
+*.local.sh
+
+# Local agent/tool configuration
+.agents/
+.codex/
+
+# Local scratch files and vendor reference manuals
+tmp/
+reference/
+
+# EDA / Verdi generated logs
+*Log/
