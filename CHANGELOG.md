@@ -7,6 +7,16 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+- Add a more complete Lark-based expression parser and evaluator for WaveKit
+  waveform expressions, including arithmetic, bitwise, comparison, shift,
+  numeric literal, nested registered-function, and selected Waveform operations
+  such as `rising_edge`, `falling_edge`, `ahead`, `back`, `bit_count`,
+  `as_signed`, and `as_unsigned`; integrate it into `Reader.eval()` while
+  preserving single-match, zip, and singleton broadcast behavior.
+- Add relational Waveform operators `<`, `<=`, `>`, and `>=`, preserving the
+  waveform time and clock axes and returning 1-bit unsigned Waveforms.
+
 ## v0.7.1 - 2026-08-23
 
 ### Changed

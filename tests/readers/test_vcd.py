@@ -24,6 +24,14 @@ def _by_group(results, group):
     return next(value for key, value in results.items() if key[0].groups == (group,))
 
 
+def _assert_same_waveform(actual, expected):
+    assert np.array_equal(actual.value, expected.value)
+    assert np.array_equal(actual.clock, expected.clock)
+    assert np.array_equal(actual.time, expected.time)
+    assert actual.width == expected.width
+    assert actual.signed == expected.signed
+
+
 # ------------------------------------------------------------------
 # Fixtures
 # ------------------------------------------------------------------
@@ -786,13 +794,39 @@ def test_vcd_reader_rejects_invalid_xz_value(compare_xz_vcd_path):
 
 def test_vcd_eval_smoke(compare_vcd_path):
     with VcdReader(str(compare_vcd_path)) as reader:
-        result = reader.eval('compare_tb.dut.unit_a.data[7:0] + 1', clock='compare_tb.clk')
-        bit_slice = reader.eval('compare_tb.dut.unit_a.data[7:0][1:0]', clock='compare_tb.clk')
+        result = reader.eval(
+            'compare_tb.dut.unit_a.data[7:0] + compare_tb.dut.unit_b.data[7:0]',
+            clock='compare_tb.clk',
+        )
+        with pytest.raises(ValueError, match='matched no signals'):
+            reader.eval('compare_tb.dut.unit_a.data[7:0][1:0]', clock='compare_tb.clk')
+        expected_left = reader.load_waveform(
+            'compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk'
+        )
+        expected_right = reader.load_waveform(
+            'compare_tb.dut.unit_b.data[7:0]', clock='compare_tb.clk'
+        )
 
     assert isinstance(result, Waveform)
-    assert result.width == 9  # addition increases width by 1
-    assert isinstance(bit_slice, Waveform)
-    assert bit_slice.width == 2
+    _assert_same_waveform(result, expected_left + expected_right)
+
+
+def test_vcd_eval_nested_function_and_window(compare_vcd_path):
+    with VcdReader(str(compare_vcd_path)) as reader:
+        result = reader.eval(
+            'rising_edge(compare_tb.rst_n)',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=5,
+        )
+        rst_n = reader.load_waveform(
+            'compare_tb.rst_n',
+            clock='compare_tb.clk',
+            begin_cycle=1,
+            end_cycle=5,
+        )
+
+    _assert_same_waveform(result, rst_n.rising_edge())
 
 
 def test_vcd_eval_no_match_raises(compare_vcd_path):
@@ -818,9 +852,15 @@ def test_vcd_eval_zip_mode_brace_expansion(vcd_path):
             clock='tb.tck',
             mode='zip',
         )
+        expected = {
+            group: reader.load_waveform(f'tb.u0.J_{group}[3:0]', clock='tb.tck') + 1
+            for group in ('state', 'next')
+        }
     assert isinstance(result, dict)
     assert _capture_groups(result) == {('state',), ('next',)}
-    assert all(isinstance(w, Waveform) for w in result.values())
+    for key, actual in result.items():
+        group = key[0].groups[0]
+        _assert_same_waveform(actual, expected[group])
 
 
 def test_vcd_eval_zip_mode_broadcast(vcd_path):
@@ -831,8 +871,15 @@ def test_vcd_eval_zip_mode_broadcast(vcd_path):
             clock='tb.tck',
             mode='zip',
         )
+        j_state = reader.load_waveform('tb.u0.J_state[3:0]', clock='tb.tck')
+        expected = {
+            group: reader.load_waveform(f'tb.u0.J_{group}[3:0]', clock='tb.tck') + j_state
+            for group in ('state', 'next')
+        }
     assert isinstance(result, dict)
-    assert len(result) == 2
+    assert set(key[0].groups[0] for key in result) == {'state', 'next'}
+    for key, actual in result.items():
+        _assert_same_waveform(actual, expected[key[0].groups[0]])
 
 
 # ------------------------------------------------------------------

@@ -36,6 +36,14 @@ def _by_group(results, group):
     return next(value for key, value in results.items() if key[0].groups == (group,))
 
 
+def _assert_same_waveform(actual, expected):
+    assert np.array_equal(actual.value, expected.value)
+    assert np.array_equal(actual.clock, expected.clock)
+    assert np.array_equal(actual.time, expected.time)
+    assert actual.width == expected.width
+    assert actual.signed == expected.signed
+
+
 # ------------------------------------------------------------------
 # Fixtures
 # ------------------------------------------------------------------
@@ -510,14 +518,15 @@ def test_fsdb_load_matched_waveforms_uses_signal_range(compare_fsdb):
     assert wave.width == 8
 
 
-def test_fsdb_reader_load_matched_waveforms(fsdb_runtime):
+def test_fsdb_reader_load_matched_waveforms_does_not_support_range_inside_brace(
+    fsdb_runtime,
+):
     with FsdbReader(str(fsdb_runtime)) as reader:
         waves = reader.load_matched_waveforms(
             'simple_tb.dut.{data_o[3:0],overflow}', 'simple_tb.clk'
         )
 
-    assert _capture_groups(waves) == {('data_o[3:0]',), ('overflow',)}
-    assert _by_group(waves, 'data_o[3:0]').width == 4
+    assert _capture_groups(waves) == {('overflow',)}
     assert _by_group(waves, 'overflow').width == 1
 
 
@@ -532,7 +541,7 @@ def test_fsdb_reader_clock_path_key_mismatch_error(fsdb_runtime):
     with FsdbReader(str(fsdb_runtime)) as reader:
         with pytest.raises(Exception, match='no clock key is a prefix'):
             reader.load_matched_waveforms(
-                'simple_tb.dut.{data_o[3:0],overflow}',  # keys: data_o[3:0], overflow
+                'simple_tb.dut.{data_o[3:0],overflow}',  # only overflow matches
                 'simple_tb.{clk,rst_n}',  # keys: clk, rst_n — mismatch
             )
 
@@ -619,18 +628,11 @@ def test_fsdb_reader_signal_regex_trailing_range(compare_fsdb):
     assert signal.full_name == 'compare_tb.dut.unit_a.data[1:0]'
 
 
-def test_fsdb_reader_signal_regex_escaped_native_range(compare_fsdb):
+def test_fsdb_reader_signal_regex_does_not_match_native_range(compare_fsdb):
     with FsdbReader(str(compare_fsdb)) as reader:
         matched = reader.get_matched_signals(r'compare_tb.dut.unit_a./data\[7:0\]/')
 
-    assert len(matched) == 1
-    (capture,) = next(iter(matched))
-    signal = next(iter(matched.values()))
-    assert isinstance(capture, RegexCapture)
-    assert capture.path == 'data[7:0]'
-    assert capture.groups == ()
-    assert signal.range == Range(7, 0)
-    assert signal.full_name == 'compare_tb.dut.unit_a.data[7:0]'
+    assert matched == {}
 
 
 def test_fsdb_reader_scope_regex_escaped_brackets(compare_fsdb):
@@ -1024,13 +1026,21 @@ def test_fsdb_reader_packed_struct_array_whole_and_fields(fsdb_runtime):
 
 def test_fsdb_eval_smoke(compare_fsdb):
     with FsdbReader(str(compare_fsdb)) as reader:
-        result = reader.eval('compare_tb.dut.unit_a.data[7:0] + 1', clock='compare_tb.clk')
-        bit_slice = reader.eval('compare_tb.dut.unit_a.data[7:0][1:0]', clock='compare_tb.clk')
+        result = reader.eval(
+            'compare_tb.dut.unit_a.data[7:0] + compare_tb.dut.unit_b.data[7:0]',
+            clock='compare_tb.clk',
+        )
+        with pytest.raises(ValueError, match='matched no signals'):
+            reader.eval('compare_tb.dut.unit_a.data[7:0][1:0]', clock='compare_tb.clk')
+        expected_left = reader.load_waveform(
+            'compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk'
+        )
+        expected_right = reader.load_waveform(
+            'compare_tb.dut.unit_b.data[7:0]', clock='compare_tb.clk'
+        )
 
     assert isinstance(result, Waveform)
-    assert result.width == 9  # addition increases width by 1
-    assert isinstance(bit_slice, Waveform)
-    assert bit_slice.width == 2
+    _assert_same_waveform(result, expected_left + expected_right)
 
 
 def test_fsdb_eval_no_match_raises(compare_fsdb):
@@ -1056,9 +1066,17 @@ def test_fsdb_eval_zip_mode_brace_expansion(compare_fsdb):
             clock='compare_tb.clk',
             mode='zip',
         )
+        expected = {
+            unit: reader.load_waveform(
+                f'compare_tb.dut.unit_{unit}.data[7:0]', clock='compare_tb.clk'
+            )
+            + 1
+            for unit in ('a', 'b')
+        }
     assert isinstance(result, dict)
     assert _capture_groups(result) == {('a',), ('b',)}
-    assert all(isinstance(w, Waveform) for w in result.values())
+    for key, actual in result.items():
+        _assert_same_waveform(actual, expected[key[0].groups[0]])
 
 
 def test_fsdb_eval_zip_mode_broadcast(compare_fsdb):
@@ -1069,8 +1087,18 @@ def test_fsdb_eval_zip_mode_broadcast(compare_fsdb):
             clock='compare_tb.clk',
             mode='zip',
         )
+        unit_a = reader.load_waveform('compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk')
+        expected = {
+            unit: reader.load_waveform(
+                f'compare_tb.dut.unit_{unit}.data[7:0]', clock='compare_tb.clk'
+            )
+            + unit_a
+            for unit in ('a', 'b')
+        }
     assert isinstance(result, dict)
-    assert len(result) == 2
+    assert set(key[0].groups[0] for key in result) == {'a', 'b'}
+    for key, actual in result.items():
+        _assert_same_waveform(actual, expected[key[0].groups[0]])
 
 
 # ------------------------------------------------------------------

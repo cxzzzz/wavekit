@@ -621,3 +621,51 @@ def test_relative_preserves_metadata():
     assert result.width == 8
     # Operations return waveforms with signal=None
     assert result.signal is None
+
+
+# ==========================================
+# Relational Comparisons
+# ==========================================
+
+
+def test_relational_comparison_waveform_and_scalar():
+    wave = build_waveform([1, 2, 3], width=8)
+
+    for result in (wave < 2, wave <= 2, wave > 2, wave >= 2):
+        assert result.width == 1
+        assert result.signed is False
+        assert np.array_equal(result.clock, wave.clock)
+        assert np.array_equal(result.time, wave.time)
+
+    assert np.array_equal((wave < 2).value, np.array([1, 0, 0]))
+    assert np.array_equal((wave <= 2).value, np.array([1, 1, 0]))
+    assert np.array_equal((wave > 2).value, np.array([0, 0, 1]))
+    assert np.array_equal((wave >= 2).value, np.array([0, 1, 1]))
+
+
+def test_relational_comparison_waveform_operands_and_reverse_scalars():
+    wave = build_waveform([1, 2, 3], width=8)
+    other = build_waveform([2, 2, 2], width=8)
+
+    assert np.array_equal((wave < other).value, np.array([1, 0, 0]))
+    assert np.array_equal((wave <= other).value, np.array([1, 1, 0]))
+    assert np.array_equal((wave > other).value, np.array([0, 0, 1]))
+    assert np.array_equal((wave >= other).value, np.array([0, 1, 1]))
+    assert np.array_equal((2 < wave).value, np.array([0, 0, 1]))
+    assert np.array_equal((2 <= wave).value, np.array([0, 1, 1]))
+    assert np.array_equal((2 > wave).value, np.array([1, 0, 0]))
+    assert np.array_equal((2 >= wave).value, np.array([1, 1, 0]))
+
+
+def test_relational_comparison_signedness_mismatch():
+    signed = build_waveform([-1, 0, 1], width=8, signed=True)
+    unsigned = build_waveform([1, 2, 3], width=8, signed=False)
+
+    with pytest.raises(ValueError, match='signedness mismatch'):
+        _ = signed < unsigned
+    with pytest.raises(ValueError, match='signedness mismatch'):
+        _ = signed <= unsigned
+    with pytest.raises(ValueError, match='signedness mismatch'):
+        _ = signed > unsigned
+    with pytest.raises(ValueError, match='signedness mismatch'):
+        _ = signed >= unsigned

@@ -5,6 +5,7 @@ from typing import Any, Callable, Literal, Union, cast
 import numpy as np
 import numpy.typing as npt
 
+from .expression import expression_function
 from .readers.hierarchy import Signal
 
 
@@ -276,6 +277,7 @@ class Waveform:
             value.astype(np.uint64) - offset,
         )
 
+    @expression_function
     def as_signed(self) -> Waveform:
         """Reinterpret the unsigned bit pattern as a two's-complement signed integer.
 
@@ -293,6 +295,7 @@ class Waveform:
     def _unsigned(value: np.ndarray, width: int):
         return value & ((1 << width) - 1)
 
+    @expression_function
     def as_unsigned(self) -> Waveform:
         """Reinterpret the signed value as an unsigned bit pattern.
 
@@ -725,6 +728,32 @@ class Waveform:
             signed=False,
         )
 
+    def _compare(self, other: object, comparator: Callable[[Any, Any], Any]) -> Any:
+        if not isinstance(other, (Waveform, int, float)):
+            return NotImplemented
+        self._check_sign(other)
+        return self.vectorized_map(
+            lambda x: comparator(x, self._get_value(other)),
+            width=1,
+            signed=False,
+        )
+
+    def __lt__(self, other: object) -> Any:
+        """Return a 1-bit waveform for ``self < other``."""
+        return self._compare(other, lambda a, b: a < b)
+
+    def __le__(self, other: object) -> Any:
+        """Return a 1-bit waveform for ``self <= other``."""
+        return self._compare(other, lambda a, b: a <= b)
+
+    def __gt__(self, other: object) -> Any:
+        """Return a 1-bit waveform for ``self > other``."""
+        return self._compare(other, lambda a, b: a > b)
+
+    def __ge__(self, other: object) -> Any:
+        """Return a 1-bit waveform for ``self >= other``."""
+        return self._compare(other, lambda a, b: a >= b)
+
     @staticmethod
     def _eq(a, b):
         return a == b
@@ -962,6 +991,7 @@ class Waveform:
         vectorized_func = np.vectorize(func)
         return self.vectorized_map(vectorized_func, width, signed)
 
+    @expression_function
     def falling_edge(self) -> Waveform:
         """Detect 1→0 transitions in a 1-bit waveform.
 
@@ -991,6 +1021,7 @@ class Waveform:
             signed=False,
         )
 
+    @expression_function
     def rising_edge(self) -> Waveform:
         """Detect 0→1 transitions in a 1-bit waveform.
 
@@ -1020,6 +1051,7 @@ class Waveform:
             signed=False,
         )
 
+    @expression_function
     def bit_count(self) -> Waveform:
         """Count the number of set bits (population count) in each sample value.
 
@@ -1419,6 +1451,7 @@ class Waveform:
             signed=self.signed,
         )
 
+    @expression_function
     def ahead(
         self,
         n: int = 1,
@@ -1452,6 +1485,7 @@ class Waveform:
         """
         return self.relative(n, pad, pad_value)
 
+    @expression_function
     def back(
         self,
         n: int = 1,

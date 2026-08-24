@@ -136,6 +136,23 @@ files = [
 ]
 
 [[package]]
+name = "lark"
+version = "1.3.1"
+description = "a modern parsing library"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "lark-1.3.1-py3-none-any.whl", hash = "sha256:c629b661023a014c37da873b4ff58a817398d12635d3bbb2c5a03be7fe5d1e12"},
+    {file = "lark-1.3.1.tar.gz", hash = "sha256:b426a7a6d6d53189d318f2b6236ab5d6429eaf09259f1ca33eb716eed10d2905"},
+]
+
+[package.extras]
+atomic-cache = ["atomicwrites"]
+interegular = ["interegular (>=0.3.1,<0.4.0)"]
+nearley = ["js2py"]
+regex = ["regex"]
+
+[[package]]
 name = "librt"
 version = "0.7.8"
 description = "Mypyc runtime library"
@@ -570,4 +587,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "e9ac39d12163084536eaa3e32bc4e68671de37e454410ba94a5229af1acc35e6"
+content-hash = "c2d10987fe104f3e97ec56dbe9213d22d168f88e0bb12bb68ae74cce79df3817"

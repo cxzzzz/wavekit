@@ -49,3 +49,4 @@ reference/
 
 # EDA / Verdi generated logs
 *Log/
+.opencode

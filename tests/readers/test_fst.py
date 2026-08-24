@@ -23,6 +23,14 @@ def _by_group(results, group):
     return next(value for key, value in results.items() if key[0].groups == (group,))
 
 
+def _assert_same_waveform(actual, expected):
+    assert np.array_equal(actual.value, expected.value)
+    assert np.array_equal(actual.clock, expected.clock)
+    assert np.array_equal(actual.time, expected.time)
+    assert actual.width == expected.width
+    assert actual.signed == expected.signed
+
+
 # ------------------------------------------------------------------
 # Fixtures
 # ------------------------------------------------------------------
@@ -757,13 +765,21 @@ def test_fst_reader_verilator_whole_aggregate_reads_fail(unknown_fst_path):
 
 def test_fst_eval_smoke(compare_fst_path):
     with FstReader(str(compare_fst_path)) as reader:
-        result = reader.eval('compare_tb.dut.unit_a.data[7:0] + 1', clock='compare_tb.clk')
-        bit_slice = reader.eval('compare_tb.dut.unit_a.data[7:0][1:0]', clock='compare_tb.clk')
+        result = reader.eval(
+            'compare_tb.dut.unit_a.data[7:0] + compare_tb.dut.unit_b.data[7:0]',
+            clock='compare_tb.clk',
+        )
+        with pytest.raises(ValueError, match='matched no signals'):
+            reader.eval('compare_tb.dut.unit_a.data[7:0][1:0]', clock='compare_tb.clk')
+        expected_left = reader.load_waveform(
+            'compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk'
+        )
+        expected_right = reader.load_waveform(
+            'compare_tb.dut.unit_b.data[7:0]', clock='compare_tb.clk'
+        )
 
     assert isinstance(result, Waveform)
-    assert result.width == 9  # addition increases width by 1
-    assert isinstance(bit_slice, Waveform)
-    assert bit_slice.width == 2
+    _assert_same_waveform(result, expected_left + expected_right)
 
 
 def test_fst_eval_no_match_raises(compare_fst_path):
@@ -789,9 +805,17 @@ def test_fst_eval_zip_mode_brace_expansion(compare_fst_path):
             clock='compare_tb.clk',
             mode='zip',
         )
+        expected = {
+            unit: reader.load_waveform(
+                f'compare_tb.dut.unit_{unit}.data[7:0]', clock='compare_tb.clk'
+            )
+            + 1
+            for unit in ('a', 'b')
+        }
     assert isinstance(result, dict)
     assert _capture_groups(result) == {('a',), ('b',)}
-    assert all(isinstance(w, Waveform) for w in result.values())
+    for key, actual in result.items():
+        _assert_same_waveform(actual, expected[key[0].groups[0]])
 
 
 def test_fst_eval_zip_mode_broadcast(compare_fst_path):
@@ -802,8 +826,18 @@ def test_fst_eval_zip_mode_broadcast(compare_fst_path):
             clock='compare_tb.clk',
             mode='zip',
         )
+        unit_a = reader.load_waveform('compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk')
+        expected = {
+            unit: reader.load_waveform(
+                f'compare_tb.dut.unit_{unit}.data[7:0]', clock='compare_tb.clk'
+            )
+            + unit_a
+            for unit in ('a', 'b')
+        }
     assert isinstance(result, dict)
-    assert len(result) == 2
+    assert set(key[0].groups[0] for key in result) == {'a', 'b'}
+    for key, actual in result.items():
+        _assert_same_waveform(actual, expected[key[0].groups[0]])
 
 
 # ------------------------------------------------------------------

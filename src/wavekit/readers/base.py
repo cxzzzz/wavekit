@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import ast
 from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Generic, Literal, TypeVar, cast
 
 import numpy as np
 
+from ..expression import evaluate_expression, parse_expression
 from ..waveform import Waveform
-from .expr_parser import extract_wave_paths
 from .hierarchy import Node, Scope, Signal
 from .matcher import CaptureKey
 from .value_change import value_change_to_value_array
@@ -684,35 +683,33 @@ class Reader(Generic[SignalT]):
         mode: Literal['single', 'zip'] = 'single',
         root_scope: Scope | None = None,
     ) -> Waveform | dict[CaptureKey, Waveform]:
-        """Evaluate a waveform expression string.
-
-        Wave signal paths embedded in *expr* are automatically extracted,
-        loaded, and substituted before evaluating the resulting Python
-        arithmetic expression.
+        """Evaluate a waveform expression containing physical signal paths.
 
         Parameters
         ----------
         expr:
-            Expression string.
-            Single mode example: ``"tb.dut.w_ptr[3:0] - tb.dut.r_ptr[3:0]"``.
-            Zip mode example: ``"tb.dut.fifo_{0..3}.w_ptr[3:0] - tb.dut.fifo_{0..3}.r_ptr[3:0]"``.
+            Expression string. Signal paths may be used as operands or as
+            arguments to registered expression functions.
         clock:
             Clock signal used for all waveform loads.
+        xz_value, signed, sample_on_posedge, begin_time, end_time, begin_cycle,
+        end_cycle:
+            Forwarded to :meth:`load_matched_waveforms` for every path.
         mode:
-            ``'single'`` (default) — every path must match exactly one
-            signal; returns a single :class:`Waveform`.
-            ``'zip'`` — paths matching multiple signals must all share the
-            same set of pattern keys; single-match paths are broadcast;
-            returns ``dict[CaptureKey, Waveform]``.
+            ``'single'`` requires every path to match one signal. ``'zip'``
+            evaluates once per shared multi-match key and broadcasts singleton
+            paths.
         root_scope:
-            If provided, all signal paths in *expr* are resolved within this
-            scope instead of the file's top-level scopes.
+            If provided, resolve paths within this scope.
+
+        Returns
+        -------
+        Waveform or dict[CaptureKey, Waveform]
+            The evaluated waveform, or one waveform per zip key.
         """
         self._validate_xz_value(xz_value)
-        substituted, path_entries = extract_wave_paths(expr)
-
+        substituted, path_entries = parse_expression(expr)
         load_kwargs: dict[str, Any] = dict(
-            clock=clock,
             xz_value=xz_value,
             signed=signed,
             sample_on_posedge=sample_on_posedge,
@@ -720,81 +717,84 @@ class Reader(Generic[SignalT]):
             end_time=end_time,
             begin_cycle=begin_cycle,
             end_cycle=end_cycle,
+            root_scope=root_scope,
         )
 
-        # Resolve each path to its matched signal(s)
-        matched_per_path: list[tuple[str, str, dict[CaptureKey, SignalT]]] = []
+        loaded_per_path: list[tuple[str, str, dict[CaptureKey, Waveform]]] = []
         for placeholder, path in path_entries:
-            matched = self.get_matched_signals(path, root_scope=root_scope)
+            matched = self.load_matched_waveforms(
+                signal_path=path,
+                clock_path=clock,
+                **load_kwargs,
+            )
             if not matched:
                 raise ValueError(f"path '{path}' matched no signals")
-            matched_per_path.append((placeholder, path, matched))
+            loaded_per_path.append((placeholder, path, matched))
 
         if mode == 'single':
-            for _placeholder, path, matched in matched_per_path:
+            for _placeholder, path, matched in loaded_per_path:
                 if len(matched) > 1:
+                    matched_names = [
+                        wave.signal.full_name if wave.signal is not None else None
+                        for wave in matched.values()
+                    ]
                     raise ValueError(
                         f"path '{path}' matched {len(matched)} signals in mode='single',"
-                        f" use mode='zip'. Matched: {[sig.full_name for sig in matched.values()]}"
+                        f" use mode='zip'. Matched: "
+                        f'{matched_names}'
                     )
-            ns: dict[str, Any] = {
-                placeholder: self.load_waveform(next(iter(matched.values())), **load_kwargs)
-                for placeholder, _, matched in matched_per_path
+            namespace = {
+                placeholder: next(iter(matched.values()))
+                for placeholder, _, matched in loaded_per_path
             }
             try:
-                code = compile(ast.parse(substituted, mode='eval'), '<eval_expr>', 'eval')
-                return eval(code, {'__builtins__': {}}, ns)  # noqa: S307
+                return evaluate_expression(substituted, namespace)
             except Exception as exc:
                 raise ValueError(
-                    f"failed to evaluate expression '{expr}' (substituted: '{substituted}')"
+                    f"failed to evaluate expression '{expr}' " f"(substituted: '{substituted}')"
                 ) from exc
 
-        elif mode == 'zip':
-            multi_paths = [(ph, p, m) for ph, p, m in matched_per_path if len(m) > 1]
-            single_paths = [(ph, p, m) for ph, p, m in matched_per_path if len(m) == 1]
+        if mode == 'zip':
+            multi_paths = [
+                (placeholder, path, matched)
+                for placeholder, path, matched in loaded_per_path
+                if len(matched) > 1
+            ]
+            single_paths = [
+                (placeholder, path, matched)
+                for placeholder, path, matched in loaded_per_path
+                if len(matched) == 1
+            ]
 
             if multi_paths:
-                # All multi-match paths must share identical key sets
-                ref_ph, ref_p, ref_matched = multi_paths[0]
-                ref_keys = set(ref_matched.keys())
-                for _ph, p, matched in multi_paths[1:]:
-                    if set(matched.keys()) != ref_keys:
+                _ref_placeholder, ref_path, ref_matched = multi_paths[0]
+                ref_keys = set(ref_matched)
+                for _placeholder, path, matched in multi_paths[1:]:
+                    if set(matched) != ref_keys:
                         raise ValueError(
-                            f'inconsistent match keys between paths: '
-                            f"'{ref_p}' has keys {ref_keys!r}, "
-                            f"'{p}' has keys {set(matched)!r}"
+                            'inconsistent match keys between paths: '
+                            f"'{ref_path}' has keys {ref_keys!r}, "
+                            f"'{path}' has keys {set(matched)!r}"
                         )
-                zip_keys: list[CaptureKey] = list(ref_keys)
+                zip_keys = list(ref_keys)
             else:
-                # All paths are single-match; degenerate to single behaviour
                 zip_keys = [()]
 
-            # Pre-load broadcast waveforms (single-match paths)
-            broadcast_ns: dict[str, Waveform] = {
-                placeholder: self.load_waveform(next(iter(matched.values())), **load_kwargs)
+            broadcast_namespace = {
+                placeholder: next(iter(matched.values()))
                 for placeholder, _, matched in single_paths
             }
-
             result: dict[CaptureKey, Waveform] = {}
-            try:
-                code = compile(ast.parse(substituted, mode='eval'), '<eval_expr>', 'eval')
-            except SyntaxError as exc:
-                raise ValueError(
-                    f"invalid expression '{expr}' (substituted: '{substituted}')"
-                ) from exc
-
             for key in zip_keys:
-                ns = dict(broadcast_ns)
-                for placeholder, _, matched in multi_paths:
-                    ns[placeholder] = self.load_waveform(matched[key], **load_kwargs)
+                namespace = dict(broadcast_namespace)
+                for placeholder, _path, matched in multi_paths:
+                    namespace[placeholder] = matched[key]
                 try:
-                    result[key] = eval(code, {'__builtins__': {}}, ns)  # noqa: S307
+                    result[key] = evaluate_expression(substituted, namespace)
                 except Exception as exc:
                     raise ValueError(
-                        f"failed to evaluate expression '{expr}' for key {key}"
+                        f'failed to evaluate expression {expr!r} for key {key!r}'
                     ) from exc
-
             return result
 
-        else:
-            raise ValueError(f"unknown mode '{mode}', expected 'single' or 'zip'")
+        raise ValueError(f"unknown mode '{mode}', expected 'single' or 'zip'")
