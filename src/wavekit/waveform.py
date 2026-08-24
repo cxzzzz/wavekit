@@ -311,10 +311,6 @@ class Waveform:
             lambda x: self._unsigned(x, width), width=self.width, signed=False
         )
 
-    @staticmethod
-    def _add(a, b):
-        return a + b
-
     def _check_sign(self, other: WaveformOrScalar):
         if isinstance(other, Waveform) and self.signed != other.signed:
             raise ValueError('signedness mismatch')
@@ -370,19 +366,16 @@ class Waveform:
             return max_width + 1
 
         new_width = self._infer_arithmetic_op_width(inferred_width)
+        other_value = self._get_value(other)
 
         return self.vectorized_map(
-            lambda x: self._add(x, self._get_value(other)),
+            lambda x: x + other_value,
             width=new_width,
             signed=self.signed,
         )
 
     def __radd__(self, other: WaveformOrScalar) -> Waveform:
         return self.__add__(other)
-
-    @staticmethod
-    def _sub(a, b):
-        return a - b
 
     def __sub__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
@@ -391,9 +384,10 @@ class Waveform:
             return self._optional_max_width(other)
 
         new_width = self._infer_arithmetic_op_width(inferred_width)
+        other_value = self._get_value(other)
 
         return self.vectorized_map(
-            lambda x: self._sub(x, self._get_value(other)),
+            lambda x: x - other_value,
             width=new_width,
             signed=self.signed,
         )
@@ -405,16 +399,13 @@ class Waveform:
             return self._optional_max_width(other)
 
         new_width = self._infer_arithmetic_op_width(inferred_width)
+        other_value = self._get_value(other)
 
         return self.vectorized_map(
-            lambda x: self._sub(self._get_value(other), x),
+            lambda x: other_value - x,
             width=new_width,
             signed=self.signed,
         )
-
-    @staticmethod
-    def _mul(a, b):
-        return a * b
 
     def __mul__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
@@ -426,9 +417,10 @@ class Waveform:
             return self.width + other_width
 
         new_width = self._infer_arithmetic_op_width(inferred_width)
+        other_value = self._get_value(other)
 
         return self.vectorized_map(
-            lambda x: self._mul(x, self._get_value(other)),
+            lambda x: x * other_value,
             width=new_width,
             signed=self.signed,
         )
@@ -436,13 +428,9 @@ class Waveform:
     def __rmul__(self, other: WaveformOrScalar) -> Waveform:
         return self.__mul__(other)
 
-    @staticmethod
-    def _truediv(a, b):
-        return a / b
-
     def __truediv__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
-        new_value = self._truediv(self.value, self._get_value(other))
+        new_value = self.value / self._get_value(other)
 
         return Waveform(
             value=new_value,
@@ -454,7 +442,7 @@ class Waveform:
 
     def __rtruediv__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
-        new_value = self._truediv(self._get_value(other), self.value)
+        new_value = self._get_value(other) / self.value
 
         return Waveform(
             value=new_value,
@@ -464,14 +452,10 @@ class Waveform:
             signed=self.signed,
         )
 
-    @staticmethod
-    def _floordiv(a, b):
-        return a // b
-
     def __floordiv__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
         new_width = self._infer_arithmetic_op_width(lambda: self.width)
-        new_value = self._floordiv(self.value, self._get_value(other))
+        new_value = self.value // self._get_value(other)
 
         return Waveform(
             value=new_value,
@@ -484,7 +468,7 @@ class Waveform:
     def __rfloordiv__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
         new_width = self._infer_arithmetic_op_width(lambda: self._get_width(other))
-        new_value = self._floordiv(self._get_value(other), self.value)
+        new_value = self._get_value(other) // self.value
 
         return Waveform(
             value=new_value,
@@ -494,15 +478,11 @@ class Waveform:
             signed=self.signed,
         )
 
-    @staticmethod
-    def _mod(a, b):
-        return a % b
-
     def __mod__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
         new_width = self._infer_arithmetic_op_width(lambda: self.width)
 
-        new_value = self._mod(self.value, self._get_value(other))
+        new_value = self.value % self._get_value(other)
 
         return Waveform(
             value=new_value,
@@ -516,7 +496,7 @@ class Waveform:
         self._check_sign(other)
         new_width = self._infer_arithmetic_op_width(lambda: self._get_width(other))
 
-        new_value = self._mod(self._get_value(other), self.value)
+        new_value = self._get_value(other) % self.value
 
         return Waveform(
             value=new_value,
@@ -526,15 +506,11 @@ class Waveform:
             signed=self.signed,
         )
 
-    @staticmethod
-    def _pow(a, b):
-        return a**b
-
     def __pow__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
         new_width = self._infer_arithmetic_op_width(lambda: 64)
 
-        new_value = self._pow(self.value, self._get_value(other))
+        new_value = self.value ** self._get_value(other)
 
         return Waveform(
             value=new_value,
@@ -579,10 +555,6 @@ class Waveform:
             raise ValueError(f'width mismatch: {self.width} and {other}')
         return self.width
 
-    @staticmethod
-    def _lshift(a, b):
-        return a << b
-
     def __lshift__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
         self._check_logical_op_type(other)
@@ -600,10 +572,9 @@ class Waveform:
             inferred_width=base_width + shift_width,
         )
 
-        new_value = self._lshift(
-            self.value.astype(np.object_) if new_width > 64 else self.value,
-            self._get_value(other),
-        )
+        new_value = (
+            self.value.astype(np.object_) if new_width > 64 else self.value
+        ) << self._get_value(other)
 
         return Waveform(
             value=new_value,
@@ -615,10 +586,6 @@ class Waveform:
 
     def __rlshift__(self, other: WaveformOrScalar) -> Waveform:
         return self.__lshift__(other)
-
-    @staticmethod
-    def _rshift(a, b):
-        return a >> b
 
     def __rshift__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
@@ -634,7 +601,7 @@ class Waveform:
                 inferred_width=max((self.width or 0) - other, 0),
             )
 
-        new_value = self._rshift(self.value, self._get_value(other))
+        new_value = self.value >> self._get_value(other)
 
         return Waveform(
             value=new_value,
@@ -658,7 +625,7 @@ class Waveform:
                 inferred_width=max((self.width or 0) - other, 0),
             )
 
-        new_value = self._rshift(self.value, self._get_value(other))
+        new_value = self.value >> self._get_value(other)
 
         return Waveform(
             value=new_value,
@@ -668,15 +635,12 @@ class Waveform:
             signed=self.signed,
         )
 
-    @staticmethod
-    def _and(a, b):
-        return a & b
-
     def __and__(self, other: WaveformOrScalar) -> Waveform:
         self._check_sign(other)
         new_width = self._infer_logical_op_width(other)
+        other_value = self._get_value(other)
         return self.vectorized_map(
-            lambda x: self._and(x, self._get_value(other)),
+            lambda x: x & other_value,
             width=new_width,
             signed=False,
         )
@@ -684,29 +648,21 @@ class Waveform:
     def __rand__(self, other: WaveformOrScalar) -> Waveform:
         return self.__and__(other)
 
-    @staticmethod
-    def _or(a, b):
-        return a | b
-
     def __or__(self, other: WaveformOrScalar, width: int = None) -> Waveform:
         self._check_sign(other)
         new_width = self._infer_logical_op_width(other)
-        return self.vectorized_map(
-            lambda x: self._or(x, self._get_value(other)), width=new_width, signed=False
-        )
+        other_value = self._get_value(other)
+        return self.vectorized_map(lambda x: x | other_value, width=new_width, signed=False)
 
     def __ror__(self, other: WaveformOrScalar, width: int = None) -> Waveform:
         return self.__or__(other, width)
 
-    @staticmethod
-    def _xor(a, b):
-        return a ^ b
-
     def __xor__(self, other: WaveformOrScalar, width: int = None) -> Waveform:
         self._check_sign(other)
         new_width = self._infer_logical_op_width(other)
+        other_value = self._get_value(other)
         return self.vectorized_map(
-            lambda x: self._xor(x, self._get_value(other)),
+            lambda x: x ^ other_value,
             width=new_width,
             signed=False,
         )
@@ -754,30 +710,24 @@ class Waveform:
         """Return a 1-bit waveform for ``self >= other``."""
         return self._compare(other, lambda a, b: a >= b)
 
-    @staticmethod
-    def _eq(a, b):
-        return a == b
-
     def __eq__(self, other: object) -> Any:
         if not isinstance(other, (Waveform, int, float)):
             return NotImplemented
         self._check_sign(other)
+        other_value = self._get_value(other)
         return self.vectorized_map(
-            lambda x: self._eq(x, self._get_value(other)),
+            lambda x: x == other_value,
             width=1,
             signed=False,
         )
-
-    @staticmethod
-    def _ne(a, b):
-        return a != b
 
     def __ne__(self, other: object) -> Any:
         if not isinstance(other, (Waveform, int, float)):
             return NotImplemented
         self._check_sign(other)
+        other_value = self._get_value(other)
         return self.vectorized_map(
-            lambda x: self._ne(x, self._get_value(other)),
+            lambda x: x != other_value,
             width=1,
             signed=False,
         )
