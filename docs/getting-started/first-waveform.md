@@ -12,8 +12,8 @@ make -C example/fifo_occupancy sim
 
 ## Load the waveform
 
-The FIFO exposes write and read pointers sampled by its clock. Open the VCD and
-load both pointers with the same clock path:
+Load the FIFO's write and read pointers from the VCD, calculate its occupancy,
+and report summary statistics:
 
 ```python
 import numpy as np
@@ -41,7 +41,7 @@ with VcdReader('example/fifo_occupancy/fifo_tb.vcd') as reader:
 analysis. Its `.value` attribute is a NumPy array, so it can be passed directly
 to NumPy functions or combined with other NumPy arrays.
 
-For the current FIFO fixture, the corresponding summary is:
+For this fixture, the script prints:
 
 ```text
 Average occupancy: 4.64
@@ -50,17 +50,14 @@ Maximum occupancy: 7
 
 ## Run the complete example
 
-The command below regenerates the waveform, then runs the complete analysis
-script from the repository root:
+The command below regenerates the waveform and runs `occupancy.py`:
 
 ```console
 make -C example/fifo_occupancy all
 ```
 
 The Makefile compiles `fifo_tb.sv` and `fifo.sv`, runs the simulation, and then
-executes `occupancy.py`. See [the examples index](../examples.md) for more
-advanced examples, including latency analysis and protocol transaction
-extraction.
+runs `occupancy.py`. See the [examples index](../examples.md) for more examples.
 
 ## Next steps
 

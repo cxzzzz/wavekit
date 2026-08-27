@@ -1,6 +1,6 @@
 # Waveform analysis
 
-A `Waveform` keeps three aligned arrays:
+A `Waveform` contains three aligned arrays:
 
 - `.value`: sampled signal values;
 - `.clock`: absolute clock-cycle numbers, starting at cycle 0 for the first
@@ -131,8 +131,8 @@ summary = data.downsample(100)  # average each 100-sample chunk
 
 ## Keep unknown values visible
 
-Ordinary loading substitutes X/Z states with `xz_value` (zero by default). If
-that replacement is not enough, load a companion mask:
+Ordinary loading replaces X/Z states with `xz_value` (zero by default). To
+preserve X/Z information, load a companion mask:
 
 ```python
 value = reader.load_waveform('tb.data[7:0]', clock='tb.clk', xz_value=0)

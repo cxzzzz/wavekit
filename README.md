@@ -21,15 +21,15 @@ at both the cycle and transaction levels.
 ## Features
 
 - **Flexible signal queries:** find and batch-load related signals from
-  hierarchical waveform data using flexible path matching.
-- **Cycle-level analysis:** use rich waveform operations on clock-sampled data
-  to analyze cycle-based behavior such as interface backpressure and FIFO
+  hierarchical waveform data using multiple path-matching options.
+- **Cycle-level analysis:** use a range of waveform operations on clock-sampled
+  data to analyze cycle-based behavior such as interface backpressure and FIFO
   occupancy.
 - **Transaction-level analysis:** use temporal pattern matching to describe
   signal relationships across multiple clock cycles for protocol analysis,
   transaction extraction, and latency measurement.
 - **Multi-format waveform support:** load and analyze VCD, FST, and FSDB files
-  through the same reader and `Waveform` APIs.
+  using the same API.
 
 ## Installation
 

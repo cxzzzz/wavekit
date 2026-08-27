@@ -1,9 +1,9 @@
 # Reader
 
-Wavekit provides three readers: `VcdReader` for VCD files, `FstReader` for
-FST files, and `FsdbReader` for FSDB files. All three expose the same
-clock-synchronised loading workflow. Use a reader as a context manager so file
-and backend resources are released reliably:
+Wavekit has three readers: `VcdReader` for VCD files, `FstReader` for FST
+files, and `FsdbReader` for FSDB files. They use the same clock-sampled loading
+interface. Use readers as context managers so their resources are released
+automatically when the block exits:
 
 ```python
 from wavekit import FstReader, VcdReader

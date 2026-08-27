@@ -69,7 +69,7 @@ Use the following syntax to construct query paths:
 
 | Syntax | Example | Captured key component |
 | --- | --- | --- |
-| Exact path | `tb.dut.valid` | None; exact components are omitted |
+| Exact path | `tb.dut.valid` | No capture |
 | Brace list | `sig_{read,write}` | `BraceCapture` |
 | Integer range | `fifo_{0..3}.ptr` | One `BraceCapture` per index |
 | Stepped range | `lane_{0..6..2}.valid` | `BraceCapture` for `0`, `2`, `4`, `6` |

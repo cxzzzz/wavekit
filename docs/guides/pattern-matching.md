@@ -51,8 +51,8 @@ matching. Later blocking steps describe the timing within that match. Once a
 blocking step is satisfied, the following step is evaluated in the same cycle;
 use `delay(1)` to advance to the next cycle explicitly.
 
-For repeated or conditional protocol flows, combine these steps with `loop()`,
-`repeat()`, and `branch()`:
+For repeated or conditional flows, combine these steps with `loop()`, `repeat()`,
+and `branch()`:
 
 ```python
 beat = Pattern().consume(w_valid & w_ready, channel='w').capture(

@@ -27,8 +27,8 @@ poetry run mypy
 poetry run pytest
 ```
 
-The example tests compile their HDL fixtures with Icarus Verilog and execute the
-analysis scripts. Install `iverilog` before running them.
+The example tests compile their HDL fixtures with Icarus Verilog and run the
+analysis scripts. Install `iverilog` before running the example tests.
 
 ## Build the documentation
 

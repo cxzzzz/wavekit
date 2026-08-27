@@ -9,13 +9,15 @@ at both the cycle and transaction levels.
 
 ## What wavekit provides
 
-Wavekit reads VCD, FST, and FSDB files into clock-sampled `Waveform` objects.
-Its analysis workflow is organized around:
+Wavekit loads VCD, FST, and FSDB files through the same API, producing
+clock-sampled `Waveform` objects.
+
+The main workflow is:
 
 1. **Flexible signal queries:** find and batch-load related signals from
-   hierarchical waveform data using flexible path matching.
-2. **Cycle-level analysis:** use rich waveform operations on clock-sampled data
-   to analyze cycle-based behavior such as interface backpressure and FIFO
+   hierarchical waveform data using multiple path-matching options.
+2. **Cycle-level analysis:** use a range of waveform operations on clock-sampled
+   data to analyze cycle-based behavior such as interface backpressure and FIFO
    occupancy.
 3. **Transaction-level analysis:** use temporal pattern matching to describe
    signal relationships across multiple clock cycles for protocol analysis,
