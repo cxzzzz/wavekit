@@ -5,6 +5,12 @@ on:
     branches: ['main']
   pull_request:
     branches: ['main']
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -26,5 +32,28 @@ jobs:
           poetry config virtualenvs.in-project true
           poetry install --with docs --no-interaction
 
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
       - name: Build documentation
         run: poetry run zensical build --clean --strict
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
