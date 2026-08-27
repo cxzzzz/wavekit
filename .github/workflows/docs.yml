@@ -35,8 +35,11 @@ jobs:
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Build documentation
+      - name: Build English documentation
         run: poetry run zensical build --clean --strict
+
+      - name: Build Chinese documentation
+        run: poetry run zensical build --config-file zensical-zh.toml --strict
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v4

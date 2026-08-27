@@ -1,4 +1,4 @@
-# wavekit
+# <img src="docs-zh/images/logo.svg" alt="" width="30" height="30" valign="middle"> wavekit
 
 [![CI](https://github.com/cxzzzz/wavekit/actions/workflows/python-package.yml/badge.svg)](https://github.com/cxzzzz/wavekit/actions/workflows/python-package.yml)
 [![PyPI version](https://img.shields.io/pypi/v/wavekit.svg)](https://pypi.org/project/wavekit/)
@@ -27,7 +27,7 @@
 python -m pip install wavekit
 ```
 
-wavekit 支持 Python 3.9 及以上版本。FSDB 支持需要 Verdi NPI 运行时（`libNPI.so`）；配置方法请参阅 [Reader 配置指南](docs/guides/reader.md)。
+wavekit 支持 Python 3.9 及以上版本。FSDB 支持需要 Verdi NPI 运行时（`libNPI.so`）；配置方法请参阅 [Reader 配置指南](docs-zh/guides/reader.md)。
 
 ## 快速上手
 
@@ -56,20 +56,20 @@ with VcdReader('simulation.vcd') as r:
     print('Average occupancy:', np.mean(occupancy.value))
 ```
 
-完整的可运行 FIFO 示例请参阅 [第一个波形教程](docs/getting-started/first-waveform.md)。
+完整的可运行 FIFO 示例请参阅 [第一个波形教程](docs-zh/getting-started/first-waveform.md)。
 
 ## 文档
 
-完整的参考文档和指南请参阅[文档](docs/index.md)：
+完整的参考文档和指南请参阅[文档](docs-zh/index.md)：
 
-- [安装](docs/getting-started/installation.md)
-- [第一个波形](docs/getting-started/first-waveform.md)
-- [Reader 与 FSDB 配置](docs/guides/reader.md)
-- [信号查询](docs/guides/signal-query.md)
-- [波形分析](docs/guides/waveform-analysis.md)
-- [模式匹配](docs/guides/pattern-matching.md)
-- [API 参考](docs/reference/api.md)
-- [完整示例](docs/examples.md)
+- [安装](docs-zh/getting-started/installation.md)
+- [第一个波形](docs-zh/getting-started/first-waveform.md)
+- [Reader 与 FSDB 配置](docs-zh/guides/reader.md)
+- [信号查询](docs-zh/guides/signal-query.md)
+- [波形分析](docs-zh/guides/waveform-analysis.md)
+- [模式匹配](docs-zh/guides/pattern-matching.md)
+- [API 参考](docs-zh/reference/api.md)
+- [完整示例](docs-zh/examples.md)
 
 ## 开发
 
@@ -90,7 +90,7 @@ poetry install --with docs
 poetry run zensical build --clean --strict
 ```
 
-有关贡献方式，请参阅[贡献指南](docs/contributing.md)。
+有关贡献方式，请参阅[贡献指南](docs-zh/contributing.md)。
 
 ## 许可证
 

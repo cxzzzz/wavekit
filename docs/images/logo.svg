@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">wavekit</title>
+  <desc id="desc">A bold digital square wave</desc>
+  <path d="M5 54h14V12h26v42h14" fill="none" stroke="#62c8bf" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

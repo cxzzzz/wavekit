@@ -1,4 +1,4 @@
-# wavekit
+# <img src="docs/images/logo.svg" alt="" width="30" height="30" valign="middle"> wavekit
 
 [![CI](https://github.com/cxzzzz/wavekit/actions/workflows/python-package.yml/badge.svg)](https://github.com/cxzzzz/wavekit/actions/workflows/python-package.yml)
 [![PyPI version](https://img.shields.io/pypi/v/wavekit.svg)](https://pypi.org/project/wavekit/)

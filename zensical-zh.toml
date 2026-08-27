@@ -1,28 +1,28 @@
 [project]
 site_name = "wavekit"
-site_url = "https://cxzzzz.github.io/wavekit/"
-site_description = "High-level digital waveform analysis in Python"
+site_url = "https://cxzzzz.github.io/wavekit/zh/"
+site_description = "使用 Python 进行高层次数字波形分析"
 repo_url = "https://github.com/cxzzzz/wavekit"
 repo_name = "cxzzzz/wavekit"
-docs_dir = "docs"
-site_dir = "site"
+docs_dir = "docs-zh"
+site_dir = "site/zh"
 nav = [
-  { "Home" = "index.md" },
-  { "Getting started" = [
-    { "Installation" = "getting-started/installation.md" },
-    { "First waveform" = "getting-started/first-waveform.md" },
+  { "首页" = "index.md" },
+  { "快速开始" = [
+    { "安装" = "getting-started/installation.md" },
+    { "第一个波形" = "getting-started/first-waveform.md" },
   ] },
-  { "Guides" = [
+  { "指南" = [
     { "Reader" = "guides/reader.md" },
-    { "Signal queries" = "guides/signal-query.md" },
-    { "Waveform analysis" = "guides/waveform-analysis.md" },
-    { "Pattern matching" = "guides/pattern-matching.md" },
+    { "信号查询" = "guides/signal-query.md" },
+    { "波形分析" = "guides/waveform-analysis.md" },
+    { "模式匹配" = "guides/pattern-matching.md" },
   ] },
-  { "Reference" = [
-    { "API reference" = "reference/api.md" },
+  { "参考" = [
+    { "API 参考" = "reference/api.md" },
   ] },
-  { "Examples" = "examples.md" },
-  { "Contributing" = "contributing.md" },
+  { "示例" = "examples.md" },
+  { "参与贡献" = "contributing.md" },
 ]
 
 [project.extra]
@@ -32,7 +32,7 @@ alternate = [
 ]
 
 [project.theme]
-language = "en"
+language = "zh"
 logo = "images/logo.svg"
 favicon = "images/favicon.svg"
 font.text = "Inter"
@@ -46,20 +46,19 @@ features = [
   "search.highlight",
 ]
 
-# A restrained light/dark palette inspired by small, technical documentation sites.
 [[project.theme.palette]]
 scheme = "default"
 primary = "teal"
 accent = "cyan"
 toggle.icon = "lucide/sun"
-toggle.name = "Switch to dark mode"
+toggle.name = "切换到深色模式"
 
 [[project.theme.palette]]
 scheme = "slate"
 primary = "teal"
 accent = "cyan"
 toggle.icon = "lucide/moon"
-toggle.name = "Switch to light mode"
+toggle.name = "切换到浅色模式"
 
 [project.markdown_extensions]
 admonition = {}

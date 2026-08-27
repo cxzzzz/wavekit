@@ -9,10 +9,11 @@ at both the cycle and transaction levels.
 
 ## What wavekit provides
 
-Wavekit loads VCD, FST, and FSDB files through the same API, producing
-clock-sampled `Waveform` objects.
+Wavekit loads VCD, FST, and FSDB files through the same API, representing
+signals as clock-sampled `Waveform` objects for further waveform operations
+and analysis.
 
-The main workflow is:
+Its main features include:
 
 1. **Flexible signal queries:** find and batch-load related signals from
    hierarchical waveform data using multiple path-matching options.
