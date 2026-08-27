@@ -1,0 +1,81 @@
+[project]
+site_name = "wavekit"
+site_url = "https://cxzzzz.github.io/wavekit/"
+site_description = "High-level digital waveform analysis in Python"
+repo_url = "https://github.com/cxzzzz/wavekit"
+repo_name = "cxzzzz/wavekit"
+docs_dir = "docs"
+site_dir = "site"
+nav = [
+  { "Home" = "index.md" },
+  { "Getting started" = [
+    { "Installation" = "getting-started/installation.md" },
+    { "First waveform" = "getting-started/first-waveform.md" },
+  ] },
+  { "Guides" = [
+    { "Reader" = "guides/reader.md" },
+    { "Signal queries" = "guides/signal-query.md" },
+    { "Waveform analysis" = "guides/waveform-analysis.md" },
+    { "Pattern matching" = "guides/pattern-matching.md" },
+  ] },
+  { "Reference" = [
+    { "API reference" = "reference/api.md" },
+  ] },
+  { "Examples" = "examples.md" },
+  { "Contributing" = "contributing.md" },
+]
+
+[project.theme]
+language = "en"
+font.text = "Inter"
+font.code = "Hack"
+features = [
+  "content.code.copy",
+  "navigation.footer",
+  "navigation.path",
+  "navigation.sections",
+  "navigation.top",
+  "search.highlight",
+]
+
+[project.theme.icon]
+logo = "material/square-wave"
+
+# A restrained light/dark palette inspired by small, technical documentation sites.
+[[project.theme.palette]]
+scheme = "default"
+primary = "teal"
+accent = "cyan"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+primary = "teal"
+accent = "cyan"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[project.markdown_extensions]
+admonition = {}
+attr_list = {}
+def_list = {}
+footnotes = {}
+md_in_html = {}
+toc.permalink = true
+pymdownx.details = {}
+pymdownx.highlight = { anchor_linenums = true, line_spans = "__span", pygments_lang_class = true }
+pymdownx.superfences = {}
+pymdownx.tabbed = { alternate_style = true }
+pymdownx.tasklist = { custom_checkbox = true }
+
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["src"]
+options.docstring_style = "numpy"
+options.docstring_section_style = "table"
+options.filters = ["!^_"]
+options.show_source = false
+options.inherited_members = true
+options.show_root_heading = true
+options.show_root_full_path = false
+options.merge_init_into_class = true

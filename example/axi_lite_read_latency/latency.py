@@ -18,7 +18,7 @@ with VcdReader('axi_lite_tb.vcd') as reader:
     result = match(
         Pattern()
         .wait(ar_sigs['valid'] & ar_sigs['ready'])
-        .wait(r_sigs['valid'] & r_sigs['ready'])
+        .consume(r_sigs['valid'] & r_sigs['ready'], channel='read-response')
         .capture('rdata', r_sigs['data'])
     )
 

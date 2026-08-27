@@ -23,7 +23,7 @@ def analyze_write_latency():
         blocked_start = blocked.rising_edge().filter(lambda v: v != 0)
         blocked_end = blocked.falling_edge().filter(lambda v: v != 0)
         blocked_num = len(blocked_end.value)
-        duration = (blocked_end.clock[:blocked_num] - blocked_start.clock[:blocked_num]) + 1
+        duration = blocked_end.clock[:blocked_num] - blocked_start.clock[:blocked_num]
 
         print('Write Backpressure Analysis:')
         print(f'  Total blocked cycles: {np.sum(blocked.value)}')

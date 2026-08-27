@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "wavekit"
 version = "0.7.2"
-description = "a fundamental package for digital circuit waveform analysis"
+description = "High-level digital waveform analysis in Python"
 authors = ["cxzzzz <cxz19961010@outlook.com>"]
 readme = "README.md"
 repository = "https://github.com/cxzzzz/wavekit"
@@ -21,6 +21,11 @@ lark = ">=1.2,<2"
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.6.2"
 mypy = "^1.11.2"
+
+
+[tool.poetry.group.docs.dependencies]
+zensical = {version = "^0.0.57", python = ">=3.10,<4.0"}
+mkdocstrings-python = {version = "1.18.2", python = ">=3.10,<4.0"}
 
 [tool.ruff]
 target-version = "py39"

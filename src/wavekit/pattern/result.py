@@ -19,14 +19,18 @@ class MatchStatus:
 
     @dataclass(frozen=True)
     class OK(MatchStatusValue):
-        pass
+        """Successful completion of a pattern candidate."""
 
     @dataclass(frozen=True)
     class Timeout(MatchStatusValue):
+        """A pattern candidate did not complete within its allowed duration."""
+
         message: str | None = None
 
     @dataclass(frozen=True)
     class RequireViolated(MatchStatusValue):
+        """A non-blocking ``require`` check failed."""
+
         message: str | None = None
 
 

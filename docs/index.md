@@ -1,0 +1,34 @@
+# wavekit documentation
+
+**High-level digital waveform analysis in Python.**
+
+Waveform files expose timestamps and value changes, while hardware engineers
+reason about clock cycles, signal relationships, and multi-cycle behavior.
+wavekit bridges that abstraction gap with flexible signal queries and analysis
+at both the cycle and transaction levels.
+
+## What wavekit provides
+
+Wavekit reads VCD, FST, and FSDB files into clock-sampled `Waveform` objects.
+Its analysis workflow is organized around:
+
+1. **Flexible signal queries:** find and batch-load related signals from
+   hierarchical waveform data using flexible path matching.
+2. **Cycle-level analysis:** use rich waveform operations on clock-sampled data
+   to analyze cycle-based behavior such as interface backpressure and FIFO
+   occupancy.
+3. **Transaction-level analysis:** use temporal pattern matching to describe
+   signal relationships across multiple clock cycles for protocol analysis,
+   transaction extraction, and latency measurement.
+
+## Start here
+
+- [Install wavekit](getting-started/installation.md).
+- Follow [the first waveform tutorial](getting-started/first-waveform.md).
+- Choose a [reader for your waveform format](guides/reader.md).
+- Learn [signal queries](guides/signal-query.md), [waveform analysis](guides/waveform-analysis.md),
+  and [pattern matching](guides/pattern-matching.md).
+- Browse the [API reference](reference/api.md) or [complete examples](examples.md).
+
+The optional [wavekit-mcp](https://github.com/cxzzzz/wavekit-mcp) project exposes
+wavekit analysis through MCP tools for AI-assisted workflows.

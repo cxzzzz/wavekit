@@ -45,8 +45,11 @@ tests/readers/fixtures/fsdb/README.local.md
 
 # Local scratch files and vendor reference manuals
 tmp/
-reference/
+/reference/
 
 # EDA / Verdi generated logs
 *Log/
 .opencode
+
+# Generated documentation site
+site/
