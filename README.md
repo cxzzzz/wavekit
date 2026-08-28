@@ -37,7 +37,7 @@ python -m pip install wavekit
 ```
 
 wavekit supports Python 3.9 and newer. FSDB support requires the Verdi NPI
-runtime (`libNPI.so`); see the [reader setup guide](https://cxzzzz.github.io/wavekit/guides/reader/) for
+runtime (`libNPI.so`); see the [installation guide](https://cxzzzz.github.io/wavekit/getting-started/installation/) for
 setup details.
 
 ## Quick start
@@ -76,7 +76,7 @@ See the [documentation](https://cxzzzz.github.io/wavekit/) for the full referenc
 
 - [Installation](https://cxzzzz.github.io/wavekit/getting-started/installation/)
 - [First waveform](https://cxzzzz.github.io/wavekit/getting-started/first-waveform/)
-- [Reader and FSDB setup](https://cxzzzz.github.io/wavekit/guides/reader/)
+- [Reader guide](https://cxzzzz.github.io/wavekit/guides/reader/)
 - [Signal queries](https://cxzzzz.github.io/wavekit/guides/signal-query/)
 - [Waveform analysis](https://cxzzzz.github.io/wavekit/guides/waveform-analysis/)
 - [Pattern matching](https://cxzzzz.github.io/wavekit/guides/pattern-matching/)

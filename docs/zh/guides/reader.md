@@ -3,16 +3,19 @@
 wavekit 提供三种 Reader，分别读取 VCD、FST 和 FSDB 文件。它们使用相同的时钟采样加载接口。使用 `with` 管理 Reader，代码块结束时会自动释放资源：
 
 ```python
-from wavekit import FstReader, VcdReader
+from wavekit import FsdbReader, FstReader, VcdReader
 
 with VcdReader('simulation.vcd') as reader:
     data = reader.load_waveform('tb.dut.data[7:0]', clock='tb.clk')
 
 with FstReader('simulation.fst') as reader:
     data = reader.load_waveform('tb.dut.data[7:0]', clock='tb.clk')
+
+with FsdbReader('simulation.fsdb') as reader:
+    data = reader.load_waveform('tb.dut.data[7:0]', clock='tb.clk')
 ```
 
-`FsdbReader` 还需要 Verdi NPI 运行时（`libNPI.so`）。打开 FSDB 文件前，请先阅读 [FSDB 安装和运行时配置](../getting-started/installation.md)。
+`FsdbReader` 的使用方式相同，但需要 Verdi NPI 运行时（`libNPI.so`）。打开 FSDB 文件前，请先阅读 [FSDB 安装和运行时配置](../getting-started/installation.md)。
 
 ## 采样和窗口
 

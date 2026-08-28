@@ -6,16 +6,19 @@ interface. Use readers as context managers so their resources are released
 automatically when the block exits:
 
 ```python
-from wavekit import FstReader, VcdReader
+from wavekit import FsdbReader, FstReader, VcdReader
 
 with VcdReader('simulation.vcd') as reader:
     data = reader.load_waveform('tb.dut.data[7:0]', clock='tb.clk')
 
 with FstReader('simulation.fst') as reader:
     data = reader.load_waveform('tb.dut.data[7:0]', clock='tb.clk')
+
+with FsdbReader('simulation.fsdb') as reader:
+    data = reader.load_waveform('tb.dut.data[7:0]', clock='tb.clk')
 ```
 
-`FsdbReader` additionally requires the Verdi NPI runtime (`libNPI.so`). See
+`FsdbReader` uses the same API, but requires the Verdi NPI runtime (`libNPI.so`). See
 the [FSDB installation and runtime setup](../getting-started/installation.md#fsdb-support)
 before opening an FSDB file.
 

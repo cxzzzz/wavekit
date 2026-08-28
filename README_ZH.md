@@ -26,7 +26,7 @@
 python -m pip install wavekit
 ```
 
-wavekit 支持 Python 3.9 及以上版本。FSDB 支持需要 Verdi NPI 运行时（`libNPI.so`）；配置方法请参阅 [Reader 配置指南](https://cxzzzz.github.io/wavekit/zh/guides/reader/)。
+wavekit 支持 Python 3.9 及以上版本。FSDB 支持需要 Verdi NPI 运行时（`libNPI.so`）；配置方法请参阅[安装说明](https://cxzzzz.github.io/wavekit/zh/getting-started/installation/)。
 
 ## 快速上手
 
@@ -63,7 +63,7 @@ with VcdReader('simulation.vcd') as r:
 
 - [安装](https://cxzzzz.github.io/wavekit/zh/getting-started/installation/)
 - [第一个波形](https://cxzzzz.github.io/wavekit/zh/getting-started/first-waveform/)
-- [Reader 与 FSDB 配置](https://cxzzzz.github.io/wavekit/zh/guides/reader/)
+- [Reader 使用指南](https://cxzzzz.github.io/wavekit/zh/guides/reader/)
 - [信号查询](https://cxzzzz.github.io/wavekit/zh/guides/signal-query/)
 - [波形分析](https://cxzzzz.github.io/wavekit/zh/guides/waveform-analysis/)
 - [模式匹配](https://cxzzzz.github.io/wavekit/zh/guides/pattern-matching/)

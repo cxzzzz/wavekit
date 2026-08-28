@@ -24,7 +24,7 @@ with VcdReader('axi_read_reorder_tb.vcd') as reader:
         Pattern()
         .wait(ar_sigs['valid'] & ar_sigs['ready'])
         .capture('arid', ar_sigs['id'])
-        .consume(resp_fire, channel=lambda index, captures: captures['arid'])
+        .consume(resp_fire, channel='read-response')
         .capture('rdata', r_sigs['data'])
     )
 
