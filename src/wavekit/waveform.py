@@ -935,6 +935,47 @@ class Waveform:
         vectorized_func = np.vectorize(func)
         return self.vectorized_map(vectorized_func, width, signed)
 
+    def _transition_mask(
+        self,
+        predicate: Callable[[npt.NDArray[Any], npt.NDArray[Any]], npt.NDArray[Any]],
+    ) -> Waveform:
+        new_value = np.zeros(len(self.value), dtype=bool)
+        if len(self.value) > 1:
+            new_value[1:] = predicate(self.value[:-1], self.value[1:])
+        return Waveform(
+            value=new_value,
+            clock=np.copy(self.clock),
+            time=np.copy(self.time),
+            width=1,
+            signed=False,
+        )
+
+    @expression_function
+    def changed(self) -> Waveform:
+        """Detect changes between adjacent samples.
+
+        Returns a new unsigned 1-bit Waveform where ``value[i]`` is true when
+        the current sample differs from the previous sample. The first sample
+        is always false.
+        """
+        return self._transition_mask(lambda previous, current: previous != current)
+
+    @expression_function
+    def any_edge(self) -> Waveform:
+        """Detect either edge in a 1-bit waveform.
+
+        Returns a new unsigned 1-bit Waveform that is true for both ``0 -> 1``
+        and ``1 -> 0`` transitions. The first sample is always false.
+
+        Raises
+        ------
+        ValueError
+            If the source waveform is not one bit wide.
+        """
+        if self.width != 1:
+            raise ValueError('any_edge() requires a 1-bit waveform')
+        return self.changed()
+
     @expression_function
     def falling_edge(self) -> Waveform:
         """Detect 1→0 transitions in a 1-bit waveform.
@@ -945,25 +986,17 @@ class Waveform:
 
         Raises
         ------
-        Exception:
-            If ``self.width != 1``.
+        ValueError
+            If the source waveform is not one bit wide.
 
         See Also
         --------
         rising_edge : detect 0→1 transitions.
+        any_edge : detect either transition.
         """
         if self.width != 1:
-            raise Exception('raising only support 1-bit waveform')
-        one = self.value[:-1] == 1
-        zero = self.value[1:] == 0
-        new_value = np.concatenate(([False], one & zero))
-        return Waveform(
-            value=new_value,
-            clock=np.copy(self.clock),
-            time=np.copy(self.time),
-            width=1,
-            signed=False,
-        )
+            raise ValueError('falling_edge() requires a 1-bit waveform')
+        return self._transition_mask(lambda previous, current: (previous == 1) & (current == 0))
 
     @expression_function
     def rising_edge(self) -> Waveform:
@@ -975,25 +1008,17 @@ class Waveform:
 
         Raises
         ------
-        Exception:
-            If ``self.width != 1``.
+        ValueError
+            If the source waveform is not one bit wide.
 
         See Also
         --------
         falling_edge : detect 1→0 transitions.
+        any_edge : detect either transition.
         """
         if self.width != 1:
-            raise Exception('raising only support 1-bit waveform')
-        zero = self.value[:-1] == 0
-        one = self.value[1:] == 1
-        new_value = np.concatenate(([False], one & zero))
-        return Waveform(
-            value=new_value,
-            clock=np.copy(self.clock),
-            time=np.copy(self.time),
-            width=1,
-            signed=False,
-        )
+            raise ValueError('rising_edge() requires a 1-bit waveform')
+        return self._transition_mask(lambda previous, current: (previous == 0) & (current == 1))
 
     @expression_function
     def bit_count(self) -> Waveform:

@@ -9,7 +9,7 @@ import numpy as np
 from ..expression import evaluate_expression, parse_expression
 from ..waveform import Waveform
 from .hierarchy import Node, Scope, Signal
-from .matcher import CaptureKey
+from .matcher import CaptureKey, ExactMatcher, parse_query_path
 from .value_change import value_change_to_value_array
 
 SignalT = TypeVar('SignalT', bound=Signal)
@@ -155,8 +155,8 @@ class Reader(Generic[SignalT]):
             *end_cycle*) are provided simultaneously.
         """
         self._validate_xz_value(xz_value)
-        resolved_signal = self._resolve_signal(signal)
-        resolved_clock = self._resolve_signal(clock)
+        resolved_signal = signal if isinstance(signal, Signal) else self.get_signal(signal)
+        resolved_clock = clock if isinstance(clock, Signal) else self.get_signal(clock)
         value_mapping = {'0': 0, '1': 1, 'x': xz_value, 'z': xz_value}
         wf = self._sample_on_clock(
             resolved_signal,
@@ -212,8 +212,8 @@ class Reader(Generic[SignalT]):
         Waveform:
             Unsigned mask waveform.
         """
-        resolved_signal = self._resolve_signal(signal)
-        resolved_clock = self._resolve_signal(clock)
+        resolved_signal = signal if isinstance(signal, Signal) else self.get_signal(signal)
+        resolved_clock = clock if isinstance(clock, Signal) else self.get_signal(clock)
 
         value_mapping = {
             '0': 0,
@@ -382,11 +382,100 @@ class Reader(Generic[SignalT]):
 
         return result
 
-    def _search_root(self, root_scope: Scope | None) -> Node:
-        """Return a real root or an internal search container for all top-level scopes."""
-        if root_scope is not None:
-            return root_scope
-        return _SearchRoot(top_scopes=self.top_scopes)
+    def get_signal(
+        self,
+        path: str,
+        root_scope: Scope | None = None,
+    ) -> SignalT:
+        """Return the signal at an exact hierarchy path.
+
+        Parameters
+        ----------
+        path:
+            Exact dotted signal path, with an optional terminal bit selection
+            or range. Matcher expressions are not accepted.
+        root_scope:
+            If provided, resolve *path* within this scope instead of starting
+            from the file's top-level scopes.
+
+        Returns
+        -------
+        Signal
+            The exact matched signal, including any requested range view.
+
+        Raises
+        ------
+        ValueError
+            If *path* contains matcher syntax or the signal does not exist.
+        """
+        steps = parse_query_path(path)
+        if any(
+            not isinstance(step.matcher, ExactMatcher)
+            or step.matcher.target != 'name'
+            or step.recursive
+            or step.native_recursive
+            for step in steps
+        ):
+            raise ValueError(
+                'get_signal() requires an exact path; '
+                'use get_matched_signals() for pattern queries'
+            )
+        search_root = root_scope or _SearchRoot(self.top_scopes)
+        matched = search_root._match_path(
+            steps,
+            lambda node, remaining: len(remaining) > 1 or isinstance(node, Signal),
+        )
+        if not matched:
+            raise ValueError(f"signal '{path}' not found")
+        return cast(SignalT, next(iter(matched.values())))
+
+    def get_scope(
+        self,
+        path: str,
+        root_scope: Scope | None = None,
+    ) -> Scope:
+        """Return the scope at an exact hierarchy path.
+
+        Parameters
+        ----------
+        path:
+            Exact dotted scope path. Matcher expressions and terminal signal
+            ranges are not accepted.
+        root_scope:
+            If provided, resolve *path* within this scope instead of starting
+            from the file's top-level scopes.
+
+        Returns
+        -------
+        Scope
+            The exact matched scope.
+
+        Raises
+        ------
+        ValueError
+            If *path* contains matcher syntax, contains a terminal range, or
+            the scope does not exist.
+        """
+        steps = parse_query_path(path)
+        if any(
+            not isinstance(step.matcher, ExactMatcher)
+            or step.matcher.target != 'name'
+            or step.recursive
+            or step.native_recursive
+            for step in steps
+        ):
+            raise ValueError(
+                'get_scope() requires an exact path; '
+                'use get_matched_scopes() for pattern queries'
+            )
+        search_root = root_scope or _SearchRoot(self.top_scopes)
+        matched = search_root._match_path(
+            steps,
+            lambda node, _remaining: isinstance(node, Scope),
+        )
+        if not matched:
+            raise ValueError(f"scope '{path}' not found")
+        return cast(Scope, next(iter(matched.values())))
 
     def get_matched_signals(
         self,
@@ -422,7 +511,7 @@ class Reader(Generic[SignalT]):
             If two different signals resolve to the same key, or if using
             module matchers on a backend without ``definition`` support (VCD/FST).
         """
-        search_root = self._search_root(root_scope)
+        search_root = root_scope or _SearchRoot(self.top_scopes)
         return cast(dict[CaptureKey, SignalT], search_root.get_matched_signals(path))
 
     def get_matched_scopes(
@@ -460,7 +549,7 @@ class Reader(Generic[SignalT]):
             module matchers on a backend without ``definition`` support (VCD/FST),
             or if the path contains a terminal signal bit-range suffix.
         """
-        search_root = self._search_root(root_scope)
+        search_root = root_scope or _SearchRoot(self.top_scopes)
         return search_root.get_matched_scopes(path)
 
     def load_matched_waveforms(
@@ -589,16 +678,6 @@ class Reader(Generic[SignalT]):
     def _validate_xz_value(xz_value: int) -> None:
         if xz_value not in (0, 1):
             raise ValueError('xz_value must be 0 or 1')
-
-    def _resolve_signal(self, signal: SignalT | str) -> SignalT:
-        if isinstance(signal, Signal):
-            return signal
-        matched = self.get_matched_signals(signal)
-        if len(matched) == 0:
-            raise ValueError(f"signal '{signal}' not found")
-        if len(matched) > 1:
-            raise ValueError(f"signal '{signal}' matches more than one signal")
-        return matched[()]
 
     def _resolve_clock_pairing(
         self,

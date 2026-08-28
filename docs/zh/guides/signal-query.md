@@ -14,7 +14,12 @@ with VcdReader('simulation.vcd') as reader:
     )
 ```
 
-如果只需要层次元数据而不需要加载采样值，可以使用 `get_matched_signals()` 或 `get_matched_scopes()`。
+如果只需要查看单个节点的层次信息，而不需要加载采样值，可以使用 `get_signal()` 或 `get_scope()`：
+
+```python
+signal = reader.get_signal('tb.dut.data')
+scope = reader.get_scope('tb.dut')
+```
 
 ## 批量加载
 

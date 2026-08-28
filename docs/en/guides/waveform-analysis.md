@@ -110,14 +110,25 @@ majority = Waveform.merge(
 
 ## Transitions and reduction
 
-One-bit waveforms provide `rising_edge()` and `falling_edge()`:
+Use `changed()` to detect value changes in signals of any width:
+
+```python
+occupancy_changes = occupancy.changed()
+change_cycles = occupancy_changes.clock[occupancy_changes.value]
+```
+
+For one-bit signals, use `rising_edge()` and `falling_edge()` to locate the
+start and end of an active interval:
 
 ```python
 starts = valid.rising_edge()
 stops = valid.falling_edge()
-start_times = starts.time[starts.value.astype(bool)]
-stop_times = stops.time[stops.value.astype(bool)]
+
+start_times = starts.time[starts.value]
+stop_times = stops.time[stops.value]
 ```
+
+Use `any_edge()` when the transition direction does not matter.
 
 Use `unique_consecutive()` to keep the first sample of each consecutive run, or
 `compress()` to also preserve the final sample of the waveform. Use

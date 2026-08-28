@@ -18,8 +18,13 @@ with VcdReader('simulation.vcd') as reader:
     )
 ```
 
-Use `get_matched_signals()` or `get_matched_scopes()` when you want hierarchy
-metadata without loading samples.
+Use `get_signal()` or `get_scope()` to inspect one exact hierarchy node without loading waveform data:
+
+```python
+signal = reader.get_signal('tb.dut.data')
+scope = reader.get_scope('tb.dut')
+```
+
 
 ## Batch loading
 

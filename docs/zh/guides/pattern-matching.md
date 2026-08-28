@@ -29,7 +29,7 @@ response = rsp_valid & rsp_ready
 pattern = (
     Pattern()
     .wait(request)
-    .consume(response, channel='response')
+    .consume(response)
     .capture('rsp_data', rsp_data)
 )
 result = match(pattern)
@@ -40,7 +40,7 @@ result = match(pattern)
 对于重复或有条件的流程，可以组合使用 `loop()`、`repeat()` 和 `branch()`：
 
 ```python
-beat = Pattern().consume(w_valid & w_ready, channel='w').capture(
+beat = Pattern().consume(w_valid & w_ready).capture(
     'data', w_data, mode='list'
 )
 pattern = Pattern().wait(aw_valid & aw_ready).loop(beat, until=w_last)
@@ -94,9 +94,21 @@ commands = collect(read_command)
 
 ## 事件消费与 channel
 
-`wait()` 观察事件，但不占用它。`consume()` 等待事件，并在逻辑 channel 上占用它。channel 用于标识事件流，并处理事件的所有权和仲裁。
+`wait()` 只等待条件满足，不会占用匹配到的事件。`consume()` 在条件满足时占用当前事件，并通过逻辑 channel 处理多个匹配之间的竞争。
 
-同一个 channel、同一个周期上的事件，最多只能被一个匹配占用。不同 channel 上的事件可以独立消费。
+多个事务等待同一个响应流时，可以共享一个 channel：
+
+```python
+pattern = (
+    Pattern()
+    .wait(request_fire)
+    .consume(response_fire, channel='response')
+)
+```
+
+这样可以确保同一个周期的响应最多只被一个匹配占用。不同 channel 上的事件可以独立消费。
+
+声明式 `consume()` 省略 `channel` 时，会为该步骤分配一个独立的 channel。如果多个 consume 步骤需要共享同一所有权范围，应显式指定 channel。编程式 `ctx.consume()` 和 `ctx.try_consume()` 始终要求显式传入 channel。
 
 ## 结果与失败处理
 

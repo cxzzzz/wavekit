@@ -591,3 +591,14 @@ def test_stage2_entrypoints_and_status_messages():
 
     ctx_failed = match(tx)
     assert ctx_failed[0].status == MatchStatus.RequireViolated('ctx guard')
+
+
+def test_programmable_consume_requires_explicit_channel():
+    ready = _bool_wf([1])
+
+    def body(ctx):
+        ctx.consume(ready)
+        return ctx.OK
+
+    with pytest.raises(TypeError, match="missing 1 required positional argument: 'channel'"):
+        match(body)

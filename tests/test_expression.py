@@ -176,6 +176,8 @@ def test_evaluate_expression_registered_functions():
         ('as_signed(data)', data.as_signed()),
         ('rising_edge(valid)', valid.rising_edge()),
         ('falling_edge(valid)', valid.falling_edge()),
+        ('any_edge(valid)', valid.any_edge()),
+        ('changed(data)', data.changed()),
     ]:
         result = evaluate_source_expression(expr, {'data': data, 'valid': valid})
         assert_same_waveform(result, expected)

@@ -112,6 +112,12 @@ Batch-load unknown masks with the same pattern and clock assignment rules as
 
 ---
 
+### `reader.get_signal(path) -> Signal` / `reader.get_scope(path) -> Scope`
+
+Resolve one exact hierarchy path without loading waveform values. Singular lookup
+accepts fixed path components only, with an optional terminal range for signals.
+Use the matched APIs for braces, regex, wildcards, or module-definition queries.
+
 ### `reader.get_matched_signals(path) -> dict[CaptureKey, Signal]`
 
 Resolve a query to `Signal` objects without loading data. Exact-name components
@@ -231,12 +237,14 @@ Every operation returns a **new** `Waveform`; none mutate in place.
 | `Waveform.concatenate([w0,w1,...])` | Join waveforms (w0=LSB, last=MSB), all must be unsigned |
 | `wave.bit_count()` | Population count per sample -> uint64 |
 
-### Edge detection (1-bit waveforms only)
+### Change and edge detection
 
 | Method | Description |
 |--------|-------------|
-| `wave.rising_edge()` | True at 0->1 transitions |
-| `wave.falling_edge()` | True at 1->0 transitions |
+| `wave.changed()` | True when the current value differs from the previous sample |
+| `wave.rising_edge()` | True at 0->1 transitions on a 1-bit waveform |
+| `wave.falling_edge()` | True at 1->0 transitions on a 1-bit waveform |
+| `wave.any_edge()` | True at either transition on a 1-bit waveform |
 
 ### Arithmetic operators
 
@@ -284,7 +292,7 @@ of extracted values.
 pattern = (
     Pattern()
     .wait(req_valid & req_ready)
-    .consume(rsp_valid & rsp_ready, channel='response')
+    .consume(rsp_valid & rsp_ready)
     .capture('rsp_data', rsp_data)
 )
 result = match(pattern)
@@ -357,7 +365,7 @@ reports timeout rows and `collect()` raises `PatternError`.
 | Step | Blocking? | Description |
 |------|-----------|-------------|
 | `.wait(cond, require=None, require_message=None)` | yes | Block until `cond` is true without consuming the event. |
-| `.consume(cond, channel, require=None, require_message=None)` | yes | Block until `cond` is true and exclusively consume the current `(channel, cycle)`. |
+| `.consume(cond, channel=None, require=None, require_message=None)` | yes | Block until `cond` is true and exclusively consume the current `(channel, cycle)`; omitted channels are private to the declarative step. |
 | `.try_consume(cond, channel)` | no | Poll `channel` without blocking; returns `True` only when the condition and channel are both available. |
 | `.delay(n, require=None, require_message=None)` | yes for n≥1 / epsilon for n=0 | Advance exactly `n` cycles. |
 | `.capture(name, signal, mode='last')` | no | Record a value. `mode='list'` appends to a Python list. |
@@ -371,6 +379,11 @@ callbacks passed to `ctx.wait()`, `ctx.consume()`, `ctx.try_consume()`,
 `ctx.delay()`, or `ctx.require()` are zero-argument callables that close over
 `ctx`. In both cases `index` / `ctx.index` is the current waveform-array sample
 index, not a cycle number and not rebased by `match(start_cycle=...)`.
+
+A declarative `.consume()` creates a private channel when `channel` is omitted.
+Pass an explicit channel to share ownership across declarative steps or partition
+events dynamically. Programmable `ctx.consume()` and `ctx.try_consume()` always
+require an explicit channel.
 
 Use `ctx.try_consume(...)` when you need non-blocking polling or arbitration
 across multiple candidate channels. For a linear burst, `ctx.consume(...)` is

@@ -105,6 +105,73 @@ def test_vcd_node_and_reader_match_keys_are_consistent(compare_vcd_path):
     assert _capture_groups(brace_from_node) == {('a',), ('b',)}
 
 
+def test_vcd_reader_get_signal_and_scope_exact_paths(compare_vcd_path):
+    with VcdReader(str(compare_vcd_path)) as reader:
+        scope = reader.get_scope('compare_tb.dut.unit_a')
+        generated_scope = reader.get_scope('compare_tb.dut.unit_a.gen_blk[0]')
+        signal = reader.get_signal('compare_tb.dut.unit_a.data')
+        selected = reader.get_signal('compare_tb.dut.unit_a.data[3:0]')
+
+        assert scope.full_name == 'compare_tb.dut.unit_a'
+        assert generated_scope.full_name == 'compare_tb.dut.unit_a.gen_blk[0]'
+        assert signal.full_name == 'compare_tb.dut.unit_a.data[7:0]'
+        assert signal.width == 8
+        assert selected.full_name == 'compare_tb.dut.unit_a.data[3:0]'
+        assert selected.width == 4
+
+
+def test_vcd_reader_get_signal_and_scope_with_root_scope(compare_vcd_path):
+    with VcdReader(str(compare_vcd_path)) as reader:
+        root = reader.top_scopes[0]
+
+        assert reader.get_scope('dut.unit_a', root_scope=root).full_name == (
+            'compare_tb.dut.unit_a'
+        )
+        assert reader.get_signal('dut.unit_a.data', root_scope=root).full_name == (
+            'compare_tb.dut.unit_a.data[7:0]'
+        )
+
+
+@pytest.mark.parametrize(
+    ('method_name', 'path', 'matched_api'),
+    [
+        ('get_signal', 'compare_tb.dut.unit_{a,b}.data', 'get_matched_signals'),
+        ('get_signal', r'compare_tb.dut./unit_.*/.data', 'get_matched_signals'),
+        ('get_signal', 'compare_tb.dut.*.data', 'get_matched_signals'),
+        ('get_signal', 'compare_tb.**.data', 'get_matched_signals'),
+        ('get_signal', 'compare_tb.$unit_a.data', 'get_matched_signals'),
+        ('get_signal', 'compare_tb.$$unit_a.data', 'get_matched_signals'),
+        ('get_scope', 'compare_tb.dut.unit_{a,b}', 'get_matched_scopes'),
+        ('get_scope', r'compare_tb.dut./unit_.*/', 'get_matched_scopes'),
+        ('get_scope', 'compare_tb.dut.*', 'get_matched_scopes'),
+        ('get_scope', 'compare_tb.**.unit_a', 'get_matched_scopes'),
+        ('get_scope', 'compare_tb.$unit_a', 'get_matched_scopes'),
+        ('get_scope', 'compare_tb.$$unit_a', 'get_matched_scopes'),
+    ],
+)
+def test_vcd_reader_singular_lookup_rejects_matchers(
+    compare_vcd_path, method_name, path, matched_api
+):
+    with VcdReader(str(compare_vcd_path)) as reader:
+        method = getattr(reader, method_name)
+        with pytest.raises(ValueError, match=rf'use {matched_api}\(\)'):
+            method(path)
+
+
+def test_vcd_reader_singular_lookup_reports_missing_paths(compare_vcd_path):
+    with VcdReader(str(compare_vcd_path)) as reader:
+        with pytest.raises(ValueError, match="signal 'compare_tb.missing' not found"):
+            reader.get_signal('compare_tb.missing')
+        with pytest.raises(ValueError, match="scope 'compare_tb.missing' not found"):
+            reader.get_scope('compare_tb.missing')
+
+
+def test_vcd_reader_single_load_rejects_matcher_paths(compare_vcd_path):
+    with VcdReader(str(compare_vcd_path)) as reader:
+        with pytest.raises(ValueError, match=r'use get_matched_signals\(\)'):
+            reader.load_waveform('compare_tb.dut.unit_{a,b}.data', clock='compare_tb.clk')
+
+
 # ------------------------------------------------------------------
 # Basic load / range metadata (jtag.vcd)
 # ------------------------------------------------------------------
@@ -827,6 +894,23 @@ def test_vcd_eval_nested_function_and_window(compare_vcd_path):
         )
 
     _assert_same_waveform(result, rst_n.rising_edge())
+
+
+def test_vcd_eval_changed_and_any_edge(compare_vcd_path):
+    with VcdReader(str(compare_vcd_path)) as reader:
+        changed = reader.eval(
+            'changed(compare_tb.dut.unit_a.data)',
+            clock='compare_tb.clk',
+        )
+        any_edge = reader.eval(
+            'any_edge(compare_tb.rst_n)',
+            clock='compare_tb.clk',
+        )
+        data = reader.load_waveform('compare_tb.dut.unit_a.data', clock='compare_tb.clk')
+        rst_n = reader.load_waveform('compare_tb.rst_n', clock='compare_tb.clk')
+
+    _assert_same_waveform(changed, data.changed())
+    _assert_same_waveform(any_edge, rst_n.any_edge())
 
 
 def test_vcd_eval_no_match_raises(compare_vcd_path):

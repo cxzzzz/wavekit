@@ -318,6 +318,52 @@ def test_edges():
     assert np.all(wave.falling_edge().value == np.array([0, 0, 1, 0, 0, 1]))
 
 
+def test_changed_detects_any_width_value_changes():
+    wave = build_waveform([3, 3, 7, 7, 1], width=4)
+
+    changed = wave.changed()
+
+    assert np.array_equal(changed.value, np.array([0, 0, 1, 0, 1]))
+    assert np.array_equal(changed.clock, wave.clock)
+    assert np.array_equal(changed.time, wave.time)
+    assert changed.width == 1
+    assert changed.signed is False
+
+
+def test_any_edge_detects_both_one_bit_transitions():
+    wave = build_waveform([0, 1, 1, 0, 0, 1], width=1)
+
+    edge = wave.any_edge()
+
+    assert np.array_equal(edge.value, np.array([0, 1, 0, 1, 0, 1]))
+    assert np.array_equal(edge.value, wave.changed().value)
+
+
+def test_any_edge_requires_one_bit_waveform():
+    wave = build_waveform([0, 1], width=2)
+
+    with pytest.raises(ValueError, match=r'any_edge\(\) requires a 1-bit waveform'):
+        wave.any_edge()
+
+
+@pytest.mark.parametrize('values', [[], [1]])
+def test_transition_helpers_preserve_short_waveform_length(values):
+    changed = build_waveform(values, width=4).changed()
+    any_edge = build_waveform(values, width=1).any_edge()
+
+    assert len(changed.value) == len(values)
+    assert len(any_edge.value) == len(values)
+    assert not np.any(changed.value)
+    assert not np.any(any_edge.value)
+
+
+def test_existing_edges_preserve_empty_waveform_length():
+    wave = build_waveform([], width=1)
+
+    assert len(wave.rising_edge().value) == 0
+    assert len(wave.falling_edge().value) == 0
+
+
 # ==========================================
 # Bit Operations
 # ==========================================

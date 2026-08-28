@@ -7,6 +7,13 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+- Add exact-path `Reader.get_signal()` and `Reader.get_scope()` hierarchy lookups.
+- Allow declarative `Pattern.consume()` to create a private channel when
+  `channel` is omitted.
+- Add `Waveform.changed()` for value changes and `Waveform.any_edge()` for
+  either edge of a one-bit waveform.
+
 ## v0.7.2 - 2026-08-25
 
 ### Added

@@ -77,7 +77,10 @@ class Pattern:
     def consume(
         self,
         cond: Waveform | Callable[[int, dict[str, Any]], bool] | bool,
-        channel: Channel | Hashable | Callable[[int, dict[str, Any]], Channel | Hashable],
+        channel: Channel
+        | Hashable
+        | Callable[[int, dict[str, Any]], Channel | Hashable]
+        | None = None,
         *,
         require: Waveform | Callable[[int, dict[str, Any]], bool] | bool | None = None,
         require_message: str | Callable[[int, dict[str, Any]], str] | None = None,
@@ -93,10 +96,11 @@ class Pattern:
             cycle number. ``captures`` is the current match's capture dict.
         channel:
             ``Channel``, hashable key, or ``callable(index, captures) -> Channel | Hashable``.
-            Channel callbacks use the same ``(index, captures)`` arguments.
-            The resolved ``(channel, cycle)`` can be claimed by at most one match;
-            earlier start cycles win. This does not reserve the channel while
-            ``cond`` is false.
+            If omitted, this consume step receives a private channel created when
+            the step is declared. Channel callbacks use the same ``(index, captures)``
+            arguments. The resolved ``(channel, cycle)`` can be claimed by at most
+            one match; earlier start cycles win. This does not reserve the channel
+            while ``cond`` is false.
         require:
             Optional condition checked while ``cond`` is false, or while ``cond`` is
             true but the current ``(channel, cycle)`` was already claimed. It is not
@@ -110,9 +114,13 @@ class Pattern:
         Pattern
             This pattern, for chaining.
         """
+        resolved_channel = Channel() if channel is None else channel
         self._steps.append(
             ConsumeStep(
-                cond=cond, channel=channel, require=require, require_message=require_message
+                cond=cond,
+                channel=resolved_channel,
+                require=require,
+                require_message=require_message,
             )
         )
         return self

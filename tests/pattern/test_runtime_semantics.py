@@ -653,6 +653,38 @@ class TestChannelReset:
         assert ok.end.value[0] == 3
 
 
+class TestImplicitDeclarativeChannel:
+    def test_candidates_share_one_implicit_channel(self):
+        req = _bool_wf([1, 1, 0, 0, 0])
+        rsp = _bool_wf([0, 0, 1, 0, 0])
+
+        result = match(Pattern().wait(req).consume(rsp))
+        ok = result.filter_ok()
+
+        assert len(ok) == 1
+        assert ok.start.value[0] == 0
+        assert ok.end.value[0] == 2
+
+    def test_separate_implicit_consume_steps_have_distinct_channels(self):
+        fire = _bool_wf([1, 0])
+
+        result = match(Pattern().consume(fire).consume(fire)).filter_ok()
+
+        assert len(result) == 1
+        assert result.start.value[0] == 0
+        assert result.end.value[0] == 0
+
+    def test_repeat_reuses_the_implicit_step_channel(self):
+        fire = _bool_wf([1, 1, 0])
+        beat = Pattern().consume(fire)
+
+        result = match(Pattern().repeat(beat, 2), axis=fire).filter_ok()
+
+        assert len(result) == 1
+        assert result.start.value[0] == 0
+        assert result.end.value[0] == 1
+
+
 class TestChannelAPI:
     def test_channel_is_distinct_identity(self):
         """Two Channel() instances are distinct objects (default identity semantics)."""

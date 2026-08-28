@@ -95,14 +95,24 @@ majority = Waveform.merge(
 
 ## 边沿与归约
 
-单比特波形提供 `rising_edge()` 和 `falling_edge()`：
+使用 `changed()` 检测任意位宽信号的值变化：
+
+```python
+occupancy_changes = occupancy.changed()
+change_cycles = occupancy_changes.clock[occupancy_changes.value]
+```
+
+对于单比特信号，可以使用 `rising_edge()` 和 `falling_edge()` 找到有效区间的起止位置：
 
 ```python
 starts = valid.rising_edge()
 stops = valid.falling_edge()
-start_times = starts.time[starts.value.astype(bool)]
-stop_times = stops.time[stops.value.astype(bool)]
+
+start_times = starts.time[starts.value]
+stop_times = stops.time[stops.value]
 ```
+
+如果不需要区分上升沿和下降沿，可以使用 `any_edge()`。
 
 使用 `unique_consecutive()` 保留每个连续区间的第一个采样点；使用 `compress()` 时，还会保留波形的最后一个采样点。需要将长波形聚合为连续的数据块时，可以使用 `downsample()`：
 

@@ -40,7 +40,7 @@ response = rsp_valid & rsp_ready
 pattern = (
     Pattern()
     .wait(request)
-    .consume(response, channel='response')
+    .consume(response)
     .capture('rsp_data', rsp_data)
 )
 result = match(pattern)
@@ -55,7 +55,7 @@ For repeated or conditional flows, combine these steps with `loop()`, `repeat()`
 and `branch()`:
 
 ```python
-beat = Pattern().consume(w_valid & w_ready, channel='w').capture(
+beat = Pattern().consume(w_valid & w_ready).capture(
     'data', w_data, mode='list'
 )
 pattern = Pattern().wait(aw_valid & aw_ready).loop(beat, until=w_last)
@@ -120,12 +120,28 @@ burst, `ctx.consume()` is usually clearer.
 
 ## Event consumption and channels
 
-`wait()` observes an event without claiming it. `consume()` waits for an event
-and claims it for a logical channel. The channel identifies the event stream used
-for ownership and arbitration.
+`wait()` only waits for a condition to become true; it does not claim the matched
+event. `consume()` claims the current event when its condition is true and uses a
+logical channel to arbitrate between competing matches.
 
-At most one match can claim an event on the same channel and cycle. Events on
-different channels can be consumed independently.
+When multiple transactions wait for the same response stream, they can share a
+channel:
+
+```python
+pattern = (
+    Pattern()
+    .wait(request_fire)
+    .consume(response_fire, channel='response')
+)
+```
+
+This ensures that a response at one cycle is claimed by at most one match.
+Consumes on different channels are independent.
+
+Each declarative `consume()` step receives a private channel when `channel` is
+omitted. Pass an explicit channel when separate consume steps must share the same
+ownership group. Programmable `ctx.consume()` and `ctx.try_consume()` always
+require an explicit channel.
 
 ## Results and failures
 
