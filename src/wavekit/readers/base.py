@@ -2,17 +2,15 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Generic, Literal, TypeVar, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 
 from ..expression import evaluate_expression, parse_expression
 from ..waveform import Waveform
 from .hierarchy import Node, Scope, Signal
-from .matcher import CaptureKey, ExactMatcher, parse_query_path
+from .matcher import Capture, ExactMatcher, parse_query_path
 from .value_change import value_change_to_value_array
-
-SignalT = TypeVar('SignalT', bound=Signal)
 
 
 @dataclass(frozen=True, eq=False)
@@ -28,7 +26,7 @@ class _SearchRoot(Node):
         return self.top_scopes
 
 
-class Reader(Generic[SignalT]):
+class Reader:
     """Abstract base class for waveform file readers.
 
     Concrete subclasses (``VcdReader``,
@@ -69,7 +67,7 @@ class Reader(Generic[SignalT]):
     * ``$<module>`` / ``$$<module>`` — match direct or recursive FSDB module
       definitions; module captures are retained as ``ExactCapture``.
 
-    Matching APIs use ``CaptureKey`` dictionary keys. Ordinary exact-name components
+    Matching APIs use ``tuple[Capture, ...]`` dictionary keys. Ordinary exact-name components
     are omitted from keys; binding matchers retain typed ``Capture`` objects. The
     dictionary value type depends on the API.
     """
@@ -87,8 +85,8 @@ class Reader(Generic[SignalT]):
 
     def load_waveform(
         self,
-        signal: SignalT | str,
-        clock: SignalT | str,
+        signal: Signal | str,
+        clock: Signal | str,
         xz_value: int = 0,
         signed: bool = False,
         sample_on_posedge: bool = False,
@@ -176,8 +174,8 @@ class Reader(Generic[SignalT]):
 
     def load_unknown_mask(
         self,
-        signal: SignalT | str,
-        clock: SignalT | str,
+        signal: Signal | str,
+        clock: Signal | str,
         include_x: bool = True,
         include_z: bool = True,
         sample_on_posedge: bool = False,
@@ -269,7 +267,7 @@ class Reader(Generic[SignalT]):
     @abstractmethod
     def _load_value_changes(
         self,
-        signal: SignalT,
+        signal: Signal,
         value_mapping: dict[str, int],
         begin_time: int | None = None,
         end_time: int | None = None,
@@ -295,8 +293,8 @@ class Reader(Generic[SignalT]):
 
     def _sample_on_clock(
         self,
-        signal: SignalT,
-        clock: SignalT,
+        signal: Signal,
+        clock: Signal,
         value_mapping: dict[str, int],
         signed: bool,
         sample_on_posedge: bool,
@@ -386,7 +384,7 @@ class Reader(Generic[SignalT]):
         self,
         path: str,
         root_scope: Scope | None = None,
-    ) -> SignalT:
+    ) -> Signal:
         """Return the signal at an exact hierarchy path.
 
         Parameters
@@ -427,7 +425,7 @@ class Reader(Generic[SignalT]):
         )
         if not matched:
             raise ValueError(f"signal '{path}' not found")
-        return cast(SignalT, next(iter(matched.values())))
+        return cast(Signal, next(iter(matched.values())))
 
     def get_scope(
         self,
@@ -481,7 +479,7 @@ class Reader(Generic[SignalT]):
         self,
         path: str,
         root_scope: Scope | None = None,
-    ) -> dict[CaptureKey, SignalT]:
+    ) -> dict[tuple[Capture, ...], Signal]:
         """Return all signals whose paths match *path*, keyed by captures.
 
         Traverses the scope tree starting from *root_scope* (or the file's
@@ -499,7 +497,7 @@ class Reader(Generic[SignalT]):
 
         Returns
         -------
-        dict[CaptureKey, Signal]:
+        dict[tuple[Capture, ...], Signal]:
             Maps each capture key to the matched ``Signal``
             object (carrying name, width, range, signed).
             Ordinary exact-name matches are omitted from the key, so a query
@@ -512,13 +510,13 @@ class Reader(Generic[SignalT]):
             module matchers on a backend without ``definition`` support (VCD/FST).
         """
         search_root = root_scope or _SearchRoot(self.top_scopes)
-        return cast(dict[CaptureKey, SignalT], search_root.get_matched_signals(path))
+        return search_root.get_matched_signals(path)
 
     def get_matched_scopes(
         self,
         path: str,
         root_scope: Scope | None = None,
-    ) -> dict[CaptureKey, Scope]:
+    ) -> dict[tuple[Capture, ...], Scope]:
         """Return all scopes whose paths match *path*, keyed by captures.
 
         Similar to ``get_matched_signals`` but stops at the scope level —
@@ -537,7 +535,7 @@ class Reader(Generic[SignalT]):
 
         Returns
         -------
-        dict[CaptureKey, Scope]:
+        dict[tuple[Capture, ...], Scope]:
             Maps each capture key to the matched ``Scope``.
             Ordinary exact-name matches are omitted from the key, so a query
             without binding matchers uses ``()``.
@@ -564,7 +562,7 @@ class Reader(Generic[SignalT]):
         begin_cycle: int | None = None,
         end_cycle: int | None = None,
         root_scope: Scope | None = None,
-    ) -> dict[CaptureKey, Waveform]:
+    ) -> dict[tuple[Capture, ...], Waveform]:
         """Batch-load all signals matching *signal_path*, each paired with its clock.
 
         Internally calls ``get_matched_signals`` for both *signal_path* and
@@ -592,7 +590,7 @@ class Reader(Generic[SignalT]):
 
         Returns
         -------
-        dict[CaptureKey, Waveform]:
+        dict[tuple[Capture, ...], Waveform]:
             Same keys as ``get_matched_signals`` on *signal_path*.
 
         Raises
@@ -630,7 +628,7 @@ class Reader(Generic[SignalT]):
         begin_cycle: int | None = None,
         end_cycle: int | None = None,
         root_scope: Scope | None = None,
-    ) -> dict[CaptureKey, Waveform]:
+    ) -> dict[tuple[Capture, ...], Waveform]:
         """Batch-load X/Z mask waveforms for all signals matching *signal_path*.
 
         Clock assignment follows ``load_matched_waveforms``: a single
@@ -655,7 +653,7 @@ class Reader(Generic[SignalT]):
 
         Returns
         -------
-        dict[CaptureKey, Waveform]:
+        dict[tuple[Capture, ...], Waveform]:
             Same keys as ``get_matched_signals`` on *signal_path*.
         """
         clock_pairing = self._resolve_clock_pairing(signal_path, clock_path, root_scope)
@@ -684,7 +682,7 @@ class Reader(Generic[SignalT]):
         signal_path: str,
         clock_path: str,
         root_scope: Scope | None,
-    ) -> dict[CaptureKey, SignalT]:
+    ) -> dict[tuple[Capture, ...], Signal]:
         """Resolve signal/clock query paths into a {signal_key: clock_signal} map.
 
         Rules:
@@ -703,10 +701,10 @@ class Reader(Generic[SignalT]):
             return {k: clock_signal for k in matched_signals}
 
         clock_keys = list(matched_clocks.keys())
-        pairing: dict[CaptureKey, SignalT] = {}
+        pairing: dict[tuple[Capture, ...], Signal] = {}
         for sig_key in matched_signals:
             best_len = -1
-            best_clock_key: CaptureKey | None = None
+            best_clock_key: tuple[Capture, ...] | None = None
             for ck in clock_keys:
                 if sig_key[: len(ck)] == ck and len(ck) > best_len:
                     best_len = len(ck)
@@ -746,7 +744,7 @@ class Reader(Generic[SignalT]):
         end_cycle: int | None = None,
         mode: Literal['single', 'zip'] = 'single',
         root_scope: Scope | None = None,
-    ) -> Waveform | dict[CaptureKey, Waveform]:
+    ) -> Waveform | dict[tuple[Capture, ...], Waveform]:
         """Evaluate a waveform expression containing physical signal paths.
 
         Parameters
@@ -768,7 +766,7 @@ class Reader(Generic[SignalT]):
 
         Returns
         -------
-        Waveform or dict[CaptureKey, Waveform]
+        Waveform or dict[tuple[Capture, ...], Waveform]
             The evaluated waveform, or one waveform per zip key.
         """
         self._validate_xz_value(xz_value)
@@ -784,7 +782,7 @@ class Reader(Generic[SignalT]):
             root_scope=root_scope,
         )
 
-        loaded_per_path: list[tuple[str, str, dict[CaptureKey, Waveform]]] = []
+        loaded_per_path: list[tuple[str, str, dict[tuple[Capture, ...], Waveform]]] = []
         for placeholder, path in path_entries:
             matched = self.load_matched_waveforms(
                 signal_path=path,
@@ -848,7 +846,7 @@ class Reader(Generic[SignalT]):
                 placeholder: next(iter(matched.values()))
                 for placeholder, _, matched in single_paths
             }
-            result: dict[CaptureKey, Waveform] = {}
+            result: dict[tuple[Capture, ...], Waveform] = {}
             for key in zip_keys:
                 namespace = dict(broadcast_namespace)
                 for placeholder, _path, matched in multi_paths:

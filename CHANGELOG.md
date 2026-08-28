@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Changed
+- Remove the redundant `CaptureKey` type alias from the public API.
+  Matched-query results remain keyed by tuples of `Capture` objects.
+
 ### Added
 - Add exact-path `Reader.get_signal()` and `Reader.get_scope()` hierarchy lookups.
 - Allow declarative `Pattern.consume()` to create a private channel when

@@ -112,7 +112,7 @@ class FsdbScope(Scope):
         return self._npi_scope.def_name()
 
 
-class FsdbReader(Reader[FsdbSignal]):
+class FsdbReader(Reader):
     """Read FSDB waveform files through the Verdi NPI runtime.
 
     ``FsdbReader`` requires the Verdi runtime library (``libNPI.so``). Configure
@@ -144,12 +144,15 @@ class FsdbReader(Reader[FsdbSignal]):
 
     def _load_value_changes(
         self,
-        signal: FsdbSignal,
+        signal: Signal,
         value_mapping: dict[str, int],
         begin_time: int | None = None,
         end_time: int | None = None,
     ) -> np.ndarray:
         """Load mapped FSDB value changes through the NPI reader."""
+
+        if not isinstance(signal, FsdbSignal):
+            raise TypeError('FsdbReader requires a FsdbSignal')
         if signal.composite_type in (
             SignalCompositeType.UNION,
             SignalCompositeType.TAGGED_UNION,

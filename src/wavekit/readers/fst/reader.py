@@ -37,7 +37,7 @@ class FstScope(Scope):
         return self._children
 
 
-class FstReader(Reader[FstSignal]):
+class FstReader(Reader):
     """Read FST waveform files via ``pylibfst``.
 
     Supports the same high-level APIs as ``VcdReader``, including
@@ -116,7 +116,7 @@ class FstReader(Reader[FstSignal]):
 
     def _load_value_changes(
         self,
-        signal: FstSignal,
+        signal: Signal,
         value_mapping: dict[str, int],
         begin_time: int | None = None,
         end_time: int | None = None,
@@ -128,6 +128,9 @@ class FstReader(Reader[FstSignal]):
         ``end_time`` is exclusive. Range-to-raw mapping is calculated once
         before iterating over value changes.
         """
+
+        if not isinstance(signal, FstSignal):
+            raise TypeError('FstReader requires a FstSignal')
 
         assert signal.composite_type is None
 

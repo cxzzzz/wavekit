@@ -81,7 +81,7 @@ class VcdScope(Scope):
         return tuple(children)
 
 
-class VcdReader(Reader[VcdSignal]):
+class VcdReader(Reader):
     """Read VCD waveform files via ``vcdvcd``.
 
     Supports the common ``Reader`` APIs, including
@@ -115,7 +115,7 @@ class VcdReader(Reader[VcdSignal]):
 
     def _load_value_changes(
         self,
-        signal: VcdSignal,
+        signal: Signal,
         value_mapping: dict[str, int],
         begin_time: int | None = None,
         end_time: int | None = None,
@@ -127,6 +127,9 @@ class VcdReader(Reader[VcdSignal]):
         ``end_time`` is exclusive. Range-to-raw mapping is calculated once
         before iterating over value changes.
         """
+
+        if not isinstance(signal, VcdSignal):
+            raise TypeError('VcdReader requires a VcdSignal')
 
         assert signal.composite_type is None
         lookup_path = signal._ref

@@ -58,7 +58,6 @@
 
 ::: wavekit.Capture
 
-::: wavekit.CaptureKey
 
 ::: wavekit.ExactCapture
 

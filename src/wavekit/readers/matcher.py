@@ -45,7 +45,7 @@ def split_trailing_range(segment: str) -> tuple[str, str, Range | None]:
 
 @dataclass(frozen=True)
 class Capture:
-    """Base class for typed bindings returned in a ``CaptureKey``.
+    """Base class for typed bindings returned in a capture tuple.
 
     Matcher-specific code may create a partial Capture with no node context.
     ``Matcher.match()`` completes it before it can escape the matcher layer.
@@ -89,9 +89,6 @@ class Capture:
             node=self.node,
             definition=self.definition,
         )
-
-
-CaptureKey = tuple[Capture, ...]
 
 
 @dataclass(frozen=True)

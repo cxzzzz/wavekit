@@ -50,7 +50,6 @@ Format-specific readers share the common loading, query, and expression APIs.
 
 ::: wavekit.Capture
 
-::: wavekit.CaptureKey
 
 ::: wavekit.ExactCapture
 

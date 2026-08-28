@@ -6,11 +6,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
-from typing import TypeVar, cast
+from typing import cast
 
 from .matcher import (
     Capture,
-    CaptureKey,
     ExactCapture,
     Matcher,
     PathStep,
@@ -19,8 +18,6 @@ from .matcher import (
     parse_query_path,
 )
 from .range import Range
-
-NodeT = TypeVar('NodeT', bound='Node')
 
 
 class SignalCompositeType(Enum):
@@ -170,7 +167,7 @@ class Node(ABC):
         self,
         path: str,
         node_filter: Callable[[Node, list[PathStep]], bool],
-    ) -> dict[CaptureKey, Node]:
+    ) -> dict[tuple[Capture, ...], Node]:
         """Execute a public query path and return its public capture keys."""
         raw_steps = parse_query_path(path)
 
@@ -194,7 +191,7 @@ class Node(ABC):
         internal_matches = self._match_path(match_steps, node_filter)
 
         # Restore public ``**`` captures and remove non-binding exact captures.
-        results: dict[CaptureKey, Node] = {}
+        results: dict[tuple[Capture, ...], Node] = {}
         for captures, node in internal_matches.items():
             key: list[Capture] = []
             for step, capture in zip(match_steps, captures):
@@ -240,24 +237,24 @@ class Node(ABC):
             results[public_key] = node
         return results
 
-    def get_matched_nodes(self, path: str) -> dict[CaptureKey, Node]:
+    def get_matched_nodes(self, path: str) -> dict[tuple[Capture, ...], Node]:
         """Return matching descendant nodes keyed by binding captures."""
         return self._match_query_path(path, lambda _node, _steps: True)
 
-    def get_matched_signals(self, path: str) -> dict[CaptureKey, Signal]:
+    def get_matched_signals(self, path: str) -> dict[tuple[Capture, ...], Signal]:
         """Return matching descendant signals keyed by binding captures."""
         return cast(
-            dict[CaptureKey, Signal],
+            dict[tuple[Capture, ...], Signal],
             self._match_query_path(
                 path,
                 lambda node, remaining_steps: len(remaining_steps) > 1 or isinstance(node, Signal),
             ),
         )
 
-    def get_matched_scopes(self, path: str) -> dict[CaptureKey, Scope]:
+    def get_matched_scopes(self, path: str) -> dict[tuple[Capture, ...], Scope]:
         """Return matching descendant scopes keyed by binding captures."""
         return cast(
-            dict[CaptureKey, Scope],
+            dict[tuple[Capture, ...], Scope],
             self._match_query_path(path, lambda node, _steps: isinstance(node, Scope)),
         )
 

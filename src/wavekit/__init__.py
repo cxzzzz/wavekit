@@ -16,7 +16,6 @@ from .readers.hierarchy import Signal as Signal
 from .readers.hierarchy import SignalCompositeType as SignalCompositeType
 from .readers.matcher import BraceCapture as BraceCapture
 from .readers.matcher import Capture as Capture
-from .readers.matcher import CaptureKey as CaptureKey
 from .readers.matcher import ExactCapture as ExactCapture
 from .readers.matcher import RegexCapture as RegexCapture
 from .readers.matcher import WildcardCapture as WildcardCapture
@@ -35,7 +34,6 @@ __all__ = [
     'Signal',
     'SignalCompositeType',
     'Capture',
-    'CaptureKey',
     'ExactCapture',
     'BraceCapture',
     'RegexCapture',
