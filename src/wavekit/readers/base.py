@@ -31,12 +31,12 @@ class _SearchRoot(Node):
 class Reader(Generic[SignalT]):
     """Abstract base class for waveform file readers.
 
-    Concrete subclasses (:class:`~wavekit.VcdReader`,
-    :class:`~wavekit.FstReader`, and :class:`~wavekit.FsdbReader`) implement
+    Concrete subclasses (``VcdReader``,
+    ``FstReader``, and ``FsdbReader``) implement
     the file-format-specific I/O;
     all high-level analysis APIs are provided here.
 
-    Supports the context-manager protocol::
+    Supports the context-manager protocol.
 
         with VcdReader("sim.vcd") as r:
             wave = r.load_waveform("tb.dut.data[7:0]", clock="tb.clk")
@@ -48,31 +48,26 @@ class Reader(Generic[SignalT]):
     If the bit-range suffix is omitted and the file stores the signal with a
     range, the range is appended automatically.
 
-    Unknown-mask API (experimental)
+    Unknown-mask API
     -------------------------------
-    :meth:`load_unknown_mask` and :meth:`load_matched_unknown_masks` return
-    source X/Z bit presence as ordinary unsigned :class:`~wavekit.Waveform`
+    ``load_unknown_mask`` and ``load_matched_unknown_masks`` return
+    source X/Z bit presence as ordinary unsigned ``Waveform``
     bitmasks, so users can detect unknown bits without changing the two-state
     value model.
 
-    .. note::
-
-       This API is **experimental**.  The mask-as-ordinary-Waveform design
-       may change in a future release based on real-world usage feedback.
-
-    Pattern syntax (used by :meth:`get_matched_signals`, :meth:`get_matched_scopes`,
-    :meth:`load_matched_waveforms`, :meth:`load_matched_unknown_masks`, :meth:`eval`)
+    Pattern syntax (used by ``get_matched_signals``, ``get_matched_scopes``,
+    ``load_matched_waveforms``, ``load_matched_unknown_masks``, ``eval``)
     -------------------------------------------------
     * ``{a,b,c}``     — matches ``a``, ``b``, or ``c``; captures each as a key.
     * ``{0..7}``       — integer range 0 to 7 inclusive; step defaults to 1.
     * ``{0..7..2}``    — integer range with explicit step (0, 2, 4, 6).
     * ``/<regex>/``     — use a Python regex instead of exact matching; capture
-      groups ``(...)`` are retained in a :class:`~wavekit.RegexCapture` key.
+      groups ``(...)`` are retained in a ``RegexCapture`` key.
     * ``@<regex>``      — legacy-compatible regex spelling accepted by the parser.
     * ``*`` / ``**``    — match one hierarchy level or recursively match levels;
-      matches are retained as :class:`~wavekit.WildcardCapture` keys.
+      matches are retained as ``WildcardCapture`` keys.
     * ``$<module>`` / ``$$<module>`` — match direct or recursive FSDB module
-      definitions; module captures are retained as :class:`~wavekit.ExactCapture`.
+      definitions; module captures are retained as ``ExactCapture``.
 
     Matching APIs use ``CaptureKey`` dictionary keys. Ordinary exact-name components
     are omitted from keys; binding matchers retain typed ``Capture`` objects. The
@@ -102,7 +97,7 @@ class Reader(Generic[SignalT]):
         begin_cycle: int | None = None,
         end_cycle: int | None = None,
     ) -> Waveform:
-        """Load a single signal as a clock-synchronised :class:`~wavekit.Waveform`.
+        """Load a single signal as a clock-synchronised ``Waveform``.
 
         The signal is sampled on every **negedge** of *clock* by default
         (i.e. the value is captured at each falling edge of the clock, which
@@ -112,13 +107,13 @@ class Reader(Generic[SignalT]):
         Parameters
         ----------
         signal:
-            Full dotted path of the signal as a :class:`~wavekit.Signal`
+            Full dotted path of the signal as a ``Signal``
             object or a string.  When a ``Signal`` is passed, ``signal.full_name``
             is used as the path (which may include bit-range suffixes).
             When a string is passed, the value is used verbatim as the full
             hierarchical path, e.g. ``"tb.dut.data[7:0]"`` or ``"tb.dut.data"``.
         clock:
-            Clock signal as a :class:`~wavekit.Signal` or full dotted
+            Clock signal as a ``Signal`` or full dotted
             path string, e.g. ``"tb.clk"``.
         xz_value:
             Integer substituted for ``X`` and ``Z`` values in the file.
@@ -193,30 +188,24 @@ class Reader(Generic[SignalT]):
     ) -> Waveform:
         """Load source X/Z presence as an unsigned bitmask waveform.
 
-        .. note::
-
-           This API is **experimental**.  The mask-as-ordinary-Waveform
-           design may change in a future release based on real-world usage
-           feedback.
-
-        The returned :class:`~wavekit.Waveform` is sampled on the same clock
+        The returned ``Waveform`` is sampled on the same clock
         edges and supports the same time/cycle windowing as
-        :meth:`load_waveform`, but its values are masks instead of substituted
+        ``load_waveform``, but its values are masks instead of substituted
         two-state signal values.  A mask bit is ``1`` when the corresponding
         source bit is selected by *include_x* and/or *include_z*.
 
         Parameters
         ----------
         signal:
-            Full dotted signal path or :class:`~wavekit.Signal` object.
+            Full dotted signal path or ``Signal`` object.
         clock:
-            Clock signal path or :class:`~wavekit.Signal` object.
+            Clock signal path or ``Signal`` object.
         include_x:
             If ``True`` (default), mark source ``X``/``x`` bits.
         include_z:
             If ``True`` (default), mark source ``Z``/``z`` bits.
         sample_on_posedge, begin_time, end_time, begin_cycle, end_cycle:
-            Same sampling/windowing semantics as :meth:`load_waveform`.
+            Same sampling/windowing semantics as ``load_waveform``.
 
         Returns
         -------
@@ -318,7 +307,7 @@ class Reader(Generic[SignalT]):
     ) -> Waveform:
         """Sample *signal* on every *clock* edge and return a raw Waveform.
 
-        Subclasses provide :meth:`_load_value_changes` for format-specific I/O.
+        Subclasses provide ``_load_value_changes`` for format-specific I/O.
         The returned Waveform is a simple value array — naming is handled by
         the caller.
         """
@@ -422,7 +411,7 @@ class Reader(Generic[SignalT]):
         Returns
         -------
         dict[CaptureKey, Signal]:
-            Maps each capture key to the matched :class:`~wavekit.Signal`
+            Maps each capture key to the matched ``Signal``
             object (carrying name, width, range, signed).
             Ordinary exact-name matches are omitted from the key, so a query
             without binding matchers uses ``()``.
@@ -443,7 +432,7 @@ class Reader(Generic[SignalT]):
     ) -> dict[CaptureKey, Scope]:
         """Return all scopes whose paths match *path*, keyed by captures.
 
-        Similar to :meth:`get_matched_signals` but stops at the scope level —
+        Similar to ``get_matched_signals`` but stops at the scope level —
         the last component of *path* must match a scope name, not a signal.
         Useful for enumerating module instances before loading their signals.
 
@@ -460,7 +449,7 @@ class Reader(Generic[SignalT]):
         Returns
         -------
         dict[CaptureKey, Scope]:
-            Maps each capture key to the matched :class:`~wavekit.Scope`.
+            Maps each capture key to the matched ``Scope``.
             Ordinary exact-name matches are omitted from the key, so a query
             without binding matchers uses ``()``.
 
@@ -489,8 +478,8 @@ class Reader(Generic[SignalT]):
     ) -> dict[CaptureKey, Waveform]:
         """Batch-load all signals matching *signal_path*, each paired with its clock.
 
-        Internally calls :meth:`get_matched_signals` for both *signal_path* and
-        *clock_path*, then dispatches :meth:`load_waveform` for every match.
+        Internally calls ``get_matched_signals`` for both *signal_path* and
+        *clock_path*, then dispatches ``load_waveform`` for every match.
 
         Clock assignment rules:
 
@@ -507,7 +496,7 @@ class Reader(Generic[SignalT]):
         clock_path:
             Clock signal query path.  Must match at least one signal.
         xz_value, signed, sample_on_posedge, begin_time, end_time, begin_cycle, end_cycle:
-            Forwarded to :meth:`load_waveform` for every loaded signal.
+            Forwarded to ``load_waveform`` for every loaded signal.
         root_scope:
             If provided, both *signal_path* and *clock_path* are searched within
             this scope instead of the file's top-level scopes.
@@ -515,7 +504,7 @@ class Reader(Generic[SignalT]):
         Returns
         -------
         dict[CaptureKey, Waveform]:
-            Same keys as :meth:`get_matched_signals` on *signal_path*.
+            Same keys as ``get_matched_signals`` on *signal_path*.
 
         Raises
         ------
@@ -555,11 +544,7 @@ class Reader(Generic[SignalT]):
     ) -> dict[CaptureKey, Waveform]:
         """Batch-load X/Z mask waveforms for all signals matching *signal_path*.
 
-        .. note::
-
-           This API is **experimental**.  See :meth:`load_unknown_mask`.
-
-        Clock assignment follows :meth:`load_matched_waveforms`: a single
+        Clock assignment follows ``load_matched_waveforms``: a single
         matched clock is broadcast to all signals; otherwise the longest-prefix
         clock key is selected for each signal key.
 
@@ -574,7 +559,7 @@ class Reader(Generic[SignalT]):
         include_z:
             If ``True`` (default), mark source ``Z``/``z`` bits.
         sample_on_posedge, begin_time, end_time, begin_cycle, end_cycle:
-            Same sampling/windowing semantics as :meth:`load_waveform`.
+            Same sampling/windowing semantics as ``load_waveform``.
         root_scope:
             If provided, both *signal_path* and *clock_path* are searched within
             this scope instead of the file's top-level scopes.
@@ -582,7 +567,7 @@ class Reader(Generic[SignalT]):
         Returns
         -------
         dict[CaptureKey, Waveform]:
-            Same keys as :meth:`get_matched_signals` on *signal_path*.
+            Same keys as ``get_matched_signals`` on *signal_path*.
         """
         clock_pairing = self._resolve_clock_pairing(signal_path, clock_path, root_scope)
         load_kwargs: dict[str, Any] = dict(
@@ -694,7 +679,7 @@ class Reader(Generic[SignalT]):
             Clock signal used for all waveform loads.
         xz_value, signed, sample_on_posedge, begin_time, end_time, begin_cycle,
         end_cycle:
-            Forwarded to :meth:`load_matched_waveforms` for every path.
+            Forwarded to ``load_matched_waveforms`` for every path.
         mode:
             ``'single'`` requires every path to match one signal. ``'zip'``
             evaluates once per shared multi-match key and broadcasts singleton

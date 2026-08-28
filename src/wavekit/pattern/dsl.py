@@ -28,8 +28,8 @@ class Pattern:
     """Declarative temporal pattern builder over waveform signals.
 
     Build steps with ``Pattern().wait(...).capture(...)`` and execute with
-    module-level :func:`match`. ``Pattern`` stores only the declarative step AST;
-    programmable checking/extraction uses :func:`match(body)` or :func:`collect(body)`.
+    module-level ``match``. ``Pattern`` stores only the declarative step AST;
+    programmable checking/extraction uses ``match(body)`` or ``collect(body)``.
 
     The first blocking step selects candidate start cycles. Later blocking steps
     wait within a matched transaction.
@@ -235,7 +235,7 @@ class Pattern:
         Notes
         -----
         Exactly one of ``until`` and ``when`` is required. Conditions use the same
-        ``Waveform`` / ``bool`` / callable forms as :meth:`wait`.
+        ``Waveform`` / ``bool`` / callable forms as ``wait``.
         """
         if until is not None and when is not None:
             raise ValueError("Cannot specify both 'until' and 'when' in loop()")

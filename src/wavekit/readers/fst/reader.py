@@ -38,9 +38,9 @@ class FstScope(Scope):
 
 
 class FstReader(Reader[FstSignal]):
-    """Read FST waveform files via :mod:`pylibfst`.
+    """Read FST waveform files via ``pylibfst``.
 
-    Supports the same high-level APIs as :class:`~wavekit.VcdReader`, including
+    Supports the same high-level APIs as ``VcdReader``, including
     context-manager usage, hierarchy traversal, pattern matching, expression
     evaluation, and clock-synchronised ``load_waveform`` sampling.
     """

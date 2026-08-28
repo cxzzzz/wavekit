@@ -24,12 +24,12 @@ class Waveform:
     transforms values also transforms the corresponding ``clock`` and ``time``
     entries so positional alignment is preserved.
 
-    The convenience property :attr:`data` returns them as a single numpy record
+    The convenience property ``data`` returns them as a single numpy record
     array with fields ``("time", "clock", "value")`` for easy pandas / numpy
     interop.
 
     ``width`` and ``signed`` are direct fields on ``Waveform``.  ``signal`` is
-    an optional :class:`~wavekit.Signal` that is set only when the
+    an optional ``Signal`` that is set only when the
     waveform was loaded directly from a reader.
 
     Bit-width rules
@@ -41,13 +41,13 @@ class Waveform:
     * Arithmetic operators automatically infer a result width (e.g. addition
       widens by 1 bit; multiplication sums both widths).  Width inference is
       capped at 64 bits for integer types.
-    * Two :class:`Waveform` operands **must have the same signedness**; mixing
+    * Two ``Waveform`` operands **must have the same signedness**; mixing
       signed and unsigned raises ``ValueError``.
 
     Typical usage
     -------------
-    Waveforms are normally created by a :class:`~wavekit.readers.base.Reader`,
-    not constructed directly::
+    Waveforms are normally created by a ``Reader``,
+    not constructed directly.
 
         with VcdReader("sim.vcd") as r:
             data = r.load_waveform("tb.dut.data[7:0]", clock="tb.clk")
@@ -191,7 +191,7 @@ class Waveform:
         """Return a new Waveform keeping only the samples where *func* returns True.
 
         *func* receives the entire ``value`` array at once and must return a
-        boolean array of the same length.  Prefer this over :meth:`filter` for
+        boolean array of the same length.  Prefer this over ``filter()`` for
         performance-critical paths.
 
         Parameters
@@ -206,7 +206,7 @@ class Waveform:
         """Return a new Waveform keeping only the samples that satisfy *condition*.
 
         *condition* is called once per sample value (scalar, not vectorized).
-        For large waveforms prefer :meth:`vectorized_filter`.
+        For large waveforms prefer ``vectorized_filter()``.
 
         Parameters
         ----------
@@ -215,7 +215,6 @@ class Waveform:
 
         Example
         -------
-        ::
 
             non_zero = wave.filter(lambda v: v != 0)
         """
@@ -228,7 +227,7 @@ class Waveform:
         Parameters
         ----------
         mask:
-            Either a boolean ``np.ndarray`` or a 1-bit :class:`Waveform`
+            Either a boolean ``np.ndarray`` or a 1-bit ``Waveform``
             (``width == 1`` or ``dtype == bool``).  Must have the same length
             as ``self``.
 
@@ -239,7 +238,6 @@ class Waveform:
 
         Example
         -------
-        ::
 
             valid_data = data.mask(valid == 1)   # keep only cycles where valid is high
         """
@@ -762,7 +760,6 @@ class Waveform:
 
         Example
         -------
-        ::
 
             byte0 = wide_bus[7:0]    # bits 7 down to 0 → width=8
             msb   = wide_bus[31]     # single bit       → width=1
@@ -797,10 +794,10 @@ class Waveform:
         Parameters
         ----------
         indices:
-            Integer index array, list of ints, or a :class:`Waveform` whose
+            Integer index array, list of ints, or a ``Waveform`` whose
             ``value`` array contains integer indices (e.g. the result of
             ``np.where``).  Boolean arrays are **not** accepted; use
-            :meth:`mask` instead.
+            ``mask()`` instead.
 
         Raises
         ------
@@ -809,7 +806,6 @@ class Waveform:
 
         Example
         -------
-        ::
 
             # Keep every other sample
             even = wave.take(list(range(0, len(wave.value), 2)))
@@ -853,7 +849,6 @@ class Waveform:
 
         Example
         -------
-        ::
 
             # Average occupancy in 100-cycle windows
             avg = occupancy.downsample(100, np.mean)
@@ -921,7 +916,7 @@ class Waveform:
         """Apply a scalar function element-wise and return a new Waveform.
 
         Internally wraps *func* with ``np.vectorize``.  For large waveforms
-        prefer :meth:`vectorized_map` with a native numpy operation.
+        prefer ``vectorized_map()`` with a native numpy operation.
 
         Parameters
         ----------
@@ -934,7 +929,6 @@ class Waveform:
 
         Example
         -------
-        ::
 
             upper_nibble = wave.map(lambda v: (v >> 4) & 0xF, width=4, signed=False)
         """
@@ -1051,7 +1045,6 @@ class Waveform:
 
         Example
         -------
-        ::
 
             # Split a 32-bit bus into four 8-bit bytes (byte0 = bits[7:0])
             bytes_ = bus32.split_bits(8)
@@ -1085,7 +1078,7 @@ class Waveform:
 
         Bits are joined so that the *last* element in *waves* becomes the MSB
         group and the *first* becomes the LSB group — this is the inverse of
-        :meth:`split_bits`.
+        ``split_bits()``.
 
         All waveforms in *waves* must be **unsigned** and have the same length.
         The result width is the sum of all input widths.
@@ -1104,7 +1097,6 @@ class Waveform:
 
         Example
         -------
-        ::
 
             # Recombine four 8-bit bytes into one 32-bit value (byte3 = MSB)
             bus32 = Waveform.concatenate([byte0, byte1, byte2, byte3])
@@ -1161,7 +1153,6 @@ class Waveform:
 
         Example
         -------
-        ::
 
             # Compute bitwise majority across three 1-bit signals
             majority = Waveform.merge(
@@ -1208,7 +1199,6 @@ class Waveform:
 
         Example
         -------
-        ::
 
             # Analyse only the first 1000 simulation time units
             early = wave.time_slice(0, 1000)
@@ -1258,7 +1248,6 @@ class Waveform:
 
         Example
         -------
-        ::
 
             # Analyse cycles 100 to 199 (exclusive end)
             window = wave.cycle_slice(100, 200)
@@ -1312,8 +1301,8 @@ class Waveform:
     ) -> Waveform:
         """Return a new Waveform shifted by *offset* cycles.
 
-        This is the core method for relative time access. Use :meth:`ahead` and
-        :meth:`back` for more readable positive/negative offsets.
+        This is the core method for relative time access. Use ``ahead()`` and
+        ``back()`` for more readable positive/negative offsets.
 
         Parameters
         ----------
@@ -1344,7 +1333,6 @@ class Waveform:
 
         Example
         -------
-        ::
 
             # Rising edge detection
             rising = (wave == 0) & wave.ahead()
@@ -1410,16 +1398,16 @@ class Waveform:
     ) -> Waveform:
         """Return a new Waveform looking *n* cycles into the future.
 
-        Convenience wrapper around :meth:`relative` for positive offsets.
+        Convenience wrapper around ``relative()`` for positive offsets.
 
         Parameters
         ----------
         n:
             Number of cycles to look ahead. Default is 1.
         pad:
-            See :meth:`relative` for options.
+            See ``relative()`` for the padding options.
         pad_value:
-            See :meth:`relative` for usage.
+            See ``relative()`` for an example.
 
         Returns
         -------
@@ -1428,7 +1416,6 @@ class Waveform:
 
         Example
         -------
-        ::
 
             # Rising edge detection
             rising = (wave == 0) & wave.ahead()
@@ -1444,16 +1431,16 @@ class Waveform:
     ) -> Waveform:
         """Return a new Waveform looking *n* cycles into the past.
 
-        Convenience wrapper around :meth:`relative` for negative offsets.
+        Convenience wrapper around ``relative()`` for negative offsets.
 
         Parameters
         ----------
         n:
             Number of cycles to look back. Default is 1.
         pad:
-            See :meth:`relative` for options.
+            See ``relative()`` for the padding options.
         pad_value:
-            See :meth:`relative` for usage.
+            See ``relative()`` for an example.
 
         Returns
         -------
@@ -1462,7 +1449,6 @@ class Waveform:
 
         Example
         -------
-        ::
 
             # Check if current value equals previous
             same = wave == wave.back()

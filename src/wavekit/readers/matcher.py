@@ -45,7 +45,7 @@ def split_trailing_range(segment: str) -> tuple[str, str, Range | None]:
 
 @dataclass(frozen=True)
 class Capture:
-    """Base class for typed bindings returned in a :data:`CaptureKey`.
+    """Base class for typed bindings returned in a ``CaptureKey``.
 
     Matcher-specific code may create a partial Capture with no node context.
     ``Matcher.match()`` completes it before it can escape the matcher layer.
@@ -276,7 +276,7 @@ class PathStep:
 
 
 def parse_query_path(path: str) -> list[PathStep]:
-    """Parse a query path string into :class:`PathStep` objects."""
+    """Parse a query path string into ``PathStep`` objects."""
     path = path.strip()
 
     def find_regex_close(text: str) -> int:

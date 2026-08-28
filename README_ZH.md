@@ -16,10 +16,10 @@
 
 ## 特性
 
-- **灵活的信号查询：**支持多种路径匹配方式，从层次化波形数据中查找并批量加载相关信号。
-- **周期级分析：**使用多种 Waveform 操作处理时钟采样数据，分析接口反压、FIFO 水位等周期级行为。
-- **事务级分析：**使用时序模式匹配描述跨多个时钟周期的信号关系，分析协议行为、提取事务并测量延迟。
-- **多格式波形支持：**使用同一套 API 加载和分析 VCD、FST 和 FSDB 文件。
+- **灵活的信号查询：** 支持多种路径匹配方式，从层次化波形数据中查找并批量加载相关信号。
+- **周期级分析：** 使用多种 Waveform 操作处理时钟采样数据，分析接口反压、FIFO 水位等周期级行为。
+- **事务级分析：** 使用时序模式匹配描述跨多个时钟周期的信号关系，分析协议行为、提取事务并测量延迟。
+- **多格式波形支持：** 使用同一套 API 加载和分析 VCD、FST 和 FSDB 文件。
 
 ## 安装
 
@@ -27,7 +27,7 @@
 python -m pip install wavekit
 ```
 
-wavekit 支持 Python 3.9 及以上版本。FSDB 支持需要 Verdi NPI 运行时（`libNPI.so`）；配置方法请参阅 [Reader 配置指南](docs-zh/guides/reader.md)。
+wavekit 支持 Python 3.9 及以上版本。FSDB 支持需要 Verdi NPI 运行时（`libNPI.so`）；配置方法请参阅 [Reader 配置指南](https://cxzzzz.github.io/wavekit/zh/guides/reader/)。
 
 ## 快速上手
 
@@ -56,20 +56,20 @@ with VcdReader('simulation.vcd') as r:
     print('Average occupancy:', np.mean(occupancy.value))
 ```
 
-完整的可运行 FIFO 示例请参阅 [第一个波形教程](docs-zh/getting-started/first-waveform.md)。
+完整的可运行 FIFO 示例请参阅 [第一个波形教程](https://cxzzzz.github.io/wavekit/zh/getting-started/first-waveform/)。
 
 ## 文档
 
-完整的参考文档和指南请参阅[文档](docs-zh/index.md)：
+完整的参考文档和指南请参阅[文档](https://cxzzzz.github.io/wavekit/zh/)：
 
-- [安装](docs-zh/getting-started/installation.md)
-- [第一个波形](docs-zh/getting-started/first-waveform.md)
-- [Reader 与 FSDB 配置](docs-zh/guides/reader.md)
-- [信号查询](docs-zh/guides/signal-query.md)
-- [波形分析](docs-zh/guides/waveform-analysis.md)
-- [模式匹配](docs-zh/guides/pattern-matching.md)
-- [API 参考](docs-zh/reference/api.md)
-- [完整示例](docs-zh/examples.md)
+- [安装](https://cxzzzz.github.io/wavekit/zh/getting-started/installation/)
+- [第一个波形](https://cxzzzz.github.io/wavekit/zh/getting-started/first-waveform/)
+- [Reader 与 FSDB 配置](https://cxzzzz.github.io/wavekit/zh/guides/reader/)
+- [信号查询](https://cxzzzz.github.io/wavekit/zh/guides/signal-query/)
+- [波形分析](https://cxzzzz.github.io/wavekit/zh/guides/waveform-analysis/)
+- [模式匹配](https://cxzzzz.github.io/wavekit/zh/guides/pattern-matching/)
+- [API 参考](https://cxzzzz.github.io/wavekit/zh/reference/api/)
+- [完整示例](https://cxzzzz.github.io/wavekit/zh/examples/)
 
 ## 开发
 
@@ -90,7 +90,7 @@ poetry install --with docs
 poetry run zensical build --clean --strict
 ```
 
-有关贡献方式，请参阅[贡献指南](docs-zh/contributing.md)。
+有关贡献方式，请参阅[贡献指南](https://cxzzzz.github.io/wavekit/zh/contributing/)。
 
 ## 许可证
 

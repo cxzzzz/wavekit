@@ -149,7 +149,7 @@ def evaluate_expression(expr: str, namespace: dict[str, Any]) -> Any:
     Parameters
     ----------
     expr:
-        The substituted expression returned by :func:`parse_expression`.
+        The substituted expression returned by ``parse_expression``.
         Physical paths must be resolved and replaced before calling this
         function.
     namespace:

@@ -38,7 +38,7 @@ python -m pip install wavekit
 ```
 
 wavekit supports Python 3.9 and newer. FSDB support requires the Verdi NPI
-runtime (`libNPI.so`); see the [reader setup guide](docs/guides/reader.md) for
+runtime (`libNPI.so`); see the [reader setup guide](https://cxzzzz.github.io/wavekit/guides/reader/) for
 setup details.
 
 ## Quick start
@@ -68,21 +68,21 @@ with VcdReader('simulation.vcd') as r:
     print('Average occupancy:', np.mean(occupancy.value))
 ```
 
-See the [first waveform tutorial](docs/getting-started/first-waveform.md) for a
+See the [first waveform tutorial](https://cxzzzz.github.io/wavekit/getting-started/first-waveform/) for a
 complete runnable FIFO example.
 
 ## Documentation
 
-See the [documentation](docs/index.md) for the full reference and guides:
+See the [documentation](https://cxzzzz.github.io/wavekit/) for the full reference and guides:
 
-- [Installation](docs/getting-started/installation.md)
-- [First waveform](docs/getting-started/first-waveform.md)
-- [Reader and FSDB setup](docs/guides/reader.md)
-- [Signal queries](docs/guides/signal-query.md)
-- [Waveform analysis](docs/guides/waveform-analysis.md)
-- [Pattern matching](docs/guides/pattern-matching.md)
-- [API reference](docs/reference/api.md)
-- [Complete examples](docs/examples.md)
+- [Installation](https://cxzzzz.github.io/wavekit/getting-started/installation/)
+- [First waveform](https://cxzzzz.github.io/wavekit/getting-started/first-waveform/)
+- [Reader and FSDB setup](https://cxzzzz.github.io/wavekit/guides/reader/)
+- [Signal queries](https://cxzzzz.github.io/wavekit/guides/signal-query/)
+- [Waveform analysis](https://cxzzzz.github.io/wavekit/guides/waveform-analysis/)
+- [Pattern matching](https://cxzzzz.github.io/wavekit/guides/pattern-matching/)
+- [API reference](https://cxzzzz.github.io/wavekit/reference/api/)
+- [Complete examples](https://cxzzzz.github.io/wavekit/examples/)
 
 ## Development
 
@@ -103,7 +103,7 @@ poetry install --with docs
 poetry run zensical build --clean --strict
 ```
 
-See [Contributing](docs/contributing.md) for contribution guidelines.
+See [Contributing](https://cxzzzz.github.io/wavekit/contributing/) for contribution guidelines.
 
 ## License
 

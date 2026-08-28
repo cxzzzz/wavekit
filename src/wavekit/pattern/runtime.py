@@ -37,7 +37,7 @@ class PatternContext:
 
     Programmable bodies run once per scanned start cycle. Use ``ctx.value(...)``
     to read waveforms, ``ctx.wait(...)`` / ``ctx.consume(...)`` / ``ctx.delay(...)``
-    to move through time, and return ``ctx.OK`` from :func:`wavekit.pattern.match`
+    to move through time, and return ``ctx.OK`` from ``wavekit.pattern.match``
     bodies to record a successful match.
     """
 

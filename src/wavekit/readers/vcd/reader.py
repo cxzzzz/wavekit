@@ -82,9 +82,9 @@ class VcdScope(Scope):
 
 
 class VcdReader(Reader[VcdSignal]):
-    """Read VCD waveform files via :mod:`vcdvcd`.
+    """Read VCD waveform files via ``vcdvcd``.
 
-    Supports the common :class:`~wavekit.readers.base.Reader` APIs, including
+    Supports the common ``Reader`` APIs, including
     hierarchy traversal, expression evaluation, and clock-synchronised waveform
     loading.
     """
@@ -172,7 +172,7 @@ class VcdReader(Reader[VcdSignal]):
     def close(self):
         """Close this VCD reader.
 
-        The underlying :mod:`vcdvcd` reader keeps data in memory and does not
+        The underlying ``vcdvcd`` reader keeps data in memory and does not
         expose an explicit close operation, so this method is a no-op.
         """
         pass
