@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.7.3 - 2026-08-28
+
 ### Changed
 - Remove the redundant `CaptureKey` type alias from the public API.
   Matched-query results remain keyed by tuples of `Capture` objects.
