@@ -71,9 +71,14 @@ but call them through `ctx` inside the function body. The context provides
 their declarative counterparts, while `ctx.value()` reads a scalar from a
 waveform at the current sample.
 
-The body runs once for each scanned start cycle. Return `None` to skip that start
-cycle. Use ordinary Python conditionals and loops when later steps depend on
-values read during the match.
+Programmable patterns are useful when later steps depend on values read from
+the waveform. The runtime invokes the body from each possible start cycle, so
+the body can use ordinary Python conditionals and loops to choose the flow based
+on values read during the match.
+
+For this reason, precompute fixed `Waveform` expressions outside the body to
+avoid processing the full waveform repeatedly. Use `ctx.value()` inside the
+body when a decision depends on the current cycle.
 
 ```python
 from wavekit.pattern import collect

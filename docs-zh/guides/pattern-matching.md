@@ -51,7 +51,9 @@ result = match(pattern)
 
 编程式模式使用和声明式模式相同的模式操作，但这些操作是在函数体内通过 `ctx` 调用的。上下文对象 `ctx` 提供 `ctx.value()`、`ctx.wait()`、`ctx.consume()`、`ctx.try_consume()`、`ctx.delay()`、`ctx.capture()` 和 `ctx.require()`。这些操作的作用与声明式对应项相同；其中 `ctx.value()` 会读取当前采样点的标量值。
 
-函数体会针对扫描到的每个起始周期运行一次。返回 `None` 可以跳过当前起始周期。如果后续步骤取决于匹配过程中读取到的值，可以使用普通的 Python 条件和循环。
+编程式模式适合后续流程取决于波形值的场景。运行时会从扫描范围内的每个可能起始周期调用一次函数体，因此可以在函数体内使用普通的 Python 条件和循环，根据匹配过程中读取到的值决定后续操作。
+
+因此，固定的 `Waveform` 表达式应放在函数体外预先计算，避免重复处理完整波形；函数体内需要根据当前周期做判断时，使用 `ctx.value()`。
 
 ```python
 from wavekit.pattern import collect

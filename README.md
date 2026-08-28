@@ -8,15 +8,14 @@
 
 English | [中文](README_ZH.md)
 
-**High-level digital waveform analysis in Python.**
+**Wavekit is a Python library for high-level digital waveform analysis.**
+Wavekit supports common digital waveform formats; by combining batch signal
+queries with analysis at the cycle and transaction levels, it helps users
+interpret recorded signal changes in terms of per-cycle state and temporal
+relationships.
 
-Waveform files expose timestamps and value changes, while hardware engineers
-reason about clock cycles, signal relationships, and multi-cycle behavior.
-wavekit bridges that abstraction gap with flexible signal queries and analysis
-at both the cycle and transaction levels.
-
-> **AI integration:** [wavekit-mcp](https://github.com/cxzzzz/wavekit-mcp) exposes
-> wavekit analysis through MCP tools for AI-assisted workflows.
+> **AI integration:** [wavekit-mcp](https://github.com/cxzzzz/wavekit-mcp) exposes wavekit analysis through
+> MCP tools for AI-assisted workflows.
 
 ## Features
 
