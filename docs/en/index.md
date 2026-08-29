@@ -2,10 +2,10 @@
 
 **High-level digital waveform analysis in Python.**
 
-Waveform files expose timestamps and value changes, while hardware engineers
-reason about clock cycles, signal relationships, and multi-cycle behavior.
-wavekit bridges that abstraction gap with flexible signal queries and analysis
-at both the cycle and transaction levels.
+Waveform files record timestamps and value changes, while hardware engineers
+focus on clock cycles, signal relationships, and multi-cycle behavior.
+Wavekit provides flexible signal queries and processing at the cycle and
+transaction levels, making complex hardware behavior easier to analyze.
 
 ## What wavekit provides
 
