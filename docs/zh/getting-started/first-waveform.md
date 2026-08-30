@@ -1,6 +1,6 @@
 # 第一个波形：FIFO 水位
 
-本教程使用仓库中的完整 FIFO 水位示例：[`example/fifo_occupancy/`](../../example/fifo_occupancy/)。命令请从仓库根目录执行。
+本教程使用仓库中的完整 FIFO 水位示例：[`example/fifo_occupancy/`](https://github.com/cxzzzz/wavekit/tree/main/example/fifo_occupancy/)。命令请从仓库根目录执行。
 
 先生成 VCD 波形：
 

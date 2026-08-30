@@ -1,7 +1,7 @@
 # First waveform: FIFO occupancy
 
 This tutorial uses the complete FIFO occupancy example in
-[`example/fifo_occupancy/`](../../example/fifo_occupancy/). Run the commands from
+[`example/fifo_occupancy/`](https://github.com/cxzzzz/wavekit/tree/main/example/fifo_occupancy/). Run the commands from
 the repository root.
 
 Generate the waveform first:
