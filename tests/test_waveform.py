@@ -316,6 +316,8 @@ def test_edges():
     wave = build_waveform([0, 1, 0, 1, 1, 0], width=1)
     assert np.all(wave.rising_edge().value == np.array([0, 1, 0, 1, 0, 0]))
     assert np.all(wave.falling_edge().value == np.array([0, 0, 1, 0, 0, 1]))
+    assert np.array_equal(wave.rose().value, wave.rising_edge().value)
+    assert np.array_equal(wave.fell().value, wave.falling_edge().value)
 
 
 def test_changed_detects_any_width_value_changes():
@@ -344,6 +346,12 @@ def test_any_edge_requires_one_bit_waveform():
 
     with pytest.raises(ValueError, match=r'any_edge\(\) requires a 1-bit waveform'):
         wave.any_edge()
+
+
+@pytest.mark.parametrize('method', ['rose', 'fell'])
+def test_systemverilog_edges_require_one_bit_waveform(method):
+    with pytest.raises(ValueError, match=r'.*_edge\(\) requires a 1-bit waveform'):
+        getattr(build_waveform([0, 1], width=2), method)()
 
 
 @pytest.mark.parametrize('values', [[], [1]])
@@ -386,6 +394,56 @@ def test_bit_count_wide():
     wide_values_2 = np.array([1 << 70, (1 << 80) + 3], dtype=np.object_)
     wide_wave_2 = build_waveform(wide_values_2, width=96)
     assert np.all(wide_wave_2.bit_count().value == np.array([1, 3]))
+
+
+def test_systemverilog_population_count_helpers():
+    wave = build_waveform([0, 1, 3, 8], width=4)
+
+    assert np.array_equal(wave.countones().value, np.array([0, 1, 2, 1]))
+    assert np.array_equal(wave.countbits(1).value, np.array([0, 1, 2, 1]))
+    assert np.array_equal(wave.countbits(0).value, np.array([4, 3, 2, 3]))
+    assert np.array_equal(wave.countbits(True).value, wave.countbits(1).value)
+    assert np.array_equal(wave.countbits(False).value, wave.countbits(0).value)
+    assert wave.countbits(0).width == 64
+    assert wave.countbits(0).signed is False
+
+    wide = build_waveform([0, (1 << 70) + 3], width=128)
+    assert np.array_equal(wide.countones().value, np.array([0, 3]))
+    assert np.array_equal(wide.countbits(0).value, np.array([128, 125]))
+
+
+@pytest.mark.parametrize('value', [-1, 2, 'x'])
+def test_countbits_rejects_non_bit_values(value):
+    with pytest.raises(ValueError, match=r'countbits\(\) requires value 0 or 1'):
+        build_waveform([0], width=1).countbits(value)
+
+
+def test_countbits_requires_known_width():
+    wave = Waveform(np.array([0, 1]), np.array([0, 1]), np.array([0, 10]))
+
+    with pytest.raises(ValueError, match='width is None'):
+        wave.countbits(0)
+
+
+def test_systemverilog_predicate_helpers():
+    wave = build_waveform([0, 1, 3, 8], width=4)
+
+    assert np.array_equal(wave.onehot().value, np.array([0, 1, 0, 1]))
+    assert np.array_equal(wave.onehot0().value, np.array([1, 1, 0, 1]))
+    assert wave.onehot().width == 1
+    assert wave.onehot().signed is False
+
+
+def test_stable_uses_offline_two_state_semantics():
+    wave = build_waveform([3, 3, 7, 7, 1], width=4)
+
+    stable = wave.stable()
+    assert np.array_equal(stable.value, np.array([1, 1, 0, 1, 0]))
+    assert np.array_equal(stable.clock, wave.clock)
+    assert np.array_equal(stable.time, wave.time)
+    assert stable.width == 1
+    assert stable.signed is False
+    assert len(build_waveform([], width=1).stable().value) == 0
 
 
 def test_split_concat_merge():
@@ -644,6 +702,13 @@ def test_ahead_back():
 
     result = wave.back(pad='value', pad_value=99)
     assert np.all(result.value == np.array([99, 1, 2, 3, 4]))
+
+    assert np.array_equal(wave.past().value, wave.back().value)
+    assert np.array_equal(wave.past(2).value, wave.back(2).value)
+    assert np.array_equal(
+        wave.past(pad='value', pad_value=99).value,
+        wave.back(pad='value', pad_value=99).value,
+    )
 
 
 def test_rising_edge_with_ahead():

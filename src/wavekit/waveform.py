@@ -869,15 +869,6 @@ class Waveform:
             signed=self.signed,
         )
 
-    @staticmethod
-    def _count_one(x, width: int):
-        t = np.zeros(x.shape, dtype=np.uint64)
-        mask = (1 << 64) - 1
-        for idx in range(0, width, 64):
-            chunk = ((x >> idx) & mask).astype(np.uint64)
-            t = np.bitwise_count(chunk).astype(np.uint64) + t
-        return t
-
     def vectorized_map(
         self,
         func: Callable[[npt.NDArray[Any]], npt.NDArray[Any]],
@@ -1021,12 +1012,37 @@ class Waveform:
         return self._transition_mask(lambda previous, current: (previous == 0) & (current == 1))
 
     @expression_function
+    def rose(self) -> Waveform:
+        """Detect 0→1 transitions in a 1-bit waveform.
+
+        Alias of ``rising_edge()``.
+        """
+        return self.rising_edge()
+
+    @expression_function
+    def fell(self) -> Waveform:
+        """Detect 1→0 transitions in a 1-bit waveform.
+
+        Alias of ``falling_edge()``.
+        """
+        return self.falling_edge()
+
+    @expression_function
+    def stable(self) -> Waveform:
+        """Detect value equality with the previous sample.
+
+        Returns a new unsigned 1-bit Waveform where ``value[i]`` is true when
+        the current sample equals the previous sample. The first sample is
+        always true.
+        """
+        return ~(self.changed())
+
+    @expression_function
     def bit_count(self) -> Waveform:
         """Count the number of set bits (population count) in each sample value.
 
         Returns a new unsigned Waveform with ``width=64`` where each value is
-        the popcount of the corresponding source sample.  Supports arbitrarily
-        wide signals (> 64 bits) by chunking.
+        the popcount of the corresponding source sample.
 
         Raises
         ------
@@ -1035,10 +1051,68 @@ class Waveform:
         """
         if self.width is None:
             raise ValueError('width is None')
-        width = self.width
-        if self.value.dtype != np.object_ and self.width <= 64:
-            return self.vectorized_map(lambda v: np.bitwise_count(v), width=64, signed=False)
-        return self.vectorized_map(lambda v: Waveform._count_one(v, width), width=64, signed=False)
+        return self.vectorized_map(
+            lambda value: np.bitwise_count(value).astype(np.uint64),
+            width=64,
+            signed=False,
+        )
+
+    @expression_function
+    def countones(self) -> Waveform:
+        """Count the number of set bits (population count) in each sample value.
+
+        Alias of ``bit_count()``.
+        """
+        return self.bit_count()
+
+    @expression_function
+    def countbits(self, value: int) -> Waveform:
+        """Count the number of bits equal to *value* in each sample value.
+
+        Returns a new unsigned Waveform with ``width=64``.
+        ``countbits(1)`` is ``bit_count()``; ``countbits(0)`` is
+        ``width - bit_count()``.
+
+        Parameters
+        ----------
+        value:
+            The bit value to count; must be ``0`` or ``1``.
+
+        Raises
+        ------
+        ValueError:
+            If ``self.width`` is ``None`` or *value* is not ``0`` or ``1``.
+        """
+        if value not in (0, 1):
+            raise ValueError('countbits() requires value 0 or 1')
+        bit_count = self.bit_count()
+        return bit_count if value else self.width - bit_count
+
+    @expression_function
+    def onehot(self) -> Waveform:
+        """Detect samples where exactly one bit is set.
+
+        Returns a new unsigned 1-bit Waveform.
+
+        Raises
+        ------
+        ValueError:
+            If ``self.width`` is ``None``.
+        """
+        return self.bit_count() == 1
+
+    @expression_function
+    def onehot0(self) -> Waveform:
+        """Detect samples where at most one bit is set.
+
+        Returns a new unsigned 1-bit Waveform.
+
+        Raises
+        ------
+        ValueError:
+            If ``self.width`` is ``None``.
+        """
+        return self.bit_count() <= 1
 
     def split_bits(self, bit_group_size: int | list[int], padding: bool = False) -> list[Waveform]:
         """Split the waveform into multiple narrower waveforms by bit groups.
@@ -1479,3 +1553,16 @@ class Waveform:
             same = wave == wave.back()
         """
         return self.relative(-n, pad, pad_value)
+
+    @expression_function
+    def past(
+        self,
+        n: int = 1,
+        pad: Literal['repeat', 'value'] = 'repeat',
+        pad_value: Any = None,
+    ) -> Waveform:
+        """Return a new Waveform looking *n* cycles into the past.
+
+        Alias of ``back()``; see there for the padding options.
+        """
+        return self.back(n, pad, pad_value)
