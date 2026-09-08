@@ -171,13 +171,21 @@ def test_evaluate_expression_registered_functions():
 
     for expr, expected in [
         ('bit_count(data)', data.bit_count()),
+        ('countones(data)', data.countones()),
+        ('countbits(data, 0)', data.countbits(0)),
         ('ahead(data, 2)', data.ahead(2)),
         ('back(data, 2)', data.back(2)),
+        ('past(data, 2)', data.past(2)),
         ('as_signed(data)', data.as_signed()),
         ('rising_edge(valid)', valid.rising_edge()),
         ('falling_edge(valid)', valid.falling_edge()),
+        ('rose(valid)', valid.rose()),
+        ('fell(valid)', valid.fell()),
         ('any_edge(valid)', valid.any_edge()),
         ('changed(data)', data.changed()),
+        ('stable(data)', data.stable()),
+        ('onehot(data)', data.onehot()),
+        ('onehot0(data)', data.onehot0()),
     ]:
         result = evaluate_source_expression(expr, {'data': data, 'valid': valid})
         assert_same_waveform(result, expected)
