@@ -1051,6 +1051,22 @@ class Waveform:
         """
         if self.width is None:
             raise ValueError('width is None')
+        if self.value.dtype == np.object_:
+            # np.bitwise_count on object arrays calls int.bit_count(), which
+            # does not exist on Python 3.9; chunk to uint64 lanes instead.
+            chunks = []
+            for idx in range(0, self.width, 64):
+                lane = np.array(
+                    [(int(v) >> idx) & 0xFFFF_FFFF_FFFF_FFFF for v in self.value],
+                    dtype=np.uint64,
+                )
+                chunks.append(np.bitwise_count(lane))
+            counts = (
+                np.sum(chunks, axis=0, dtype=np.uint64)
+                if chunks
+                else np.zeros(len(self.value), dtype=np.uint64)
+            )
+            return self.vectorized_map(lambda value: counts, width=64, signed=False)
         return self.vectorized_map(
             lambda value: np.bitwise_count(value).astype(np.uint64),
             width=64,
