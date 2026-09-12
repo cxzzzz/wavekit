@@ -32,7 +32,7 @@ def test_metadata_and_copy():
     # Deprecated read-only alias: .clock returns the .cycle array.
     assert wave.clock is wave.cycle
     with pytest.raises(AttributeError):
-        wave.clock = np.arange(3)  # type: ignore[misc]
+        wave.clock = np.arange(3)
 
     copied = wave.copy()
     copied.value[0] = 99
