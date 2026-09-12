@@ -15,17 +15,17 @@ class Waveform:
     Every ``Waveform`` is a triple of parallel numpy arrays of equal length:
 
     * ``value``  — signal values sampled on every clock edge.
-    * ``clock``  — absolute sampling-edge number counted from the first selected
+    * ``cycle``  — absolute sampling-edge number counted from the first selected
       edge in the waveform file (which is cycle 0).
     * ``time``   — simulation timestamp (in the file's native time unit) of
       each sample.
 
     These three arrays are always kept in sync; any operation that filters or
-    transforms values also transforms the corresponding ``clock`` and ``time``
+    transforms values also transforms the corresponding ``cycle`` and ``time``
     entries so positional alignment is preserved.
 
     The convenience property ``data`` returns them as a single numpy record
-    array with fields ``("time", "clock", "value")`` for easy pandas / numpy
+    array with fields ``("time", "cycle", "value")`` for easy pandas / numpy
     interop.
 
     ``width`` and ``signed`` are direct fields on ``Waveform``.  ``signal`` is
@@ -62,13 +62,13 @@ class Waveform:
     def __init__(
         self,
         value: npt.NDArray[Any],
-        clock: npt.NDArray[np.number],
+        cycle: npt.NDArray[np.number],
         time: npt.NDArray[np.number],
         width: int | None = None,
         signed: bool = False,
         signal: Signal | None = None,
     ):
-        self.clock: npt.NDArray[np.number] = clock
+        self.cycle: npt.NDArray[np.number] = cycle
         self.time: npt.NDArray[np.number] = time
         self.width: int | None = width
         self.signed: bool = signed
@@ -84,26 +84,35 @@ class Waveform:
             self.value = value.astype(np.uint64)
 
     @property
-    def data(self) -> Any:
-        """Return value/clock/time as a single numpy record array.
+    def clock(self) -> npt.NDArray[np.number]:
+        """Alias of ``cycle``.
 
-        Fields: ``"time"`` (simulation timestamp), ``"clock"`` (edge counter),
+        .. deprecated:: 0.8
+            Use ``cycle`` instead.
+        """
+        return self.cycle
+
+    @property
+    def data(self) -> Any:
+        """Return value/cycle/time as a single numpy record array.
+
+        Fields: ``"time"`` (simulation timestamp), ``"cycle"`` (edge counter),
         ``"value"`` (signal value).  Useful for pandas conversion or bulk numpy
         operations that need all three columns together.
         """
         return cast(
             Any,
             np.rec.fromarrays(
-                cast(Any, [self.time, self.clock, self.value]),
-                names=cast(Any, 'time,clock,value'),
+                cast(Any, [self.time, self.cycle, self.value]),
+                names=cast(Any, 'time,cycle,value'),
             ),
         )
 
     def _format_data_table(self, max_rows: int = 10) -> str:
         """Format the data recarray as an aligned text table with truncation."""
         n = len(self.value)
-        cols = ['time', 'clock', 'value']
-        col_data = [self.time, self.clock, self.value]
+        cols = ['time', 'cycle', 'value']
+        col_data = [self.time, self.cycle, self.value]
 
         str_cols: list[list[str]] = []
         for arr in col_data:
@@ -249,7 +258,7 @@ class Waveform:
             raise TypeError('mask requires boolean numpy array')
         return Waveform(
             value=self.value[mask],
-            clock=self.clock[mask],
+            cycle=self.cycle[mask],
             time=self.time[mask],
             width=self.width,
             signed=self.signed,
@@ -261,7 +270,7 @@ class Waveform:
         Returns
         -------
         Waveform
-            New waveform with copied ``value``, ``clock``, and ``time`` arrays and
+            New waveform with copied ``value``, ``cycle``, and ``time`` arrays and
             the same ``width`` / ``signed`` metadata.
         """
         return self.vectorized_map(lambda x: np.copy(x), width=self.width, signed=self.signed)
@@ -432,7 +441,7 @@ class Waveform:
 
         return Waveform(
             value=new_value,
-            clock=self.clock,
+            cycle=self.cycle,
             time=self.time,
             width=None,
             signed=self.signed,
@@ -444,7 +453,7 @@ class Waveform:
 
         return Waveform(
             value=new_value,
-            clock=self.clock,
+            cycle=self.cycle,
             time=self.time,
             width=None,
             signed=self.signed,
@@ -457,7 +466,7 @@ class Waveform:
 
         return Waveform(
             value=new_value,
-            clock=self.clock,
+            cycle=self.cycle,
             time=self.time,
             width=new_width,
             signed=self.signed,
@@ -470,7 +479,7 @@ class Waveform:
 
         return Waveform(
             value=new_value,
-            clock=self.clock,
+            cycle=self.cycle,
             time=self.time,
             width=new_width,
             signed=self.signed,
@@ -484,7 +493,7 @@ class Waveform:
 
         return Waveform(
             value=new_value,
-            clock=self.clock,
+            cycle=self.cycle,
             time=self.time,
             width=new_width,
             signed=self.signed,
@@ -498,7 +507,7 @@ class Waveform:
 
         return Waveform(
             value=new_value,
-            clock=self.clock,
+            cycle=self.cycle,
             time=self.time,
             width=new_width,
             signed=self.signed,
@@ -512,7 +521,7 @@ class Waveform:
 
         return Waveform(
             value=new_value,
-            clock=self.clock,
+            cycle=self.cycle,
             time=self.time,
             width=new_width,
             signed=self.signed,
@@ -576,7 +585,7 @@ class Waveform:
 
         return Waveform(
             value=new_value,
-            clock=self.clock,
+            cycle=self.cycle,
             time=self.time,
             width=new_width,
             signed=self.signed,
@@ -603,7 +612,7 @@ class Waveform:
 
         return Waveform(
             value=new_value,
-            clock=self.clock,
+            cycle=self.cycle,
             time=self.time,
             width=new_width,
             signed=self.signed,
@@ -627,7 +636,7 @@ class Waveform:
 
         return Waveform(
             value=new_value,
-            clock=self.clock,
+            cycle=self.cycle,
             time=self.time,
             width=new_width,
             signed=self.signed,
@@ -782,7 +791,7 @@ class Waveform:
         new_value = self._bitsel(self.value, start, width)
         return Waveform(
             value=new_value,
-            clock=self.clock,
+            cycle=self.cycle,
             time=self.time,
             width=width,
             signed=False,
@@ -822,7 +831,7 @@ class Waveform:
                 raise TypeError('take requires integer indices')
         return Waveform(
             value=self.value[indices],
-            clock=self.clock[indices],
+            cycle=self.cycle[indices],
             time=self.time[indices],
             width=self.width,
             signed=self.signed,
@@ -835,7 +844,7 @@ class Waveform:
     ) -> Waveform:
         """Reduce the sample rate by aggregating consecutive chunks.
 
-        Splits ``value``, ``clock``, and ``time`` into non-overlapping windows
+        Splits ``value``, ``cycle``, and ``time`` into non-overlapping windows
         of *chunk_size* and applies *func* to each window.  The result length
         is ``ceil(len / chunk_size)``.
 
@@ -845,7 +854,7 @@ class Waveform:
             Number of consecutive samples to aggregate into one.
         func:
             Aggregation function applied to each value chunk.  Defaults to
-            ``np.mean``.  ``clock`` and ``time`` chunks are always averaged.
+            ``np.mean``.  ``cycle`` and ``time`` chunks are always averaged.
 
         Example
         -------
@@ -863,7 +872,7 @@ class Waveform:
 
         return Waveform(
             value=helper(self.value, func),
-            clock=helper(self.clock, np.mean),
+            cycle=helper(self.cycle, np.mean),
             time=helper(self.time, np.mean),
             width=None,
             signed=self.signed,
@@ -878,7 +887,7 @@ class Waveform:
         """Apply a vectorized function to the value array and return a new Waveform.
 
         *func* receives the entire ``value`` ndarray and must return an ndarray
-        of the same length.  ``clock`` and ``time`` are deep-copied unchanged.
+        of the same length.  ``cycle`` and ``time`` are deep-copied unchanged.
 
         Parameters
         ----------
@@ -892,7 +901,7 @@ class Waveform:
         new_value = func(self.value)
         return Waveform(
             value=new_value,
-            clock=np.copy(self.clock),
+            cycle=np.copy(self.cycle),
             time=np.copy(self.time),
             width=width,
             signed=signed if signed is not None else False,
@@ -935,7 +944,7 @@ class Waveform:
             new_value[1:] = predicate(self.value[:-1], self.value[1:])
         return Waveform(
             value=new_value,
-            clock=np.copy(self.clock),
+            cycle=np.copy(self.cycle),
             time=np.copy(self.time),
             width=1,
             signed=False,
@@ -1234,7 +1243,7 @@ class Waveform:
 
         return Waveform(
             value=new_value,
-            clock=np.copy(waves[0].clock),
+            cycle=np.copy(waves[0].cycle),
             time=np.copy(waves[0].time),
             width=concat_width,
             signed=False,
@@ -1251,7 +1260,7 @@ class Waveform:
 
         At each sample index *i*, ``func`` is called with
         ``[w.value[i] for w in waves]`` and the returned value becomes the
-        result sample.  ``clock`` and ``time`` are taken from ``waves[0]``.
+        result sample.  ``cycle`` and ``time`` are taken from ``waves[0]``.
 
         All waveforms must have the **same number of samples**.
 
@@ -1284,7 +1293,7 @@ class Waveform:
 
         return Waveform(
             value=new_value,
-            clock=np.copy(waves[0].clock),
+            cycle=np.copy(waves[0].cycle),
             time=np.copy(waves[0].time),
             width=width,
             signed=signed,
@@ -1292,25 +1301,19 @@ class Waveform:
 
     def time_slice(
         self,
-        begin_time: int | None = None,
+        start_time: int | None = None,
         end_time: int | None = None,
-        include_end: bool = False,
     ) -> Waveform:
         """Return a new Waveform trimmed to the given simulation time range.
 
-        Uses binary search on the sorted ``time`` array so the operation is
-        O(log n) regardless of waveform length.
-
         Parameters
         ----------
-        begin_time:
-            Start of the time window (inclusive).  Defaults to the first
-            sample's timestamp.
+        start_time:
+            Start of the time window (inclusive).  ``None`` means the start
+            of the waveform, including the first sample.
         end_time:
-            End of the time window.  Exclusive by default; set
-            ``include_end=True`` to make it inclusive.
-        include_end:
-            If ``True``, samples exactly at *end_time* are included.
+            End of the time window (exclusive).  ``None`` means the end of
+            the waveform, including the final sample.
 
         Example
         -------
@@ -1318,48 +1321,40 @@ class Waveform:
             # Analyse only the first 1000 simulation time units
             early = wave.time_slice(0, 1000)
         """
-        if begin_time is None:
-            begin_time = int(self.time[0])
+        if start_time is None:
+            start_time = int(self.time[0])
         if end_time is None:
             end_time = int(self.time[-1]) + 1
-        start_idx = np.searchsorted(self.time, begin_time, side='left')
-        end_idx = np.searchsorted(self.time, end_time, side='right' if include_end else 'left')
+        start_index = np.searchsorted(self.time, start_time, side='left')
+        end_index = np.searchsorted(self.time, end_time, side='left')
         return Waveform(
-            value=self.value[start_idx:end_idx],
-            clock=self.clock[start_idx:end_idx],
-            time=self.time[start_idx:end_idx],
+            value=self.value[start_index:end_index],
+            cycle=self.cycle[start_index:end_index],
+            time=self.time[start_index:end_index],
             width=self.width,
             signed=self.signed,
         )
 
     def cycle_slice(
         self,
-        begin_cycle: int | None = None,
+        start_cycle: int | None = None,
         end_cycle: int | None = None,
-        include_end: bool = False,
     ) -> Waveform:
         """Return a new Waveform trimmed to the given absolute clock cycle range.
 
-        Uses binary search on the sorted ``clock`` array so the operation is
-        O(log n) regardless of waveform length.  The ``clock`` values are
-        absolute cycle numbers from the start of simulation (not relative to
-        this waveform's window), so the same cycle number means the same
-        simulation instant across different waveforms.
+        The ``cycle`` values are absolute cycle numbers from the start of
+        simulation (not relative to this waveform's window), so the same
+        cycle number means the same simulation instant across different
+        waveforms.
 
         Parameters
         ----------
-        begin_cycle:
-            First clock cycle to include (inclusive).  Defaults to the first
-            sample's cycle number.
+        start_cycle:
+            Start of the cycle window (inclusive).  ``None`` means the
+            start of the waveform, including the first sample.
         end_cycle:
-            Last clock cycle.  Exclusive by default; set ``include_end=True``
-            to make it inclusive.
-        include_end:
-            If ``True``, samples exactly at *end_cycle* are included.
-
-        See Also
-        --------
-        time_slice : slice by simulation timestamp instead of cycle number.
+            End of the cycle window (exclusive).  ``None`` means the end of
+            the waveform, including the final sample.
 
         Example
         -------
@@ -1367,43 +1362,36 @@ class Waveform:
             # Analyse cycles 100 to 199 (exclusive end)
             window = wave.cycle_slice(100, 200)
         """
-        if begin_cycle is None:
-            begin_cycle = int(self.clock[0])
+        if start_cycle is None:
+            start_cycle = int(self.cycle[0])
         if end_cycle is None:
-            end_cycle = int(self.clock[-1]) + 1
-        start_idx = np.searchsorted(self.clock, begin_cycle, side='left')
-        end_idx = np.searchsorted(self.clock, end_cycle, side='right' if include_end else 'left')
+            end_cycle = int(self.cycle[-1]) + 1
+        start_index = np.searchsorted(self.cycle, start_cycle, side='left')
+        end_index = np.searchsorted(self.cycle, end_cycle, side='left')
         return Waveform(
-            value=self.value[start_idx:end_idx],
-            clock=self.clock[start_idx:end_idx],
-            time=self.time[start_idx:end_idx],
+            value=self.value[start_index:end_index],
+            cycle=self.cycle[start_index:end_index],
+            time=self.time[start_index:end_index],
             width=self.width,
             signed=self.signed,
         )
 
-    def slice(self, begin_idx: int, end_idx: int, include_end: bool = False) -> Waveform:
+    def slice(self, start_index: int | None = None, end_index: int | None = None) -> Waveform:
         """Return a new Waveform trimmed to the given sample index range.
 
         Parameters
         ----------
-        begin_idx:
-            First sample index to include (inclusive).
-        end_idx:
-            Last sample index.  Exclusive by default; set ``include_end=True``
-            to make it inclusive.
-        include_end:
-            If ``True``, the sample at *end_idx* is included.
-
-        See Also
-        --------
-        time_slice : slice by simulation timestamp instead of array index.
+        start_index:
+            Start of the index range (inclusive).  ``None`` means the start
+            of the waveform (index 0).
+        end_index:
+            End of the index range (exclusive), matching Python slicing.
+            ``None`` means the end of the waveform.
         """
-        if include_end:
-            end_idx += 1
         return Waveform(
-            value=self.value[begin_idx:end_idx],
-            clock=self.clock[begin_idx:end_idx],
-            time=self.time[begin_idx:end_idx],
+            value=self.value[start_index:end_index],
+            cycle=self.cycle[start_index:end_index],
+            time=self.time[start_index:end_index],
             width=self.width,
             signed=self.signed,
         )
@@ -1436,7 +1424,7 @@ class Waveform:
         Returns
         -------
         Waveform
-            A new waveform shifted by *offset* cycles. ``clock`` and ``time``
+            A new waveform shifted by *offset* cycles. ``cycle`` and ``time``
             arrays are always preserved unchanged.
 
         Raises
@@ -1498,7 +1486,7 @@ class Waveform:
 
         return Waveform(
             value=value_padded,
-            clock=self.clock.copy(),
+            cycle=self.cycle.copy(),
             time=self.time.copy(),
             width=self.width,
             signed=self.signed,

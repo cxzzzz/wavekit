@@ -19,7 +19,7 @@ with FsdbReader('simulation.fsdb') as reader:
 
 ## 采样和窗口
 
-`load_waveform(signal, clock, ...)` 会在时钟边沿采样指定信号。默认使用下降沿，以减少信号变化带来的采样错误。传入 `sample_on_posedge=True` 可以改为在上升沿采样。使用 `begin_time` 和 `end_time` 指定时间窗口，或使用 `begin_cycle` 和 `end_cycle` 指定绝对时钟周期窗口。时间窗口和周期窗口不能混用。
+`load_waveform(signal, clock, ...)` 会在时钟边沿采样指定信号。默认使用下降沿，以减少信号变化带来的采样错误。传入 `sample_on_posedge=True` 可以改为在上升沿采样。使用 `start_time` 和 `end_time` 指定时间窗口，或使用 `start_cycle` 和 `end_cycle` 指定绝对时钟周期窗口。时间窗口和周期窗口不能混用。
 
 同一计算、掩码操作或模式匹配中使用的波形，必须使用同源时钟、相同的采样边沿，以及相同的时间窗口或周期窗口。
 

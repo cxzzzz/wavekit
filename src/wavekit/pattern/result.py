@@ -85,7 +85,7 @@ class MatchRecords(Sequence[MatchRecord]):
     """Columnar batch of pattern match records.
 
     ``start`` and ``end`` are point waveforms: ``.value`` stores waveform-array
-    sample indices, ``.clock`` stores absolute cycle numbers, and ``.time`` stores
+    sample indices, ``.cycle`` stores absolute cycle numbers, and ``.time`` stores
     simulation timestamps. ``duration.value`` is ``end.value - start.value + 1``.
     """
 
@@ -116,7 +116,7 @@ class MatchRecords(Sequence[MatchRecord]):
         value = np.array(
             [isinstance(status, MatchStatus.OK) for status in self.status.value], dtype=bool
         )
-        return Waveform(value, self.start.clock.copy(), self.start.time.copy(), width=1)
+        return Waveform(value, self.start.cycle.copy(), self.start.time.copy(), width=1)
 
     @property
     def failed(self) -> Waveform:
@@ -131,7 +131,7 @@ class MatchRecords(Sequence[MatchRecord]):
         value = np.array(
             [not isinstance(status, MatchStatus.OK) for status in self.status.value], dtype=bool
         )
-        return Waveform(value, self.start.clock.copy(), self.start.time.copy(), width=1)
+        return Waveform(value, self.start.cycle.copy(), self.start.time.copy(), width=1)
 
     def filter_ok(self) -> MatchRecords:
         """Return records whose status is ``MatchStatus.OK``.
@@ -219,12 +219,12 @@ class MatchRecords(Sequence[MatchRecord]):
         return MatchRecord(
             start=MatchPoint(
                 index=int(self.start.value[index]),
-                cycle=int(self.start.clock[index]),
+                cycle=int(self.start.cycle[index]),
                 time=int(self.start.time[index]),
             ),
             end=MatchPoint(
                 index=int(self.end.value[index]),
-                cycle=int(self.end.clock[index]),
+                cycle=int(self.end.cycle[index]),
                 time=int(self.end.time[index]),
             ),
             status=self.status.value[index],

@@ -28,7 +28,7 @@ from .steps import (
 def infer_declarative_axis(steps: list[Step]) -> Waveform | None:
     """Infer a minimal first-static-waveform scan axis hint from steps."""
     # Axis inference is intentionally minimal.  It only finds a static waveform
-    # so start/end_cycle can be translated to indices; full clock alignment
+    # so start/end_cycle can be translated to indices; full cycle-axis alignment
     # validation remains lazy in PatternRuntime.note_waveform().
     for step in steps:
         if isinstance(step, (WaitStep, ConsumeStep)):

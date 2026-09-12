@@ -146,7 +146,7 @@ class FsdbReader(Reader):
         self,
         signal: Signal,
         value_mapping: dict[str, int],
-        begin_time: int | None = None,
+        start_time: int | None = None,
         end_time: int | None = None,
     ) -> np.ndarray:
         """Load mapped FSDB value changes through the NPI reader."""
@@ -180,11 +180,11 @@ class FsdbReader(Reader):
             value_mapping['z'],
         )
         mode = _MAPPING_TO_FSDB_MODE[mapping_key]
-        begin = begin_time if begin_time is not None else 0
+        start = start_time if start_time is not None else 0
         end = end_time if end_time is not None else 2**64 - 1
         return self.file_handle.load_value_change_mode(
             npi_signal,
-            begin,
+            start,
             end,
             mode,
             signal.width,
@@ -199,7 +199,7 @@ class FsdbReader(Reader):
         )
 
     @property
-    def begin_time(self) -> int:
+    def start_time(self) -> int:
         """Return the first timestamp stored in the FSDB file."""
         return self.file_handle.min_time()
 

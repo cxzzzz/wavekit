@@ -164,7 +164,7 @@ A `MatchRecords` object contains:
 - named `captures`.
 
 `end` is inclusive. Extract a matched waveform window with
-`cycle_slice(start.clock, end.clock + 1)`.
+`cycle_slice(start.cycle, end.cycle + 1)`.
 
 Use:
 

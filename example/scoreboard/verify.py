@@ -23,10 +23,10 @@ def verify_fifo_data_integrity():
         empty = f.load_waveform('fifo_tb.empty', clock=clock)
         data_out = f.load_waveform('fifo_tb.data_out', clock=clock)
 
-        valid_w_idx = (w_en & (~full)).filter(lambda x: x != 0).clock
+        valid_w_idx = (w_en & (~full)).filter(lambda x: x != 0).cycle
         valid_w_data = data_in.take(valid_w_idx)
 
-        valid_r_idx = (r_en & (~empty)).filter(lambda x: x != 0).clock
+        valid_r_idx = (r_en & (~empty)).filter(lambda x: x != 0).cycle
         valid_r_data = data_out.take(valid_r_idx + 1)
 
         print(f'Total Valid Writes: {len(valid_w_data.value)}')

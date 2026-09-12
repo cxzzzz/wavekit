@@ -23,7 +23,7 @@ def test_axi_read_latency():
     result = match(Pattern().wait(arvalid & arready).wait(rvalid & rready).capture('rdata', rdata))
     ok = result.filter_ok()
     assert len(ok) == 2
-    np.testing.assert_array_equal(ok.end.clock - ok.start.clock, [3, 2])
+    np.testing.assert_array_equal(ok.end.cycle - ok.start.cycle, [3, 2])
     np.testing.assert_array_equal(ok.captures['rdata'].value, [57005, 48879])
 
 

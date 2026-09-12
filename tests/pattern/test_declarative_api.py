@@ -298,14 +298,14 @@ class TestMatchRecords:
             width=64,
         )
         duration = Waveform(
-            np.array([1, 4, 2], dtype=np.int64), start.clock.copy(), start.time.copy(), width=64
+            np.array([1, 4, 2], dtype=np.int64), start.cycle.copy(), start.time.copy(), width=64
         )
         status = Waveform(
             np.array(
                 [MatchStatus.OK(), MatchStatus.Timeout(), MatchStatus.RequireViolated()],
                 dtype=object,
             ),
-            start.clock.copy(),
+            start.cycle.copy(),
             start.time.copy(),
         )
         samples = np.empty(3, dtype=object)
@@ -313,11 +313,11 @@ class TestMatchRecords:
         captures = {
             'data': Waveform(
                 np.array([100, 200, 300], dtype=np.int64),
-                start.clock.copy(),
+                start.cycle.copy(),
                 start.time.copy(),
                 width=16,
             ),
-            'samples': Waveform(samples, start.clock.copy(), start.time.copy()),
+            'samples': Waveform(samples, start.cycle.copy(), start.time.copy()),
         }
         return MatchRecords(start, end, duration, status, captures)
 
@@ -340,7 +340,7 @@ class TestMatchRecords:
     def test_failed_preserves_status_axis(self):
         result = self._mixed_status_result()
         np.testing.assert_array_equal(result.failed.value, [False, True, True])
-        np.testing.assert_array_equal(result.failed.clock, result.status.clock)
+        np.testing.assert_array_equal(result.failed.cycle, result.status.cycle)
         np.testing.assert_array_equal(result.failed.time, result.status.time)
         assert result.failed.width == 1
         assert result.failed.signed is False
@@ -364,9 +364,9 @@ class TestMatchRecords:
         np.testing.assert_array_equal(timeout.end.value, [4])
         np.testing.assert_array_equal(timeout.duration.value, [4])
         np.testing.assert_array_equal(timeout.captures['data'].value, [200])
-        np.testing.assert_array_equal(timeout.captures['data'].clock, timeout.start.clock)
+        np.testing.assert_array_equal(timeout.captures['data'].cycle, timeout.start.cycle)
         assert list(timeout.captures['samples'].value[0]) == [2, 3]
-        np.testing.assert_array_equal(timeout.captures['samples'].clock, timeout.start.clock)
+        np.testing.assert_array_equal(timeout.captures['samples'].cycle, timeout.start.cycle)
 
     def test_integer_index_too_negative_raises_index_error(self):
         result = self._mixed_status_result()
@@ -382,20 +382,20 @@ class TestMatchRecords:
         np.testing.assert_array_equal(failed.start.value, [1, 2])
         np.testing.assert_array_equal(failed.captures['data'].value, [200, 300])
         assert [list(value) for value in failed.captures['samples'].value] == [[2, 3], [4, 5, 6]]
-        np.testing.assert_array_equal(failed.captures['samples'].clock, failed.start.clock)
+        np.testing.assert_array_equal(failed.captures['samples'].cycle, failed.start.cycle)
 
     def test_ok_and_filter_ok_preserve_result_axes_and_list_captures(self):
         trigger = _bool_wf([1, 0, 1, 0, 0])
         ready = _bool_wf([0, 1, 0, 0, 0])
         data = _wf([10, 20, 30, 40, 50], width=8)
         result = match(Pattern().wait(trigger).capture('samples', data, mode='list').wait(ready))
-        np.testing.assert_array_equal(result.ok.clock, result.status.clock)
+        np.testing.assert_array_equal(result.ok.cycle, result.status.cycle)
         np.testing.assert_array_equal(result.ok.time, result.status.time)
         assert result.ok.width == 1
         ok = result.filter_ok()
         assert len(ok) == 1
-        np.testing.assert_array_equal(ok.start.clock, [0])
-        np.testing.assert_array_equal(ok.captures['samples'].clock, ok.start.clock)
+        np.testing.assert_array_equal(ok.start.cycle, [0])
+        np.testing.assert_array_equal(ok.captures['samples'].cycle, ok.start.cycle)
         assert list(ok.captures['samples'].value[0]) == [10]
 
     def test_start_end_points_store_index_cycle_and_time(self):
@@ -408,10 +408,10 @@ class TestMatchRecords:
         result = match(Pattern().wait(trigger).delay(1))
         assert len(result) == 1
         np.testing.assert_array_equal(result.start.value, [0])
-        np.testing.assert_array_equal(result.start.clock, [10])
+        np.testing.assert_array_equal(result.start.cycle, [10])
         np.testing.assert_array_equal(result.start.time, [100])
         np.testing.assert_array_equal(result.end.value, [1])
-        np.testing.assert_array_equal(result.end.clock, [20])
+        np.testing.assert_array_equal(result.end.cycle, [20])
         np.testing.assert_array_equal(result.end.time, [200])
         np.testing.assert_array_equal(result.duration.value, [2])
         record = result[0]

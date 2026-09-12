@@ -26,7 +26,7 @@ def _by_group(results, group):
 
 def _assert_same_waveform(actual, expected):
     assert np.array_equal(actual.value, expected.value)
-    assert np.array_equal(actual.clock, expected.clock)
+    assert np.array_equal(actual.cycle, expected.cycle)
     assert np.array_equal(actual.time, expected.time)
     assert actual.width == expected.width
     assert actual.signed == expected.signed
@@ -249,9 +249,9 @@ def test_vcd_reader_native_range_metadata(nonzero_vcd_path):
 
 def test_vcd_reader_scalar_bit_select(nonzero_vcd_path):
     with VcdReader(str(nonzero_vcd_path)) as reader:
-        clk = reader.load_waveform('TOP.tb.clk', clock='TOP.tb.clk', begin_cycle=0, end_cycle=3)
+        clk = reader.load_waveform('TOP.tb.clk', clock='TOP.tb.clk', start_cycle=0, end_cycle=3)
         clk_bit0 = reader.load_waveform(
-            'TOP.tb.clk[0]', clock='TOP.tb.clk', begin_cycle=0, end_cycle=3
+            'TOP.tb.clk[0]', clock='TOP.tb.clk', start_cycle=0, end_cycle=3
         )
 
     assert clk.width == 1
@@ -262,10 +262,10 @@ def test_vcd_reader_scalar_bit_select(nonzero_vcd_path):
 def test_vcd_reader_single_bracket_array_element_load(nonzero_vcd_path):
     with VcdReader(str(nonzero_vcd_path)) as reader:
         elem0 = reader.load_waveform(
-            'TOP.tb.arr_elem[10][0]', clock='TOP.tb.clk', begin_cycle=0, end_cycle=3
+            'TOP.tb.arr_elem[10][0]', clock='TOP.tb.clk', start_cycle=0, end_cycle=3
         )
         elem1 = reader.load_waveform(
-            'TOP.tb.arr_elem[10][1]', clock='TOP.tb.clk', begin_cycle=0, end_cycle=3
+            'TOP.tb.arr_elem[10][1]', clock='TOP.tb.clk', start_cycle=0, end_cycle=3
         )
 
     assert elem0.width == 1
@@ -277,17 +277,17 @@ def test_vcd_reader_single_bracket_array_element_load(nonzero_vcd_path):
 def test_vcd_reader_nonzero_native_range_loads(nonzero_vcd_path):
     with VcdReader(str(nonzero_vcd_path)) as reader:
         full = reader.load_waveform(
-            'TOP.tb.packed_nonzero[7:4]', clock='TOP.tb.clk', begin_cycle=0, end_cycle=3
+            'TOP.tb.packed_nonzero[7:4]', clock='TOP.tb.clk', start_cycle=0, end_cycle=3
         )
         base = reader.load_waveform(
-            'TOP.tb.packed_nonzero', clock='TOP.tb.clk', begin_cycle=0, end_cycle=3
+            'TOP.tb.packed_nonzero', clock='TOP.tb.clk', start_cycle=0, end_cycle=3
         )
         view = reader.load_waveform(
-            'TOP.tb.packed_nonzero[6:5]', clock='TOP.tb.clk', begin_cycle=0, end_cycle=3
+            'TOP.tb.packed_nonzero[6:5]', clock='TOP.tb.clk', start_cycle=0, end_cycle=3
         )
         matched = reader.get_matched_signals('TOP.tb.packed_nonzero[6:5]')[()]
         masks = reader.load_matched_unknown_masks(
-            'TOP.tb.packed_nonzero[6:5]', 'TOP.tb.clk', begin_cycle=0, end_cycle=3
+            'TOP.tb.packed_nonzero[6:5]', 'TOP.tb.clk', start_cycle=0, end_cycle=3
         )
 
     assert np.array_equal(full.value, np.array([0b1100, 0b1010, 0b0101], dtype=np.uint64))
@@ -316,98 +316,98 @@ def test_vcd_reader_packed_range_directions(compare_vcd_path):
         desc_nonzero_signal = reader.get_matched_signals('compare_tb.dut.unit_a.desc_nonzero')[()]
 
         asc_zero = reader.load_waveform(
-            'compare_tb.dut.unit_a.asc_zero', clock='compare_tb.clk', begin_cycle=1, end_cycle=4
+            'compare_tb.dut.unit_a.asc_zero', clock='compare_tb.clk', start_cycle=1, end_cycle=4
         )
         asc_nonzero = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_nonzero',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         desc_nonzero = reader.load_waveform(
             'compare_tb.dut.unit_a.desc_nonzero',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
 
         asc_zero_left = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_zero[0:1]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         asc_zero_right = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_zero[2:3]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         asc_nonzero_left = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_nonzero[1:2]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         asc_nonzero_right = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_nonzero[2:3]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         desc_nonzero_left = reader.load_waveform(
             'compare_tb.dut.unit_a.desc_nonzero[3:2]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         desc_nonzero_right = reader.load_waveform(
             'compare_tb.dut.unit_a.desc_nonzero[2:1]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
 
         asc_zero_msb = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_zero[0]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         asc_zero_lsb = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_zero[3]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         asc_nonzero_msb = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_nonzero[1]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         asc_nonzero_lsb = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_nonzero[3]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         desc_nonzero_msb = reader.load_waveform(
             'compare_tb.dut.unit_a.desc_nonzero[3]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         desc_nonzero_lsb = reader.load_waveform(
             'compare_tb.dut.unit_a.desc_nonzero[1]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         matched = reader.load_matched_waveforms(
             'compare_tb.dut.unit_{a,b}.asc_nonzero[1:2]',
             'compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
 
@@ -619,7 +619,7 @@ def test_vcd_reader_load_unknown_mask_include_flags(compare_xz_vcd_path):
     assert np.array_equal(both.value, np.array([0, 15, 15, 2, 5, 0], dtype=np.uint64))
     assert np.array_equal(x_only.value, np.array([0, 15, 0, 2, 1, 0], dtype=np.uint64))
     assert np.array_equal(z_only.value, np.array([0, 0, 15, 0, 4, 0], dtype=np.uint64))
-    assert np.array_equal(both.clock, values.clock)
+    assert np.array_equal(both.cycle, values.cycle)
     assert np.array_equal(both.time, values.time)
 
 
@@ -656,7 +656,7 @@ def test_vcd_reader_load_unknown_mask_fully_known_is_zero(compare_xz_vcd_path):
     with VcdReader(str(compare_xz_vcd_path)) as reader:
         # data_0 is fully known at cycle 0 (mask bit pattern all zero there)
         mask = reader.load_unknown_mask(
-            'compare_xz_tb.data_0[3:0]', clock='compare_xz_tb.clk', begin_cycle=0, end_cycle=1
+            'compare_xz_tb.data_0[3:0]', clock='compare_xz_tb.clk', start_cycle=0, end_cycle=1
         )
 
     assert np.array_equal(mask.value, np.array([0], dtype=np.uint64))
@@ -759,10 +759,10 @@ def test_vcd_reader_verilator_composites_expose_structs_as_scopes(unknown_vcd_pa
 def test_vcd_reader_verilator_packed_struct_member_reads(unknown_vcd_path):
     with VcdReader(str(unknown_vcd_path)) as reader:
         valid = reader.load_waveform(
-            'TOP.tb.pkt.valid', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.pkt.valid', clock='TOP.tb.clk', start_cycle=1, end_cycle=6
         )
         data = reader.load_waveform(
-            'TOP.tb.pkt.data[2:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.pkt.data[2:0]', clock='TOP.tb.clk', start_cycle=1, end_cycle=6
         )
 
     assert np.array_equal(valid.value, np.array([1, 1, 0, 1, 0], dtype=np.uint64))
@@ -773,19 +773,19 @@ def test_vcd_reader_verilator_packed_struct_member_reads(unknown_vcd_path):
 def test_vcd_reader_verilator_logic_array_element_reads(unknown_vcd_path):
     with VcdReader(str(unknown_vcd_path)) as reader:
         packed_0 = reader.load_waveform(
-            'TOP.tb.packed_arr[0][2:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.packed_arr[0][2:0]', clock='TOP.tb.clk', start_cycle=1, end_cycle=6
         )
         packed_10 = reader.load_waveform(
-            'TOP.tb.packed_arr[10][2:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.packed_arr[10][2:0]', clock='TOP.tb.clk', start_cycle=1, end_cycle=6
         )
         unpacked_0 = reader.load_waveform(
-            'TOP.tb.unpacked_arr[0][10:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.unpacked_arr[0][10:0]', clock='TOP.tb.clk', start_cycle=1, end_cycle=6
         )
         unpacked_1 = reader.load_waveform(
-            'TOP.tb.unpacked_arr[1][10:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.unpacked_arr[1][10:0]', clock='TOP.tb.clk', start_cycle=1, end_cycle=6
         )
         unpacked_2 = reader.load_waveform(
-            'TOP.tb.unpacked_arr[2][10:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.unpacked_arr[2][10:0]', clock='TOP.tb.clk', start_cycle=1, end_cycle=6
         )
 
     assert np.array_equal(packed_0.value, np.array([1, 2, 3, 4, 5], dtype=np.uint64))
@@ -798,28 +798,28 @@ def test_vcd_reader_verilator_logic_array_element_reads(unknown_vcd_path):
 def test_vcd_reader_verilator_struct_array_member_reads(unknown_vcd_path):
     with VcdReader(str(unknown_vcd_path)) as reader:
         pkt_arr_0_valid = reader.load_waveform(
-            'TOP.tb.pkt_arr[0].valid', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.pkt_arr[0].valid', clock='TOP.tb.clk', start_cycle=1, end_cycle=6
         )
         pkt_arr_0_data = reader.load_waveform(
-            'TOP.tb.pkt_arr[0].data[2:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.pkt_arr[0].data[2:0]', clock='TOP.tb.clk', start_cycle=1, end_cycle=6
         )
         pkt_arr_1_valid = reader.load_waveform(
-            'TOP.tb.pkt_arr[1].valid', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.pkt_arr[1].valid', clock='TOP.tb.clk', start_cycle=1, end_cycle=6
         )
         pkt_arr_1_data = reader.load_waveform(
-            'TOP.tb.pkt_arr[1].data[2:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.pkt_arr[1].data[2:0]', clock='TOP.tb.clk', start_cycle=1, end_cycle=6
         )
         packed_0_valid = reader.load_waveform(
-            'TOP.tb.pkt_packed_arr[0].valid', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.pkt_packed_arr[0].valid', clock='TOP.tb.clk', start_cycle=1, end_cycle=6
         )
         packed_0_data = reader.load_waveform(
-            'TOP.tb.pkt_packed_arr[0].data[2:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.pkt_packed_arr[0].data[2:0]', clock='TOP.tb.clk', start_cycle=1, end_cycle=6
         )
         packed_1_valid = reader.load_waveform(
-            'TOP.tb.pkt_packed_arr[1].valid', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.pkt_packed_arr[1].valid', clock='TOP.tb.clk', start_cycle=1, end_cycle=6
         )
         packed_1_data = reader.load_waveform(
-            'TOP.tb.pkt_packed_arr[1].data[2:0]', clock='TOP.tb.clk', begin_cycle=1, end_cycle=6
+            'TOP.tb.pkt_packed_arr[1].data[2:0]', clock='TOP.tb.clk', start_cycle=1, end_cycle=6
         )
 
     assert np.array_equal(pkt_arr_0_valid.value, np.array([1, 1, 0, 1, 0], dtype=np.uint64))
@@ -883,13 +883,13 @@ def test_vcd_eval_nested_function_and_window(compare_vcd_path):
         result = reader.eval(
             'rising_edge(compare_tb.rst_n)',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=5,
         )
         rst_n = reader.load_waveform(
             'compare_tb.rst_n',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=5,
         )
 
@@ -967,15 +967,16 @@ def test_vcd_eval_zip_mode_broadcast(vcd_path):
 
 
 # ------------------------------------------------------------------
-# begin_time / end_time / begin_cycle / end_cycle tests (jtag.vcd)
+# start_time / end_time / start_cycle / end_cycle tests (jtag.vcd)
 # ------------------------------------------------------------------
 
 
-def test_vcd_begin_end_time(vcd_path):
+def test_vcd_window_time(vcd_path):
     with VcdReader(str(vcd_path)) as reader:
+        assert reader.start_time == 0
         full = reader.load_waveform('tb.u0.J_state[3:0]', clock='tb.tck')
         windowed = reader.load_waveform(
-            'tb.u0.J_state[3:0]', clock='tb.tck', begin_time=105, end_time=205
+            'tb.u0.J_state[3:0]', clock='tb.tck', start_time=105, end_time=205
         )
 
     # Windowed result should be a strict subset of the full waveform
@@ -983,39 +984,39 @@ def test_vcd_begin_end_time(vcd_path):
     assert windowed.time[0] == 105
     assert windowed.time[-1] == 195
     # Clock values are absolute: cycle 10 is at time 105 (negedge 0 at t=5, period=10)
-    assert windowed.clock[0] == 10
-    assert windowed.clock[-1] == 19
+    assert windowed.cycle[0] == 10
+    assert windowed.cycle[-1] == 19
     # Values should match the corresponding slice of the full waveform
     assert np.array_equal(windowed.value, full.value[10:20])
 
 
-def test_vcd_begin_end_cycle(vcd_path):
+def test_vcd_window_cycle(vcd_path):
     with VcdReader(str(vcd_path)) as reader:
         full = reader.load_waveform('tb.u0.J_state[3:0]', clock='tb.tck')
         windowed = reader.load_waveform(
-            'tb.u0.J_state[3:0]', clock='tb.tck', begin_cycle=10, end_cycle=20
+            'tb.u0.J_state[3:0]', clock='tb.tck', start_cycle=10, end_cycle=20
         )
 
     assert len(windowed.value) == 10
-    assert windowed.clock[0] == 10
-    assert windowed.clock[-1] == 19
+    assert windowed.cycle[0] == 10
+    assert windowed.cycle[-1] == 19
     assert np.array_equal(windowed.value, full.value[10:20])
 
 
 def test_vcd_cycle_equals_time_window(vcd_path):
-    # begin_cycle=20 / end_cycle=30 should produce identical results to the
-    # corresponding begin_time / end_time window (cycle 20 is at time 205)
+    # start_cycle=20 / end_cycle=30 should produce identical results to the
+    # corresponding start_time / end_time window (cycle 20 is at time 205)
     with VcdReader(str(vcd_path)) as reader:
         full = reader.load_waveform('tb.u0.J_state[3:0]', clock='tb.tck')
         by_time = reader.load_waveform(
-            'tb.u0.J_state[3:0]', clock='tb.tck', begin_time=205, end_time=305
+            'tb.u0.J_state[3:0]', clock='tb.tck', start_time=205, end_time=305
         )
         by_cycle = reader.load_waveform(
-            'tb.u0.J_state[3:0]', clock='tb.tck', begin_cycle=20, end_cycle=30
+            'tb.u0.J_state[3:0]', clock='tb.tck', start_cycle=20, end_cycle=30
         )
 
     assert np.array_equal(by_time.value, by_cycle.value)
-    assert np.array_equal(by_time.clock, by_cycle.clock)
+    assert np.array_equal(by_time.cycle, by_cycle.cycle)
     assert np.array_equal(by_time.time, by_cycle.time)
     assert np.array_equal(by_cycle.value, full.value[20:30])
 
@@ -1026,8 +1027,8 @@ def test_vcd_mutually_exclusive_errors(vcd_path):
             reader.load_waveform(
                 'tb.u0.J_state[3:0]',
                 clock='tb.tck',
-                begin_time=100,
-                begin_cycle=10,
+                start_time=100,
+                start_cycle=10,
             )
         with pytest.raises(ValueError, match='mutually exclusive'):
             reader.load_waveform(
@@ -1056,13 +1057,13 @@ def test_vcd_value_change_to_waveform_sample_on_posedge():
     )
 
     assert np.all(wave.value == np.array([1, 0]))
-    assert np.all(wave.clock == np.array([0, 1]))
+    assert np.all(wave.cycle == np.array([0, 1]))
     assert np.all(wave.time == np.array([5, 15]))
     assert wave.signal is None
 
 
 def test_vcd_value_change_to_waveform_clock_offset():
-    # Verify that clock_offset shifts the .clock array to start from a given value
+    # Verify that clock_offset shifts the .cycle array to start from a given value
     value_change = np.array([[0, 0], [5, 1], [10, 0]], dtype=np.uint64)
     clock_changes = np.array([[0, 0], [5, 1], [10, 0], [15, 1]], dtype=np.uint64)
 
@@ -1082,8 +1083,8 @@ def test_vcd_value_change_to_waveform_clock_offset():
         clock_offset=50,
     )
 
-    assert np.all(wave_no_offset.clock == np.array([0, 1]))
-    assert np.all(wave_with_offset.clock == np.array([50, 51]))
+    assert np.all(wave_no_offset.cycle == np.array([0, 1]))
+    assert np.all(wave_with_offset.cycle == np.array([50, 51]))
     # Values are the same regardless of offset
     assert np.array_equal(wave_no_offset.value, wave_with_offset.value)
 
@@ -1099,18 +1100,18 @@ def test_vcd_cycle_slice(vcd_path):
 
     sliced = full.cycle_slice(10, 20)
     assert len(sliced.value) == 10
-    assert sliced.clock[0] == 10
-    assert sliced.clock[-1] == 19
+    assert sliced.cycle[0] == 10
+    assert sliced.cycle[-1] == 19
     assert np.array_equal(sliced.value, full.value[10:20])
 
 
-def test_vcd_cycle_slice_include_end(vcd_path):
+def test_vcd_cycle_slice_end_inclusive_window(vcd_path):
     with VcdReader(str(vcd_path)) as reader:
         full = reader.load_waveform('tb.u0.J_state[3:0]', clock='tb.tck')
 
-    sliced = full.cycle_slice(10, 20, include_end=True)
+    sliced = full.cycle_slice(10, 20 + 1)
     assert len(sliced.value) == 11
-    assert sliced.clock[-1] == 20
+    assert sliced.cycle[-1] == 20
 
 
 def test_vcd_recursive_wildcard_lowering_preserves_capture(compare_vcd_path):

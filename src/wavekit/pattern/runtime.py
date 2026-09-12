@@ -121,7 +121,7 @@ class PatternContext:
         Parameters
         ----------
         waveform:
-            Waveform to read. It must share the same clock axis as other observed
+            Waveform to read. It must share the same cycle axis as other observed
             pattern waveforms.
         offset:
             Relative sample offset from ``ctx.index``. ``0`` reads the current
@@ -142,17 +142,17 @@ class PatternContext:
         Parameters
         ----------
         waveform:
-            Waveform whose clock axis is read and validated.
+            Waveform whose cycle axis is read and validated.
         offset:
             Relative sample offset from ``ctx.index``.
 
         Returns
         -------
         Any
-            Scalar value from ``waveform.clock[ctx.index + offset]``.
+            Scalar value from ``waveform.cycle[ctx.index + offset]``.
         """
         index = self._waveform_index(waveform, offset)
-        return waveform.clock[index]
+        return waveform.cycle[index]
 
     def time(self, waveform: Waveform, offset: int = 0) -> Any:
         """Return a waveform timestamp at the current sample plus *offset*.
@@ -400,14 +400,14 @@ class PatternRuntime:
         if self._start_cycle is None:
             return 0
         axis = self._require_axis()
-        return int(np.searchsorted(axis.clock, self._start_cycle))
+        return int(np.searchsorted(axis.cycle, self._start_cycle))
 
     @cached_property
     def scan_end_index(self) -> int:
         axis = self._require_axis()
         if self._end_cycle is None:
             return len(axis.value)
-        return int(np.searchsorted(axis.clock, self._end_cycle))
+        return int(np.searchsorted(axis.cycle, self._end_cycle))
 
     def match(self, start_cycle: int | None = None, end_cycle: int | None = None) -> MatchRecords:
         completed = self._run(start_cycle, end_cycle)
@@ -426,20 +426,20 @@ class PatternRuntime:
                 continue
             raise PatternError(
                 f'Pattern failed with {inst.status}; '
-                f'start_cycle={axis.clock[inst.start_index]}, '
-                f'failure_cycle={axis.clock[inst.end_index]}'
+                f'start_cycle={axis.cycle[inst.start_index]}, '
+                f'failure_cycle={axis.cycle[inst.end_index]}'
             )
         return [inst.return_value for inst in completed if inst.return_value is not None]
 
     def _records(self, completed: list[PatternInstance]) -> MatchRecords:
         axis = self._require_axis()
-        completed.sort(key=lambda i: (int(axis.clock[i.start_index]), i.order))
+        completed.sort(key=lambda i: (int(axis.cycle[i.start_index]), i.order))
         start_index_arr = np.array([i.start_index for i in completed], dtype=np.int64)
         end_index_arr = np.array([i.end_index for i in completed], dtype=np.int64)
         start_cycle_arr = np.array(
-            [int(axis.clock[i.start_index]) for i in completed], dtype=np.int64
+            [int(axis.cycle[i.start_index]) for i in completed], dtype=np.int64
         )
-        end_cycle_arr = np.array([int(axis.clock[i.end_index]) for i in completed], dtype=np.int64)
+        end_cycle_arr = np.array([int(axis.cycle[i.end_index]) for i in completed], dtype=np.int64)
         start_time_arr = np.array(
             [int(axis.time[i.start_index]) for i in completed], dtype=np.int64
         )
@@ -493,10 +493,10 @@ class PatternRuntime:
             self._axis = waveform
             self._validated_waveform_ids.add(waveform_id)
             return
-        if len(waveform.clock) != len(self._axis.clock):
-            raise PatternError('Waveform clock arrays have different lengths')
-        if not np.array_equal(waveform.clock, self._axis.clock):
-            raise PatternError('Waveform clock arrays are not aligned')
+        if len(waveform.cycle) != len(self._axis.cycle):
+            raise PatternError('Waveform cycle arrays have different lengths')
+        if not np.array_equal(waveform.cycle, self._axis.cycle):
+            raise PatternError('Waveform cycle arrays are not aligned')
         self._validated_waveform_ids.add(waveform_id)
 
     def resolve_channel(

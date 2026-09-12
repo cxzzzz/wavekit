@@ -128,7 +128,7 @@ pattern = (
 `end` 对应的周期也包含在匹配范围内。需要提取某次匹配对应的波形窗口时，使用：
 
 ```python
-cycle_slice(start.clock, end.clock + 1)
+cycle_slice(start.cycle, end.cycle + 1)
 ```
 
 可使用以下方法筛选记录：

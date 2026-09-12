@@ -7,6 +7,34 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Changed (breaking)
+
+- Rename `Waveform.clock` to `Waveform.cycle` for the absolute clock-cycle
+  axis; a read-only deprecated `Waveform.clock` property still returns
+  `cycle`. The `Waveform.data` recarray field `clock` is renamed to `cycle`
+  accordingly, and the `Waveform(clock=...)` constructor keyword becomes
+  `cycle=` (positional calls are unaffected).
+- Rename reader window parameters `begin_time` / `begin_cycle` to
+  `start_time` / `start_cycle` in `load_waveform`, `load_unknown_mask`,
+  `load_matched_waveforms`, `load_matched_unknown_masks`, and `eval`
+  (`end_time` / `end_cycle` are unchanged).
+- Rename reader metadata property `begin_time` to `start_time`
+  (inclusive, matching `end_time`).
+- Rename `Waveform.slice` parameters `begin_idx` / `end_idx` to
+  `start_index` / `end_index`, and `time_slice` / `cycle_slice` parameters
+  `begin_time` / `end_time` / `begin_cycle` / `end_cycle` to
+  `start_time` / `end_time` / `start_cycle` / `end_cycle`.
+- Remove the `include_end` parameter from `Waveform.slice`,
+  `time_slice`, and `cycle_slice`. All selection windows are now
+  uniformly half-open `[start, end)`; replace `include_end=True` with
+  an end bound of `last + 1` (e.g. `cycle_slice(10, 20 + 1)`).
+
+### Added
+
+- Allow omitting `Waveform.slice()` bounds: `start_index` and `end_index`
+  default to `None`, following Python slicing semantics
+  (`wave.slice(2)`, `wave.slice(end_index=5)`).
+
 ## v0.7.3 - 2026-08-28
 
 ### Changed
