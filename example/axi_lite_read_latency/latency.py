@@ -23,5 +23,5 @@ with VcdReader('axi_lite_tb.vcd') as reader:
     )
 
     ok = result.filter_ok()
-    print('AXI-Lite read latency (cycles):', list(ok.end.clock - ok.start.clock))
+    print('AXI-Lite read latency (cycles):', list(ok.end.cycle - ok.start.cycle))
     print('AXI-Lite read data:', [int(value) for value in ok.captures['rdata'].value])

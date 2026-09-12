@@ -27,8 +27,8 @@ before opening an FSDB file.
 `load_waveform(signal, clock, ...)` samples the selected signal on every edge of
 the clock. By default, wavekit samples on the falling edge to reduce errors
 caused by sampling during signal transitions. Pass
-`sample_on_posedge=True` to sample on rising edges. Use `begin_time` and
-`end_time` for timestamp windows, or `begin_cycle` and `end_cycle` for absolute
+`sample_on_posedge=True` to sample on rising edges. Use `start_time` and
+`end_time` for timestamp windows, or `start_cycle` and `end_cycle` for absolute
 clock-cycle windows. Time and cycle windows cannot be mixed.
 
 Waveforms used together for arithmetic, masking, or pattern matching must

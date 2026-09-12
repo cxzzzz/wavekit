@@ -9,9 +9,9 @@ from wavekit.expression import evaluate_expression, parse_expression
 
 def build_waveform(values, width=8, signed=False):
     value = np.array(values)
-    clock = np.arange(len(value))
-    time = clock * 10
-    return Waveform(value, clock, time, width=width, signed=signed)
+    cycle = np.arange(len(value))
+    time = cycle * 10
+    return Waveform(value, cycle=cycle, time=time, width=width, signed=signed)
 
 
 def evaluate_source_expression(expr, waveforms):
@@ -22,7 +22,7 @@ def evaluate_source_expression(expr, waveforms):
 
 def assert_same_waveform(actual, expected):
     assert np.array_equal(actual.value, expected.value)
-    assert np.array_equal(actual.clock, expected.clock)
+    assert np.array_equal(actual.cycle, expected.cycle)
     assert np.array_equal(actual.time, expected.time)
     assert actual.width == expected.width
     assert actual.signed == expected.signed
@@ -212,7 +212,7 @@ def test_evaluate_expression_registered_nested_functions():
     )
 
     assert np.array_equal(result.value, np.array([0, 0, 0, 1]))
-    assert np.array_equal(result.clock, valid.clock)
+    assert np.array_equal(result.cycle, valid.cycle)
     assert np.array_equal(result.time, valid.time)
 
 

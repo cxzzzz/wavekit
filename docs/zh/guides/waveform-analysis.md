@@ -3,10 +3,10 @@
 `Waveform` 由三个相互对齐的数组组成：
 
 - `.value`：采样得到的信号值；
-- `.clock`：绝对时钟周期号，从文件中的第一个采样边沿开始计为周期 0；
+- `.cycle`：绝对时钟周期号，从文件中的第一个采样边沿开始计为周期 0；
 - `.time`：波形文件中的时间戳，单位沿用文件的原生时间单位。
 
-Waveform 操作会返回新的 `Waveform` 对象。对采样点进行过滤或变换时，返回结果会保留 clock 和 time 轴，因此仍然可以与原始仿真中的周期和时间对应。
+Waveform 操作会返回新的 `Waveform` 对象。对采样点进行过滤或变换时，返回结果会保留 cycle 和 time 轴，因此仍然可以与原始仿真中的周期和时间对应。
 
 ## 加载并操作波形
 
@@ -40,10 +40,10 @@ known = data.filter(lambda value: value != 0)
 active = data.mask(valid == 1)
 
 first_cycles = data.cycle_slice(0, 100)
-window = data.time_slice(begin=10_000, end=20_000)
+window = data.time_slice(start_time=10_000, end_time=20_000)
 ```
 
-默认情况下，`cycle_slice(begin, end)` 和 `time_slice(begin, end)` 使用半开区间，包含起点但不包含终点。它们的边界分别是绝对周期号和仿真时间戳，不是数组下标。需要按数组下标操作时，使用 `slice()` 或 `take()`。
+默认情况下，`cycle_slice(start, end)` 和 `time_slice(start, end)` 使用半开区间，包含起点但不包含终点。它们的边界分别是绝对周期号和仿真时间戳，不是数组下标。需要按数组下标操作时，使用 `slice()` 或 `take()`。
 
 ## 访问相邻样本
 
@@ -99,7 +99,7 @@ majority = Waveform.merge(
 
 ```python
 occupancy_changes = occupancy.changed()
-change_cycles = occupancy_changes.clock[occupancy_changes.value]
+change_cycles = occupancy_changes.cycle[occupancy_changes.value]
 ```
 
 对于单比特信号，可以使用 `rising_edge()` 和 `falling_edge()` 找到有效区间的起止位置：

@@ -6,9 +6,9 @@ from wavekit import Waveform
 
 def build_waveform(values, width, signed=False):
     value = np.array(values)
-    clock = np.arange(len(value))
-    time = clock * 10
-    return Waveform(value, clock, time, width=width, signed=signed)
+    cycle = np.arange(len(value))
+    time = cycle * 10
+    return Waveform(value, cycle=cycle, time=time, width=width, signed=signed)
 
 
 # ==========================================
@@ -24,10 +24,15 @@ def test_metadata_and_copy():
 
     record = wave.data
     assert len(record) == 3
-    assert record.dtype.names == ('time', 'clock', 'value')
+    assert record.dtype.names == ('time', 'cycle', 'value')
     assert np.all(record['time'] == wave.time)
-    assert np.all(record['clock'] == wave.clock)
+    assert np.all(record['cycle'] == wave.cycle)
     assert np.all(record['value'] == wave.value)
+
+    # Deprecated read-only alias: .clock returns the .cycle array.
+    assert wave.clock is wave.cycle
+    with pytest.raises(AttributeError):
+        wave.clock = np.arange(3)
 
     copied = wave.copy()
     copied.value[0] = 99
@@ -188,15 +193,14 @@ def test_getitem_errors():
 
 def test_time_slice():
     wave = build_waveform([1, 2, 3, 4], width=8)
-    # time = clock * 10 -> [0, 10, 20, 30]
+    # time = cycle * 10 -> [0, 10, 20, 30]
 
-    sliced = wave.time_slice(begin_time=10, end_time=20)
+    sliced = wave.time_slice(10, 20)
     assert np.all(sliced.time == np.array([10]))
     assert np.all(sliced.value == np.array([2]))
 
-    sliced_inclusive = wave.time_slice(begin_time=10, end_time=20, include_end=True)
-    assert np.all(sliced_inclusive.time == np.array([10, 20]))
-    assert np.all(sliced_inclusive.value == np.array([2, 3]))
+    sliced_all = wave.time_slice(10, 30 + 1)
+    assert np.all(sliced_all.time == np.array([10, 20, 30]))
 
 
 def test_slice_by_index():
@@ -206,16 +210,23 @@ def test_slice_by_index():
     assert np.all(index_slice.time == np.array([10]))
     assert np.all(index_slice.value == np.array([2]))
 
-    index_slice_inclusive = wave.slice(1, 2, include_end=True)
-    assert np.all(index_slice_inclusive.time == np.array([10, 20]))
-    assert np.all(index_slice_inclusive.value == np.array([2, 3]))
+    index_slice2 = wave.slice(1, 3)
+    assert np.all(index_slice2.time == np.array([10, 20]))
+    assert np.all(index_slice2.value == np.array([2, 3]))
+
+    # None endpoints follow Python slicing semantics
+    from_start = wave.slice(2)
+    assert np.all(from_start.value == np.array([3, 4]))
+    to_end = wave.slice(end_index=2)
+    assert np.all(to_end.value == np.array([1, 2]))
+    assert wave.slice().value.shape == wave.value.shape
 
 
 def test_take_by_indices():
     wave = build_waveform([1, 2, 3, 4], width=8)
     taken = wave.take([0, 2])
     assert np.all(taken.value == np.array([1, 3]))
-    assert np.all(taken.clock == np.array([0, 2]))
+    assert np.all(taken.cycle == np.array([0, 2]))
 
     with pytest.raises(TypeError):
         wave.take(np.array([True, False, True, False]))
@@ -245,7 +256,7 @@ def test_mask_with_waveform():
     mask_vals = np.array([False, True, False, True], dtype=np.bool_)
     mask_wave = Waveform(
         value=mask_vals,
-        clock=wave.clock,
+        cycle=wave.cycle,
         time=wave.time,
         width=1,
         signed=False,
@@ -297,7 +308,7 @@ def test_map():
     assert np.all(mapped.value == np.array([2, 3, 4, 5]))
     assert mapped.width == 9
     assert mapped.signed is True
-    assert np.all(mapped.clock == wave.clock)
+    assert np.all(mapped.cycle == wave.cycle)
     assert np.all(mapped.time == wave.time)
 
 
@@ -326,7 +337,7 @@ def test_changed_detects_any_width_value_changes():
     changed = wave.changed()
 
     assert np.array_equal(changed.value, np.array([0, 0, 1, 0, 1]))
-    assert np.array_equal(changed.clock, wave.clock)
+    assert np.array_equal(changed.cycle, wave.cycle)
     assert np.array_equal(changed.time, wave.time)
     assert changed.width == 1
     assert changed.signed is False
@@ -439,7 +450,7 @@ def test_stable_uses_offline_two_state_semantics():
 
     stable = wave.stable()
     assert np.array_equal(stable.value, np.array([1, 1, 0, 1, 0]))
-    assert np.array_equal(stable.clock, wave.clock)
+    assert np.array_equal(stable.cycle, wave.cycle)
     assert np.array_equal(stable.time, wave.time)
     assert stable.width == 1
     assert stable.signed is False
@@ -599,9 +610,9 @@ def test_relative_pad_value():
 def test_relative_pad_value_string():
     """Test relative() with string pad_value for string-typed signals."""
     value = np.array(['a', 'b', 'c', 'd'], dtype=object)
-    clock = np.arange(len(value))
-    time = clock * 10
-    wave = Waveform(value, clock, time, width=None, signed=False)
+    cycle = np.arange(len(value))
+    time = cycle * 10
+    wave = Waveform(value, cycle=cycle, time=time, width=None, signed=False)
 
     result = wave.relative(1, pad='value', pad_value='X')
     assert np.all(result.value == np.array(['b', 'c', 'd', 'X'], dtype=object))
@@ -659,11 +670,11 @@ def test_relative_preserves_clock_time():
     wave = build_waveform([1, 2, 3, 4, 5], width=8)
 
     result = wave.relative(2)
-    assert np.array_equal(result.clock, wave.clock)
+    assert np.array_equal(result.cycle, wave.cycle)
     assert np.array_equal(result.time, wave.time)
 
     result = wave.relative(-2)
-    assert np.array_equal(result.clock, wave.clock)
+    assert np.array_equal(result.cycle, wave.cycle)
     assert np.array_equal(result.time, wave.time)
 
 
@@ -745,7 +756,7 @@ def test_relational_comparison_waveform_and_scalar():
     for result in (wave < 2, wave <= 2, wave > 2, wave >= 2):
         assert result.width == 1
         assert result.signed is False
-        assert np.array_equal(result.clock, wave.clock)
+        assert np.array_equal(result.cycle, wave.cycle)
         assert np.array_equal(result.time, wave.time)
 
     assert np.array_equal((wave < 2).value, np.array([1, 0, 0]))

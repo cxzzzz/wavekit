@@ -118,12 +118,12 @@ class FstReader(Reader):
         self,
         signal: Signal,
         value_mapping: dict[str, int],
-        begin_time: int | None = None,
+        start_time: int | None = None,
         end_time: int | None = None,
     ) -> np.ndarray:
         """Load mapped FST value changes with an optional time window.
 
-        ``begin_time`` retains the last value change at or before the window
+        ``start_time`` retains the last value change at or before the window
         start so the caller can reconstruct the signal value at that time.
         ``end_time`` is exclusive. Range-to-raw mapping is calculated once
         before iterating over value changes.
@@ -177,9 +177,9 @@ class FstReader(Reader):
         )
 
         times = [time for time, _ in changes]
-        begin_index = 0 if begin_time is None else max(0, bisect_right(times, begin_time) - 1)
+        start_index = 0 if start_time is None else max(0, bisect_right(times, start_time) - 1)
         end_index = len(changes) if end_time is None else bisect_left(times, end_time)
-        windowed_changes = changes[begin_index:end_index]
+        windowed_changes = changes[start_index:end_index]
 
         dtype = np.object_ if signal.width > 64 else np.uint64
         pairs = [(time, decode(raw)) for time, raw in windowed_changes]
@@ -193,7 +193,7 @@ class FstReader(Reader):
         return self._top_scopes
 
     @cached_property
-    def begin_time(self) -> int:
+    def start_time(self) -> int:
         """Return the first timestamp stored in the FST file."""
         return int(pylibfst.lib.fstReaderGetStartTime(self.file_handle))
 

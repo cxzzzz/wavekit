@@ -90,9 +90,9 @@ class Reader:
         xz_value: int = 0,
         signed: bool = False,
         sample_on_posedge: bool = False,
-        begin_time: int | None = None,
+        start_time: int | None = None,
         end_time: int | None = None,
-        begin_cycle: int | None = None,
+        start_cycle: int | None = None,
         end_cycle: int | None = None,
     ) -> Waveform:
         """Load a single signal as a clock-synchronised ``Waveform``.
@@ -122,16 +122,16 @@ class Reader:
         sample_on_posedge:
             If ``True``, sample on rising clock edges; otherwise on falling
             edges (default).
-        begin_time:
+        start_time:
             Simulation time to start loading from (inclusive).  ``None`` means
-            start of simulation.  Mutually exclusive with *begin_cycle*.
+            start of simulation.  Mutually exclusive with *start_cycle*.
         end_time:
             Simulation time to stop loading at (exclusive).  ``None`` means
             end of simulation.  Mutually exclusive with *end_cycle*.
-        begin_cycle:
+        start_cycle:
             Absolute clock cycle number to start loading from (inclusive).
             ``None`` means start of simulation.  Mutually exclusive with
-            *begin_time*.  The clock is always loaded from time 0 so cycle
+            *start_time*.  The clock is always loaded from time 0 so cycle
             numbers are absolute and comparable across different waveforms.
         end_cycle:
             Absolute clock cycle number to stop loading at (exclusive).
@@ -142,14 +142,14 @@ class Reader:
         -------
         Waveform:
             One sample per clock edge within the requested window.  The
-            ``.clock`` array contains absolute cycle numbers from the start
+            ``.cycle`` array contains absolute cycle numbers from the start
             of simulation.  ``waveform.signal.full_name`` records the resolved
             signal path when source metadata is available.
 
         Raises
         ------
         ValueError:
-            If both *begin_time* and *begin_cycle* (or both *end_time* and
+            If both *start_time* and *start_cycle* (or both *end_time* and
             *end_cycle*) are provided simultaneously.
         """
         self._validate_xz_value(xz_value)
@@ -162,9 +162,9 @@ class Reader:
             value_mapping=value_mapping,
             signed=signed,
             sample_on_posedge=sample_on_posedge,
-            begin_time=begin_time,
+            start_time=start_time,
             end_time=end_time,
-            begin_cycle=begin_cycle,
+            start_cycle=start_cycle,
             end_cycle=end_cycle,
         )
         wf.signal = resolved_signal
@@ -179,9 +179,9 @@ class Reader:
         include_x: bool = True,
         include_z: bool = True,
         sample_on_posedge: bool = False,
-        begin_time: int | None = None,
+        start_time: int | None = None,
         end_time: int | None = None,
-        begin_cycle: int | None = None,
+        start_cycle: int | None = None,
         end_cycle: int | None = None,
     ) -> Waveform:
         """Load source X/Z presence as an unsigned bitmask waveform.
@@ -202,7 +202,7 @@ class Reader:
             If ``True`` (default), mark source ``X``/``x`` bits.
         include_z:
             If ``True`` (default), mark source ``Z``/``z`` bits.
-        sample_on_posedge, begin_time, end_time, begin_cycle, end_cycle:
+        sample_on_posedge, start_time, end_time, start_cycle, end_cycle:
             Same sampling/windowing semantics as ``load_waveform``.
 
         Returns
@@ -225,9 +225,9 @@ class Reader:
             value_mapping=value_mapping,
             signed=False,
             sample_on_posedge=sample_on_posedge,
-            begin_time=begin_time,
+            start_time=start_time,
             end_time=end_time,
-            begin_cycle=begin_cycle,
+            start_cycle=start_cycle,
             end_cycle=end_cycle,
         )
         wf.signal = resolved_signal
@@ -258,7 +258,7 @@ class Reader:
 
         return Waveform(
             value=value,
-            clock=clock,
+            cycle=clock,
             time=time,
             width=width,
             signed=signed,
@@ -269,7 +269,7 @@ class Reader:
         self,
         signal: Signal,
         value_mapping: dict[str, int],
-        begin_time: int | None = None,
+        start_time: int | None = None,
         end_time: int | None = None,
     ) -> np.ndarray:
         """Load raw value changes for a signal.
@@ -285,7 +285,7 @@ class Reader:
             native handles or dumped references required for loading.
         value_mapping:
             Character-to-bit mapping, e.g. ``{'0': 0, '1': 1, 'x': 0, 'z': 0}``.
-        begin_time:
+        start_time:
             Optional earliest time to include (inclusive).
         end_time:
             Optional latest time to include (exclusive).
@@ -298,9 +298,9 @@ class Reader:
         value_mapping: dict[str, int],
         signed: bool,
         sample_on_posedge: bool,
-        begin_time: int | None,
+        start_time: int | None,
         end_time: int | None,
-        begin_cycle: int | None,
+        start_cycle: int | None,
         end_cycle: int | None,
     ) -> Waveform:
         """Sample *signal* on every *clock* edge and return a raw Waveform.
@@ -309,8 +309,8 @@ class Reader:
         The returned Waveform is a simple value array — naming is handled by
         the caller.
         """
-        if begin_time is not None and begin_cycle is not None:
-            raise ValueError('begin_time and begin_cycle are mutually exclusive')
+        if start_time is not None and start_cycle is not None:
+            raise ValueError('start_time and start_cycle are mutually exclusive')
         if end_time is not None and end_cycle is not None:
             raise ValueError('end_time and end_cycle are mutually exclusive')
 
@@ -326,13 +326,13 @@ class Reader:
             edge_kind = 'pos' if sample_on_posedge else 'neg'
             raise ValueError(f'no {edge_kind}edges found in clock signal')
 
-        # Convert begin_cycle/end_cycle to begin_time/end_time
-        if begin_cycle is not None:
-            if begin_cycle >= len(clock_edge_times):
+        # Convert start_cycle/end_cycle to start_time/end_time
+        if start_cycle is not None:
+            if start_cycle >= len(clock_edge_times):
                 raise ValueError(
-                    f'begin_cycle {begin_cycle} out of range (max {len(clock_edge_times) - 1})'
+                    f'start_cycle {start_cycle} out of range (max {len(clock_edge_times) - 1})'
                 )
-            begin_time = int(clock_edge_times[begin_cycle])
+            start_time = int(clock_edge_times[start_cycle])
         if end_cycle is not None:
             if end_cycle > len(clock_edge_times):
                 raise ValueError(
@@ -341,18 +341,18 @@ class Reader:
             if end_cycle < len(clock_edge_times):
                 end_time = int(clock_edge_times[end_cycle])
 
-        # Compute clock_offset = number of sampling edges before begin_time
-        begin_time = begin_time if begin_time is not None else 0
+        # Compute clock_offset = number of sampling edges before start_time
+        start_time = start_time if start_time is not None else 0
         clock_offset = int(
             np.searchsorted(
                 clock_edge_times,
-                begin_time,
+                start_time,
                 side='left',
             )
         )
 
-        # Trim clock to window [begin_time, end_time)
-        clock_mask = all_clock_changes[:, 0] >= begin_time
+        # Trim clock to window [start_time, end_time)
+        clock_mask = all_clock_changes[:, 0] >= start_time
         if end_time is not None:
             clock_mask &= all_clock_changes[:, 0] < end_time
         windowed_clock_changes = all_clock_changes[clock_mask]
@@ -361,7 +361,7 @@ class Reader:
         signal_value_change = self._load_value_changes(
             signal,
             value_mapping,
-            begin_time=begin_time,
+            start_time=start_time,
             end_time=end_time,
         )
 
@@ -557,9 +557,9 @@ class Reader:
         xz_value: int = 0,
         signed: bool = False,
         sample_on_posedge: bool = False,
-        begin_time: int | None = None,
+        start_time: int | None = None,
         end_time: int | None = None,
-        begin_cycle: int | None = None,
+        start_cycle: int | None = None,
         end_cycle: int | None = None,
         root_scope: Scope | None = None,
     ) -> dict[tuple[Capture, ...], Waveform]:
@@ -582,7 +582,7 @@ class Reader:
             Signal query path.  See class docstring.
         clock_path:
             Clock signal query path.  Must match at least one signal.
-        xz_value, signed, sample_on_posedge, begin_time, end_time, begin_cycle, end_cycle:
+        xz_value, signed, sample_on_posedge, start_time, end_time, start_cycle, end_cycle:
             Forwarded to ``load_waveform`` for every loaded signal.
         root_scope:
             If provided, both *signal_path* and *clock_path* are searched within
@@ -606,9 +606,9 @@ class Reader:
             xz_value=xz_value,
             signed=signed,
             sample_on_posedge=sample_on_posedge,
-            begin_time=begin_time,
+            start_time=start_time,
             end_time=end_time,
-            begin_cycle=begin_cycle,
+            start_cycle=start_cycle,
             end_cycle=end_cycle,
         )
         return {
@@ -623,9 +623,9 @@ class Reader:
         include_x: bool = True,
         include_z: bool = True,
         sample_on_posedge: bool = False,
-        begin_time: int | None = None,
+        start_time: int | None = None,
         end_time: int | None = None,
-        begin_cycle: int | None = None,
+        start_cycle: int | None = None,
         end_cycle: int | None = None,
         root_scope: Scope | None = None,
     ) -> dict[tuple[Capture, ...], Waveform]:
@@ -645,7 +645,7 @@ class Reader:
             If ``True`` (default), mark source ``X``/``x`` bits.
         include_z:
             If ``True`` (default), mark source ``Z``/``z`` bits.
-        sample_on_posedge, begin_time, end_time, begin_cycle, end_cycle:
+        sample_on_posedge, start_time, end_time, start_cycle, end_cycle:
             Same sampling/windowing semantics as ``load_waveform``.
         root_scope:
             If provided, both *signal_path* and *clock_path* are searched within
@@ -661,9 +661,9 @@ class Reader:
             include_x=include_x,
             include_z=include_z,
             sample_on_posedge=sample_on_posedge,
-            begin_time=begin_time,
+            start_time=start_time,
             end_time=end_time,
-            begin_cycle=begin_cycle,
+            start_cycle=start_cycle,
             end_cycle=end_cycle,
         )
         matched_signals = self.get_matched_signals(signal_path, root_scope=root_scope)
@@ -738,9 +738,9 @@ class Reader:
         xz_value: int = 0,
         signed: bool = False,
         sample_on_posedge: bool = False,
-        begin_time: int | None = None,
+        start_time: int | None = None,
         end_time: int | None = None,
-        begin_cycle: int | None = None,
+        start_cycle: int | None = None,
         end_cycle: int | None = None,
         mode: Literal['single', 'zip'] = 'single',
         root_scope: Scope | None = None,
@@ -754,7 +754,7 @@ class Reader:
             arguments to registered expression functions.
         clock:
             Clock signal used for all waveform loads.
-        xz_value, signed, sample_on_posedge, begin_time, end_time, begin_cycle,
+        xz_value, signed, sample_on_posedge, start_time, end_time, start_cycle,
         end_cycle:
             Forwarded to ``load_matched_waveforms`` for every path.
         mode:
@@ -775,9 +775,9 @@ class Reader:
             xz_value=xz_value,
             signed=signed,
             sample_on_posedge=sample_on_posedge,
-            begin_time=begin_time,
+            start_time=start_time,
             end_time=end_time,
-            begin_cycle=begin_cycle,
+            start_cycle=start_cycle,
             end_cycle=end_cycle,
             root_scope=root_scope,
         )

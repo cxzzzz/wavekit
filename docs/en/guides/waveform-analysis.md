@@ -3,11 +3,11 @@
 A `Waveform` contains three aligned arrays:
 
 - `.value`: sampled signal values;
-- `.clock`: absolute clock-cycle numbers, starting at cycle 0 for the first
+- `.cycle`: absolute clock-cycle numbers, starting at cycle 0 for the first
   sampling edge in the file;
 - `.time`: timestamps in the waveform file's native time unit.
 
-Operations return new `Waveform` objects. They preserve the clock and time axes
+Operations return new `Waveform` objects. They preserve the cycle and time axes
 when filtering or transforming samples, so analysis results can still be traced
 back to the original simulation.
 
@@ -48,10 +48,10 @@ known = data.filter(lambda value: value != 0)
 active = data.mask(valid == 1)
 
 first_cycles = data.cycle_slice(0, 100)
-window = data.time_slice(begin=10_000, end=20_000)
+window = data.time_slice(start_time=10_000, end_time=20_000)
 ```
 
-By default, `cycle_slice(begin, end)` and `time_slice(begin, end)` use a
+By default, `cycle_slice(start, end)` and `time_slice(start, end)` use a
 half-open range: the start is included and the end is excluded. Their bounds are
 absolute cycle numbers or simulation timestamps, not array indices. Use
 `slice()` or `take()` when you need array-index operations.
@@ -114,7 +114,7 @@ Use `changed()` to detect value changes in signals of any width:
 
 ```python
 occupancy_changes = occupancy.changed()
-change_cycles = occupancy_changes.clock[occupancy_changes.value]
+change_cycles = occupancy_changes.cycle[occupancy_changes.value]
 ```
 
 For one-bit signals, use `rising_edge()` and `falling_edge()` to locate the

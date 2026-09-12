@@ -38,7 +38,7 @@ def _by_group(results, group):
 
 def _assert_same_waveform(actual, expected):
     assert np.array_equal(actual.value, expected.value)
-    assert np.array_equal(actual.clock, expected.clock)
+    assert np.array_equal(actual.cycle, expected.cycle)
     assert np.array_equal(actual.time, expected.time)
     assert actual.width == expected.width
     assert actual.signed == expected.signed
@@ -241,98 +241,98 @@ def test_fsdb_reader_packed_range_directions(compare_fsdb):
         desc_nonzero_signal = reader.get_matched_signals('compare_tb.dut.unit_a.desc_nonzero')[()]
 
         asc_zero = reader.load_waveform(
-            'compare_tb.dut.unit_a.asc_zero', clock='compare_tb.clk', begin_cycle=1, end_cycle=4
+            'compare_tb.dut.unit_a.asc_zero', clock='compare_tb.clk', start_cycle=1, end_cycle=4
         )
         asc_nonzero = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_nonzero',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         desc_nonzero = reader.load_waveform(
             'compare_tb.dut.unit_a.desc_nonzero',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
 
         asc_zero_left = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_zero[0:1]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         asc_zero_right = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_zero[2:3]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         asc_nonzero_left = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_nonzero[1:2]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         asc_nonzero_right = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_nonzero[2:3]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         desc_nonzero_left = reader.load_waveform(
             'compare_tb.dut.unit_a.desc_nonzero[3:2]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         desc_nonzero_right = reader.load_waveform(
             'compare_tb.dut.unit_a.desc_nonzero[2:1]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
 
         asc_zero_msb = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_zero[0]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         asc_zero_lsb = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_zero[3]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         asc_nonzero_msb = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_nonzero[1]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         asc_nonzero_lsb = reader.load_waveform(
             'compare_tb.dut.unit_a.asc_nonzero[3]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         desc_nonzero_msb = reader.load_waveform(
             'compare_tb.dut.unit_a.desc_nonzero[3]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         desc_nonzero_lsb = reader.load_waveform(
             'compare_tb.dut.unit_a.desc_nonzero[1]',
             clock='compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
         matched = reader.load_matched_waveforms(
             'compare_tb.dut.unit_{a,b}.asc_nonzero[1:2]',
             'compare_tb.clk',
-            begin_cycle=1,
+            start_cycle=1,
             end_cycle=4,
         )
 
@@ -428,7 +428,7 @@ def test_fsdb_reader_load_waveform_without_range(fsdb_runtime):
     assert data.width == 4
     assert data.signed is False
     assert len(data.value) > 0
-    assert np.array_equal(data.clock[:5], np.arange(5, dtype=np.uint64))
+    assert np.array_equal(data.cycle[:5], np.arange(5, dtype=np.uint64))
 
 
 def test_fsdb_reader_subrange_load(fsdb_runtime):
@@ -672,7 +672,7 @@ def test_fsdb_reader_load_unknown_mask_include_flags(compare_xz_fsdb):
     assert np.array_equal(both.value, np.array([0, 15, 15, 2, 5, 0], dtype=np.uint64))
     assert np.array_equal(x_only.value, np.array([0, 15, 0, 2, 1, 0], dtype=np.uint64))
     assert np.array_equal(z_only.value, np.array([0, 0, 15, 0, 4, 0], dtype=np.uint64))
-    assert np.array_equal(both.clock, values.clock)
+    assert np.array_equal(both.cycle, values.cycle)
     assert np.array_equal(both.time, values.time)
 
 
@@ -709,7 +709,7 @@ def test_fsdb_reader_load_unknown_mask_fully_known_is_zero(compare_xz_fsdb):
     with FsdbReader(str(compare_xz_fsdb)) as reader:
         # data_0 is fully known at cycle 0 (mask bit pattern all zero there)
         mask = reader.load_unknown_mask(
-            'compare_xz_tb.data_0[3:0]', clock='compare_xz_tb.clk', begin_cycle=0, end_cycle=1
+            'compare_xz_tb.data_0[3:0]', clock='compare_xz_tb.clk', start_cycle=0, end_cycle=1
         )
 
     assert np.array_equal(mask.value, np.array([0], dtype=np.uint64))
@@ -885,7 +885,7 @@ def test_fsdb_reader_packed_struct_whole_and_fields(fsdb_runtime):
     assert np.array_equal(pkt.value, np.array([0, 0, 0b1001, 0b1010, 0b0111, 0b1100]))
     assert np.array_equal(valid.value, (pkt.value >> 3) & 0x1)
     assert np.array_equal(data.value, pkt.value & 0x7)
-    assert np.array_equal(valid.clock, pkt.clock)
+    assert np.array_equal(valid.cycle, pkt.cycle)
     assert np.array_equal(data.time, pkt.time)
 
 
@@ -913,7 +913,7 @@ def test_fsdb_reader_union_members(fsdb_runtime):
     assert np.array_equal(raw.value, np.array([0, 0, 0x9, 0xA, 0x7, 0xC]))
     assert np.array_equal(valid.value, (raw.value >> 3) & 0x1)
     assert np.array_equal(data.value, raw.value & 0x7)
-    assert np.array_equal(valid.clock, raw.clock)
+    assert np.array_equal(valid.cycle, raw.cycle)
     assert np.array_equal(data.time, raw.time)
 
 
@@ -1102,17 +1102,18 @@ def test_fsdb_eval_zip_mode_broadcast(compare_fsdb):
 
 
 # ------------------------------------------------------------------
-# begin_time / end_time / begin_cycle / end_cycle tests (compare.fsdb)
+# start_time / end_time / start_cycle / end_cycle tests (compare.fsdb)
 # ------------------------------------------------------------------
 
 
-def test_fsdb_load_waveform_begin_end_time(compare_fsdb):
+def test_fsdb_load_waveform_start_end_time(compare_fsdb):
     with FsdbReader(str(compare_fsdb)) as reader:
+        assert reader.start_time == 0
         full = reader.load_waveform('compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk')
         windowed = reader.load_waveform(
             'compare_tb.dut.unit_a.data[7:0]',
             clock='compare_tb.clk',
-            begin_time=100,
+            start_time=100,
             end_time=200,
         )
 
@@ -1121,25 +1122,25 @@ def test_fsdb_load_waveform_begin_end_time(compare_fsdb):
     assert windowed.time[0] == 100
     assert windowed.time[-1] == 190
     # Clock values are absolute: cycle 10 is at time 100 (period=10)
-    assert windowed.clock[0] == 10
-    assert windowed.clock[-1] == 19
+    assert windowed.cycle[0] == 10
+    assert windowed.cycle[-1] == 19
     # Values should match the corresponding slice of the full waveform
     assert np.array_equal(windowed.value, full.value[10:20])
 
 
-def test_fsdb_load_waveform_begin_end_cycle(compare_fsdb):
+def test_fsdb_load_waveform_window_cycle(compare_fsdb):
     with FsdbReader(str(compare_fsdb)) as reader:
         full = reader.load_waveform('compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk')
         windowed = reader.load_waveform(
             'compare_tb.dut.unit_a.data[7:0]',
             clock='compare_tb.clk',
-            begin_cycle=10,
+            start_cycle=10,
             end_cycle=20,
         )
 
     assert len(windowed.value) == 10
-    assert windowed.clock[0] == 10
-    assert windowed.clock[-1] == 19
+    assert windowed.cycle[0] == 10
+    assert windowed.cycle[-1] == 19
     assert np.array_equal(windowed.value, full.value[10:20])
 
 
@@ -1147,7 +1148,7 @@ def test_fsdb_reader_mutually_exclusive_errors(fsdb_runtime):
     with FsdbReader(str(fsdb_runtime)) as reader:
         with pytest.raises(ValueError, match='mutually exclusive'):
             reader.load_waveform(
-                'simple_tb.dut.data_o[3:0]', clock='simple_tb.clk', begin_time=0, begin_cycle=0
+                'simple_tb.dut.data_o[3:0]', clock='simple_tb.clk', start_time=0, start_cycle=0
             )
         with pytest.raises(ValueError, match='mutually exclusive'):
             reader.load_waveform(
@@ -1166,15 +1167,15 @@ def test_fsdb_cycle_slice(compare_fsdb):
 
     sliced = full.cycle_slice(10, 20)
     assert len(sliced.value) == 10
-    assert sliced.clock[0] == 10
-    assert sliced.clock[-1] == 19
+    assert sliced.cycle[0] == 10
+    assert sliced.cycle[-1] == 19
     assert np.array_equal(sliced.value, full.value[10:20])
 
 
-def test_fsdb_cycle_slice_include_end(compare_fsdb):
+def test_fsdb_cycle_slice_end_inclusive_window(compare_fsdb):
     with FsdbReader(str(compare_fsdb)) as reader:
         full = reader.load_waveform('compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk')
 
-    sliced = full.cycle_slice(10, 20, include_end=True)
+    sliced = full.cycle_slice(10, 20 + 1)
     assert len(sliced.value) == 11
-    assert sliced.clock[-1] == 20
+    assert sliced.cycle[-1] == 20

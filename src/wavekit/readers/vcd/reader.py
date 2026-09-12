@@ -104,7 +104,7 @@ class VcdReader(Reader):
         )
 
     @property
-    def begin_time(self) -> int:
+    def start_time(self) -> int:
         """Return the first timestamp stored in the VCD file."""
         return self.file_handle.begintime
 
@@ -117,12 +117,12 @@ class VcdReader(Reader):
         self,
         signal: Signal,
         value_mapping: dict[str, int],
-        begin_time: int | None = None,
+        start_time: int | None = None,
         end_time: int | None = None,
     ) -> np.ndarray:
         """Load mapped VCD value changes with an optional time window.
 
-        ``begin_time`` retains the last value change at or before the window
+        ``start_time`` retains the last value change at or before the window
         start so the caller can reconstruct the signal value at that time.
         ``end_time`` is exclusive. Range-to-raw mapping is calculated once
         before iterating over value changes.
@@ -162,9 +162,9 @@ class VcdReader(Reader):
 
         tv = signal_handle.tv
         times = [time for time, _ in tv]
-        begin_index = 0 if begin_time is None else max(0, bisect_right(times, begin_time) - 1)
+        start_index = 0 if start_time is None else max(0, bisect_right(times, start_time) - 1)
         end_index = len(tv) if end_time is None else bisect_left(times, end_time)
-        windowed_tv = tv[begin_index:end_index]
+        windowed_tv = tv[start_index:end_index]
 
         dtype = np.object_ if signal.width > 64 else np.uint64
         pairs = [(time, decode(raw)) for time, raw in windowed_tv]
