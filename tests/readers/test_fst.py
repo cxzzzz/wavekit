@@ -85,6 +85,52 @@ def test_fst_reader_exported():
     assert FstReader.__name__ == 'FstReader'
 
 
+def test_fst_reader_dict_lookup(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        scope = reader['compare_tb.dut.unit_a']
+        signal = reader['compare_tb.dut.unit_a.data']
+        selected = reader['compare_tb.dut.unit_a.data[3:0]']
+        array_member = reader['compare_tb.dut.unit_a.unpacked_arr[1]']
+
+        assert scope.full_name == 'compare_tb.dut.unit_a'
+        assert signal.full_name == 'compare_tb.dut.unit_a.data[7:0]'
+        assert selected.range == Range(3, 0)
+        assert array_member.full_name == 'compare_tb.dut.unit_a.unpacked_arr[1][7:0]'
+
+        with pytest.raises(KeyError, match="'compare_tb.missing' not found in hierarchy"):
+            reader['compare_tb.missing']
+        with pytest.raises(KeyError, match='dict lookup requires an exact path'):
+            reader['compare_tb.dut.unit_{a,b}.data']
+
+
+def test_fst_reader_dict_lookup_nested_composite(unknown_fst_path):
+    with FstReader(str(unknown_fst_path)) as reader:
+        member = reader['TOP']['tb']['pkt']['valid']
+        via_path = reader['TOP.tb.pkt.valid']
+        via_multi = reader['TOP.tb']['pkt_arr[0].valid']
+        via_multi_node = reader['TOP.tb']['pkt_arr[0]']['valid']
+
+        assert member.full_name == 'TOP.tb.pkt.valid'
+        assert member.full_name == via_path.full_name
+        assert via_multi.full_name == 'TOP.tb.pkt_arr[0].valid'
+        assert via_multi.full_name == via_multi_node.full_name
+        with pytest.raises(KeyError, match="'missing' not found under 'TOP.tb.pkt'"):
+            reader['TOP.tb.pkt']['missing']
+
+
+def test_fst_reader_signal_bit_selection(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        signal = reader.get_signal('compare_tb.dut.unit_a.data')
+
+        assert signal[5].range == Range(5, 5)
+        assert signal[7:4].range == Range(7, 4)
+        assert signal[5].full_name == 'compare_tb.dut.unit_a.data[5]'
+        with pytest.raises(TypeError, match='does not support range selection'):
+            reader['compare_tb.dut.unit_a.unpacked_arr'][1:0]
+        with pytest.raises(KeyError, match="'missing' not found under"):
+            signal['missing']
+
+
 def test_fst_reader_top_scopes(compare_fst_path):
     with FstReader(str(compare_fst_path)) as reader:
         top = reader.top_scopes

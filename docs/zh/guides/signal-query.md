@@ -21,6 +21,40 @@ signal = reader.get_signal('tb.dut.data')
 scope = reader.get_scope('tb.dut')
 ```
 
+## 字典式访问
+
+`reader[path]` 返回精确路径上的 `Signal` 或 `Scope`——命中哪个返回哪个；未命中时抛出 `KeyError`：
+
+```python
+signal = reader['tb.dut.data']
+scope = reader['tb.dut']
+selected = reader['tb.dut.data[31:16]']  # 末尾范围选择器
+```
+
+Scope 和复合信号（struct、array）支持同样的相对路径查找，链式访问和多级路径均可：
+
+```python
+tb = reader['tb']
+signal = tb['dut']['data']        # 逐级链式访问
+signal = tb['dut.data']           # 等价的相对点分路径
+member = tb['pkt']['valid']       # 经复合信号访问 struct 成员
+```
+
+在信号上，整数或切片下标用于选择位，与 `Waveform` 下标相同的 Verilog 风格 `high:low` 语义：
+
+```python
+bit = signal[7]        # 单个位
+field = signal[31:16]  # 一段范围
+```
+
+`reader[path]` 返回的是 `Signal`，而不是波形数据。要得到采样后的波形，需要把信号传给 `load_waveform()`（并指定时钟）：
+
+```python
+wave = reader.load_waveform(reader['tb.dut.data'], clock='tb.clk')
+```
+
+已知具体信号名时，使用字典式访问比较方便；名称遵循某种族结构、需要批量匹配时，请使用下一节的 pattern 查询。
+
 ## 批量加载
 
 当设计中有一组名称有规律的信号时，可以使用 `load_matched_waveforms()` 一次加载它们。

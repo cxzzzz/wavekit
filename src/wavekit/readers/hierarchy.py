@@ -50,6 +50,22 @@ class Node(ABC):
             return f'{self.base_name}{self.range}'
         return self.base_name
 
+    def __getitem__(self, path: str) -> Node:
+        """Return the child ``Signal`` or ``Scope`` at the relative dotted *path*."""
+        if not isinstance(path, str):
+            raise KeyError(
+                f'{self.full_name!r} lookup requires a string path, ' f'got {type(path).__name__}'
+            )
+        matched = self.get_matched_nodes(path)
+        if not matched:
+            raise KeyError(f'{path!r} not found under {self.full_name!r}')
+        if list(matched) != [()]:
+            raise KeyError(
+                f'{path!r}: dict lookup requires an exact path; '
+                'use get_matched_nodes() for pattern queries'
+            )
+        return matched[()]
+
     @property
     def is_range_selectable(self) -> bool:
         """Return whether this node supports a trailing bit-range selection."""
@@ -363,3 +379,15 @@ class Signal(Node):
             )
 
         return dataclasses.replace(self, range=selected_range)
+
+    def __getitem__(self, key: int | slice | str) -> Signal:
+        """Return a bit-selected view, or a composite member for a string path."""
+        if isinstance(key, str):
+            return cast(Signal, super().__getitem__(key))
+        if isinstance(key, slice):
+            if key.step is not None:
+                raise ValueError('bit selection does not support a step')
+            if key.start is None or key.stop is None:
+                raise ValueError('bit selection requires explicit high and low bounds')
+            return self.with_range(Range(key.start, key.stop))
+        return self.with_range(Range(key, key))

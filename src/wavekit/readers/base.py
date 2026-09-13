@@ -83,6 +83,18 @@ class Reader:
         # exception wont be suppressed
         return False
 
+    def __getitem__(self, path: str) -> Node:
+        """Return the ``Signal`` or ``Scope`` at an exact dotted *path*."""
+        matched = self.get_matched_nodes(path)
+        if not matched:
+            raise KeyError(f'{path!r} not found in hierarchy')
+        if list(matched) != [()]:
+            raise KeyError(
+                f'{path!r}: dict lookup requires an exact path; '
+                'use get_matched_nodes() for pattern queries'
+            )
+        return matched[()]
+
     def load_waveform(
         self,
         signal: Signal | str,
@@ -474,6 +486,20 @@ class Reader:
         if not matched:
             raise ValueError(f"scope '{path}' not found")
         return cast(Scope, next(iter(matched.values())))
+
+    def get_matched_nodes(
+        self,
+        path: str,
+        root_scope: Scope | None = None,
+    ) -> dict[tuple[Capture, ...], Node]:
+        """Return all nodes whose paths match *path*, keyed by captures.
+
+        Like ``get_matched_signals`` / ``get_matched_scopes`` but returns
+        every matching node regardless of kind — signals, scopes, and
+        composite signals alike.
+        """
+        search_root = root_scope or _SearchRoot(self.top_scopes)
+        return search_root.get_matched_nodes(path)
 
     def get_matched_signals(
         self,

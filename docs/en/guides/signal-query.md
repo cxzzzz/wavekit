@@ -26,6 +26,47 @@ scope = reader.get_scope('tb.dut')
 ```
 
 
+## Dict-style access
+
+`reader[path]` returns the `Signal` or `Scope` at an exact path — whichever
+is there — and raises `KeyError` when nothing matches:
+
+```python
+signal = reader['tb.dut.data']
+scope = reader['tb.dut']
+selected = reader['tb.dut.data[31:16]']  # trailing range selector
+```
+
+Scopes and composite signals (structs, arrays) support the same lookup with
+relative paths, so chains and multi-component paths both work:
+
+```python
+tb = reader['tb']
+signal = tb['dut']['data']        # chain through nested nodes
+signal = tb['dut.data']           # equivalent relative dotted path
+member = tb['pkt']['valid']       # struct member through a composite signal
+```
+
+On a signal, an integer or slice key selects bits, with the same
+Verilog-style `high:low` semantics as `Waveform` indexing:
+
+```python
+bit = signal[7]        # one bit
+field = signal[31:16]  # a range
+```
+
+`reader[path]` returns a `Signal`, not waveform data. Pass the signal to
+`load_waveform()` (with a clock) to sample it:
+
+```python
+wave = reader.load_waveform(reader['tb.dut.data'], clock='tb.clk')
+```
+
+Use dict-style access when you know the concrete names you want; use the
+pattern queries in the next section when the names follow a family structure
+you want to match in bulk.
+
+
 ## Batch loading
 
 When a design contains a family of signals with related names, use
