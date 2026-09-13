@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from wavekit import FstReader, Scope, Signal, Waveform
+from wavekit.readers.hierarchy import SignalCompositeType
 from wavekit.readers.range import Range
 
 
@@ -47,6 +48,11 @@ def fst_path():
 @pytest.fixture()
 def compare_fst_path():
     return Path(__file__).resolve().parent / 'fixtures' / 'fst' / 'compare.fst'
+
+
+@pytest.fixture()
+def compare_vcd_path():
+    return Path(__file__).resolve().parent / 'fixtures' / 'vcd' / 'compare.vcd'
 
 
 @pytest.fixture()
@@ -115,11 +121,13 @@ def test_fst_reader_native_range_metadata(nonzero_fst_path):
     assert signals['packed_vec'].native_range == Range(3, 0)
     assert signals['packed_nonzero'].native_range == Range(7, 4)
     assert signals['packed_nonzero'].range == Range(7, 4)
-    assert signals['packed_arr[10]'].native_range == Range(2, 0)
-    assert signals['packed_arr[10]'].range == Range(2, 0)
-    assert signals['arr_elem[10][0]'].width == 1
-    assert signals['arr_elem[10][0]'].range is None
-    assert signals['arr_elem[10][0]'].native_range is None
+    packed_arr_members = {sig.base_name: sig for sig in signals['packed_arr'].children}
+    assert packed_arr_members['packed_arr[10]'].native_range == Range(2, 0)
+    assert packed_arr_members['packed_arr[10]'].range == Range(2, 0)
+    arr_elem_members = {sig.base_name: sig for sig in signals['arr_elem'].children}
+    assert arr_elem_members['arr_elem[10]'].width == 2
+    assert arr_elem_members['arr_elem[10]'].range == Range(1, 0)
+    assert arr_elem_members['arr_elem[10]'].native_range == Range(1, 0)
     assert signals['zero_range'].full_name == 'TOP.tb.zero_range[0]'
     assert signals['zero_range'].range == Range(0, 0)
     assert signals['zero_range'].native_range == Range(0, 0)
@@ -653,21 +661,26 @@ def test_fst_reader_verilator_composites_expose_structs_as_scopes(unknown_fst_pa
     assert 'pkt[3:0]' not in signals
     assert 'packed_arr[32:0]' not in signals
     assert 'pkt_packed_arr[7:0]' not in signals
-    assert signals['packed_arr[0]'].width == 3
-    assert signals['packed_arr[0]'].native_range == Range(2, 0)
-    assert signals['packed_arr[0]'].composite_type is None
-    assert signals['packed_arr[10]'].width == 3
-    assert signals['unpacked_arr[0]'].width == 11
-    assert signals['unpacked_arr[1]'].composite_type is None
-    assert set(children) == {
-        'pkt',
-        'pkt_arr[0]',
-        'pkt_arr[1]',
-        'pkt_packed_arr[0]',
-        'pkt_packed_arr[1]',
-    }
-    assert {sig.base_name for sig in _signals(children['pkt'])} == {'valid', 'data'}
-    assert all(sig.composite_type is None for sig in _signals(children['pkt']))
+    packed_arr = signals['packed_arr']
+    assert packed_arr.composite_type == SignalCompositeType.ARRAY
+    assert packed_arr.range == Range(10, 0)
+    assert packed_arr.width == 33
+    packed_members = {sig.base_name: sig for sig in packed_arr.children}
+    assert packed_members['packed_arr[0]'].width == 3
+    assert packed_members['packed_arr[0]'].native_range == Range(2, 0)
+    assert packed_members['packed_arr[0]'].composite_type is None
+    assert packed_members['packed_arr[10]'].width == 3
+    unpacked_arr = signals['unpacked_arr']
+    assert unpacked_arr.composite_type == SignalCompositeType.ARRAY
+    assert unpacked_arr.range == Range(2, 0)
+    assert unpacked_arr.width == 33
+    unpacked_members = {sig.base_name: sig for sig in unpacked_arr.children}
+    assert unpacked_members['unpacked_arr[0]'].width == 11
+    assert unpacked_members['unpacked_arr[1]'].composite_type is None
+    assert set(children) == set()
+    assert signals['pkt'].composite_type == SignalCompositeType.STRUCT
+    assert {sig.base_name for sig in signals['pkt'].children} == {'valid', 'data'}
+    assert all(sig.composite_type is None for sig in _signals(signals['pkt']))
 
 
 def test_fst_reader_verilator_packed_struct_member_reads(unknown_fst_path):
@@ -748,13 +761,11 @@ def test_fst_reader_verilator_struct_array_member_reads(unknown_fst_path):
 
 def test_fst_reader_verilator_whole_aggregate_reads_fail(unknown_fst_path):
     with FstReader(str(unknown_fst_path)) as reader:
-        for signal in [
-            'TOP.tb.pkt[3:0]',
-            'TOP.tb.packed_arr[32:0]',
-            'TOP.tb.pkt_arr[0]',
-            'TOP.tb.pkt_packed_arr[7:0]',
-        ]:
+        for signal in ['TOP.tb.pkt[3:0]', 'TOP.tb.packed_arr[32:0]', 'TOP.tb.pkt_packed_arr[7:0]']:
             with pytest.raises(ValueError, match='not found'):
+                reader.load_waveform(signal, clock='TOP.tb.clk')
+        for signal in ['TOP.tb.pkt', 'TOP.tb.pkt_arr[0]']:
+            with pytest.raises(NotImplementedError, match='composite'):
                 reader.load_waveform(signal, clock='TOP.tb.clk')
 
 
@@ -914,3 +925,38 @@ def test_fst_cycle_slice_end_inclusive_window(compare_fst_path):
     sliced = full.cycle_slice(10, 20 + 1)
     assert len(sliced.value) == 11
     assert sliced.cycle[-1] == 20
+
+
+def test_fst_reader_range_select_partial_values(compare_fst_path):
+    """Assert exact values for middle segments and nonzero-base partial selects."""
+    with FstReader(str(compare_fst_path)) as reader:
+        asc_middle = reader.load_waveform(
+            'compare_tb.dut.unit_a.asc_zero[1:2]',
+            clock='compare_tb.clk',
+            start_cycle=1,
+            end_cycle=4,
+        )
+        nz_inner = reader.load_waveform(
+            'compare_tb.dut.unit_a.nonzero_data[6:5]',
+            clock='compare_tb.clk',
+            start_cycle=1,
+            end_cycle=4,
+        )
+        nz_outer = reader.load_waveform(
+            'compare_tb.dut.unit_a.nonzero_data[5:4]',
+            clock='compare_tb.clk',
+            start_cycle=1,
+            end_cycle=4,
+        )
+
+    assert asc_middle.width == 2
+    assert np.array_equal(asc_middle.value, np.array([0b10, 0b01, 0b10], dtype=np.uint64))
+    assert nz_inner.width == 2
+    assert np.array_equal(nz_inner.value, np.array([0b10, 0b10, 0b10], dtype=np.uint64))
+    assert nz_outer.width == 2
+    assert np.array_equal(nz_outer.value, np.array([0b00, 0b00, 0b01], dtype=np.uint64))
+
+
+def test_fst_reader_rejects_vcd_file(compare_vcd_path):
+    with pytest.raises(RuntimeError, match='cannot open a VCD file'):
+        FstReader(str(compare_vcd_path))
