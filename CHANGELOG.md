@@ -28,6 +28,13 @@ and this project follows [Semantic Versioning](https://semver.org/).
   `time_slice`, and `cycle_slice`. All selection windows are now
   uniformly half-open `[start, end)`; replace `include_end=True` with
   an end bound of `last + 1` (e.g. `cycle_slice(10, 20 + 1)`).
+- Replace the `vcdvcd` / `pylibfst` backends of `VcdReader` and `FstReader`
+  with a shared wellen-based implementation backed by the new
+  `wavekit-pywellen` dependency;
+  loaded values and window semantics are unchanged.
+- VCD/FST hierarchy now follows the FSDB composite model: arrays appear as
+  ARRAY parent nodes instead of flat leaves, and FST structs/unions become
+  composite `Signal` nodes instead of `Scope` nodes.
 
 ### Added
 
