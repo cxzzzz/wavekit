@@ -9,6 +9,7 @@ try:
 except metadata.PackageNotFoundError:
     __version__ = 'unknown'
 
+from .readers.clock_domain import ClockDomain as ClockDomain
 from .readers.fst.reader import FstReader as FstReader
 from .readers.hierarchy import Node as Node
 from .readers.hierarchy import Scope as Scope

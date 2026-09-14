@@ -105,6 +105,20 @@ def test_fsdb_reader_exported(fsdb_runtime):
     assert FsdbReader.__name__ == 'FsdbReader'
 
 
+def test_fsdb_reader_clock_domain(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        expected = reader.load_waveform('simple_tb.data_i', clock='simple_tb.clk')
+        with reader.clock_domain(clock='simple_tb.clk'):
+            ambient = reader['simple_tb']['data_i'].w
+        assert np.array_equal(ambient.value, expected.value)
+
+        cd = reader.clock_domain(clock='simple_tb.clk')
+        explicit = reader.load_waveform('simple_tb.data_i', clock=cd)
+        assert np.array_equal(explicit.value, expected.value)
+        with pytest.raises(RuntimeError, match='requires an active clock domain'):
+            _ = reader['simple_tb']['data_i'].w
+
+
 def test_fsdb_reader_dict_lookup(fsdb_runtime):
     # Composite children are loaded lazily from NPI and require an open reader.
     with FsdbReader(str(fsdb_runtime)) as reader:

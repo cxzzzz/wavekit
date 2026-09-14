@@ -55,7 +55,7 @@ def _make_children(wellen_scope: Any, parent: Node) -> list[Node]:
     name gets the array's base name prepended: ``unpacked_arr`` + ``[0]``
     → ``unpacked_arr[0]``.
     """
-    # Only ARRAY parents flatten their members into the parent's name.
+    parent_reader = parent.reader
     name_prefix = (
         parent.base_name
         if isinstance(parent, Signal) and parent.composite_type == SignalCompositeType.ARRAY
@@ -79,6 +79,7 @@ def _make_children(wellen_scope: Any, parent: Node) -> list[Node]:
                 range=native_range,
                 native_range=native_range,
                 composite_type=None,
+                reader=parent_reader,
                 _wellen_var=wellen_var,
             )
         )
@@ -96,7 +97,12 @@ def _make_children(wellen_scope: Any, parent: Node) -> list[Node]:
         composite_type = composite_types.get(wellen_child.scope_type)
         if composite_type is None:
             nodes.append(
-                WellenScope(base_name=base_name, parent=parent, _wellen_scope=wellen_child)
+                WellenScope(
+                    base_name=base_name,
+                    parent=parent,
+                    reader=parent_reader,
+                    _wellen_scope=wellen_child,
+                )
             )
             continue
         array_range = None
@@ -121,6 +127,7 @@ def _make_children(wellen_scope: Any, parent: Node) -> list[Node]:
                 range=array_range,
                 native_range=array_range,
                 composite_type=composite_type,
+                reader=parent_reader,
                 _wellen_scope=wellen_child,
             )
         )
@@ -147,7 +154,9 @@ class WellenReader(Reader):
     def top_scopes(self) -> tuple[Scope, ...]:
         """Return immutable top-level scopes in the wellen hierarchy."""
         return tuple(
-            WellenScope(base_name=wellen_scope.name, parent=None, _wellen_scope=wellen_scope)
+            WellenScope(
+                base_name=wellen_scope.name, parent=None, reader=self, _wellen_scope=wellen_scope
+            )
             for wellen_scope in self.file_handle.scopes()
         )
 

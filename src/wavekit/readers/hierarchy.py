@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from .matcher import (
     Capture,
@@ -18,6 +18,10 @@ from .matcher import (
     parse_query_path,
 )
 from .range import Range
+
+if TYPE_CHECKING:
+    from ..waveform import Waveform
+    from .base import Reader
 
 
 class SignalCompositeType(Enum):
@@ -36,6 +40,7 @@ class Node(ABC):
 
     base_name: str
     parent: Node | None
+    reader: Reader = field(repr=False, compare=False)
     _recursive_match_cache: dict[Matcher, tuple[Node, ...]] = field(
         default_factory=dict,
         init=False,
@@ -284,7 +289,7 @@ class Scope(Node):
 class Signal(Node):
     """An immutable signal view, optionally narrowed by a selection range."""
 
-    range: Range | None
+    range: Range | None = None
     composite_type: SignalCompositeType | None = None
     native_range: Range | None = None
 
@@ -391,3 +396,41 @@ class Signal(Node):
                 raise ValueError('bit selection requires explicit high and low bounds')
             return self.with_range(Range(key.start, key.stop))
         return self.with_range(Range(key, key))
+
+    def waveform(self, xz_value: int = 0, signed: bool = False) -> Waveform:
+        """Load this signal as a ``Waveform`` using the ambient clock domain."""
+        from .clock_domain import ClockDomain
+
+        domain = ClockDomain.current()
+        if domain is None:
+            raise RuntimeError(
+                f'{self.full_name}.waveform() requires an active clock domain.\n'
+                f'  Enter one with:      with reader.clock_domain(clock=...):\n'
+                f'  Or load explicitly:  reader.load_waveform({self.full_name!r}, clock=...)'
+            )
+        return self.reader.load_waveform(self, clock=domain, xz_value=xz_value, signed=signed)
+
+    @property
+    def w(self) -> Waveform:
+        """Return ``waveform()`` with default parameters."""
+        return self.waveform()
+
+    def unknown_mask(self, include_x: bool = True, include_z: bool = True) -> Waveform:
+        """Load this signal's X/Z presence using the ambient clock domain."""
+        from .clock_domain import ClockDomain
+
+        domain = ClockDomain.current()
+        if domain is None:
+            raise RuntimeError(
+                f'{self.full_name}.unknown_mask() requires an active clock domain.\n'
+                f'  Enter one with:      with reader.clock_domain(clock=...):\n'
+                f'  Or load explicitly:  reader.load_unknown_mask({self.full_name!r}, clock=...)'
+            )
+        return self.reader.load_unknown_mask(
+            self, clock=domain, include_x=include_x, include_z=include_z
+        )
+
+    @property
+    def m(self) -> Waveform:
+        """Return ``unknown_mask()`` with default parameters."""
+        return self.unknown_mask()

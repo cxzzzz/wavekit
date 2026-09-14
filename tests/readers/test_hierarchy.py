@@ -6,6 +6,7 @@ from wavekit.readers.matcher import ExactCapture, ExactMatcher, WildcardCapture
 
 @dataclass(frozen=True, eq=False)
 class DefinitionScope(Scope):
+    reader: object | None = None  # mock trees never load waveforms
     module: str = ''
     _children: tuple[Node, ...] = field(default_factory=tuple)
 
