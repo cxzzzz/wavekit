@@ -51,11 +51,12 @@ def test_domain_is_reusable_value_and_context(vcd_path):
         cd = r.clock_domain(clock='compare_tb.clk')
         assert isinstance(cd, ClockDomain)
 
-        explicit = r.load_waveform('compare_tb.dut.counter', clock=cd)
         with cd:
-            ambient = r['compare_tb.dut.counter'].w
+            first = r['compare_tb.dut.counter'].w
+        with cd:
+            second = r['compare_tb.dut.counter'].w
 
-        assert np.array_equal(explicit.value, ambient.value)
+        assert np.array_equal(first.value, second.value)
 
 
 def test_nested_domains_restore_outer(vcd_path):
@@ -118,15 +119,11 @@ def test_domain_window_cycle_variant(vcd_path):
 def test_domain_window_exclusive_pair_validation(vcd_path):
     with _open(vcd_path) as r:
         with pytest.raises(ValueError, match='start_time and start_cycle are mutually exclusive'):
-            r.load_waveform(
-                'compare_tb.dut.counter',
-                clock=r.clock_domain(clock='compare_tb.clk', start_time=0, start_cycle=0),
-            )
+            with r.clock_domain(clock='compare_tb.clk', start_time=0, start_cycle=0):
+                _ = r['compare_tb.dut.counter'].w
         with pytest.raises(ValueError, match='end_time and end_cycle are mutually exclusive'):
-            r.load_waveform(
-                'compare_tb.dut.counter',
-                clock=r.clock_domain(clock='compare_tb.clk', end_time=0, end_cycle=0),
-            )
+            with r.clock_domain(clock='compare_tb.clk', end_time=0, end_cycle=0):
+                _ = r['compare_tb.dut.counter'].w
 
 
 def test_waveform_and_unknown_mask_signal_level_options(xz_vcd_path):
@@ -149,62 +146,6 @@ def test_waveform_and_unknown_mask_signal_level_options(xz_vcd_path):
             assert np.array_equal(default_mask.value, expected_default.value)
 
 
-def test_resolve_sampling_params_merges_domain_and_call(vcd_path):
-    with _open(vcd_path) as r:
-        cd = r.clock_domain(clock='compare_tb.clk')
-        merged = r.load_waveform('compare_tb.dut.counter', clock=cd, start_time=0, end_time=100)
-        expected = r.load_waveform(
-            'compare_tb.dut.counter', clock='compare_tb.clk', start_time=0, end_time=100
-        )
-        assert np.array_equal(merged.value, expected.value)
-
-        # domain value wins over the call-site default
-        cd_win = r.clock_domain(clock='compare_tb.clk', start_time=0, end_time=100)
-        domain_window = r.load_waveform('compare_tb.dut.counter', clock=cd_win)
-        assert len(domain_window.value) == len(expected.value)
-
-
-def test_resolve_sampling_params_conflict(vcd_path):
-    with _open(vcd_path) as r:
-        cd = r.clock_domain(clock='compare_tb.clk', start_time=0, end_time=100)
-        with pytest.raises(ValueError, match='start_time=5 conflicts with the clock domain'):
-            r.load_waveform('compare_tb.dut.counter', clock=cd, start_time=5)
-
-        # domain posedge wins over the unset call site; an explicit opposite is a conflict
-        cd_pos = r.clock_domain(clock='compare_tb.clk', sample_on_posedge=True)
-        posedge = r.load_waveform('compare_tb.dut.counter', clock=cd_pos)
-        assert len(posedge.value) > 0
-        cd_neg = r.clock_domain(clock='compare_tb.clk')
-        with pytest.raises(ValueError, match='sample_on_posedge=True conflicts'):
-            r.load_waveform('compare_tb.dut.counter', clock=cd_neg, sample_on_posedge=True)
-
-
-def test_load_matched_waveforms_accepts_domain(vcd_path):
-    with _open(vcd_path) as r:
-        cd = r.clock_domain(clock='compare_tb.clk')
-        matched = r.load_matched_waveforms('compare_tb.dut.{counter,status}', clock_path=cd)
-        by_path = r.load_matched_waveforms(
-            'compare_tb.dut.{counter,status}', clock_path='compare_tb.clk'
-        )
-
-        assert set(matched) == set(by_path)
-        for key in matched:
-            assert np.array_equal(matched[key].value, by_path[key].value)
-
-
-def test_load_matched_unknown_masks_accepts_domain(xz_vcd_path):
-    with _open(xz_vcd_path) as r:
-        cd = r.clock_domain(clock='compare_xz_tb.clk')
-        matched = r.load_matched_unknown_masks('compare_xz_tb.{data_0,data_1}', clock_path=cd)
-        by_path = r.load_matched_unknown_masks(
-            'compare_xz_tb.{data_0,data_1}', clock_path='compare_xz_tb.clk'
-        )
-
-        assert set(matched) == set(by_path)
-        for key in matched:
-            assert np.array_equal(matched[key].value, by_path[key].value)
-
-
 def test_clock_domain_on_fst_reader():
     with FstReader('tests/readers/fixtures/fst/compare.fst') as r:
         expected = r.load_waveform('compare_tb.dut.counter', clock='compare_tb.clk')
@@ -224,23 +165,83 @@ def test_bit_selected_signal_uses_domain(vcd_path):
         assert ambient.width == 2
 
 
-def test_resolve_sampling_params_passes_through_non_domain(vcd_path):
+def test_load_waveform_omitted_clock_uses_ambient(vcd_path):
     with _open(vcd_path) as r:
-        clock, options = r._resolve_sampling_params(
-            'compare_tb.clk', sample_on_posedge=False, start_time=None, end_time=None
+        expected = r.load_waveform('compare_tb.dut.counter', clock='compare_tb.clk')
+        with r.clock_domain(clock='compare_tb.clk'):
+            ambient = r.load_waveform('compare_tb.dut.counter')
+
+        assert np.array_equal(ambient.value, expected.value)
+
+
+def test_load_waveform_omitted_clock_uses_ambient_window(vcd_path):
+    with _open(vcd_path) as r:
+        full = r.load_waveform('compare_tb.dut.counter', clock='compare_tb.clk')
+        with r.clock_domain(clock='compare_tb.clk', start_cycle=0, end_cycle=5):
+            windowed = r.load_waveform('compare_tb.dut.counter')
+
+        assert len(windowed.value) == 5
+        assert len(windowed.value) < len(full.value)
+
+
+def test_load_waveform_omitted_clock_raises_outside_domain(vcd_path):
+    with _open(vcd_path) as r:
+        with pytest.raises(RuntimeError, match='requires an active clock domain'):
+            r.load_waveform('compare_tb.dut.counter')
+
+
+def test_load_waveform_explicit_clock_ignores_ambient(vcd_path):
+    with _open(vcd_path) as r:
+        expected = r.load_waveform('compare_tb.dut.counter', clock='compare_tb.clk')
+        with r.clock_domain(clock='compare_tb.clk', start_cycle=0, end_cycle=5):
+            explicit = r.load_waveform('compare_tb.dut.counter', clock='compare_tb.clk')
+
+        assert np.array_equal(explicit.value, expected.value)
+        assert len(explicit.value) != 5
+
+
+def test_load_unknown_mask_omitted_clock_uses_ambient(xz_vcd_path):
+    with _open(xz_vcd_path) as r:
+        expected = r.load_unknown_mask('compare_xz_tb.data_0', clock='compare_xz_tb.clk')
+        with r.clock_domain(clock='compare_xz_tb.clk'):
+            ambient = r.load_unknown_mask('compare_xz_tb.data_0')
+
+        assert np.array_equal(ambient.value, expected.value)
+
+
+def test_load_unknown_mask_omitted_clock_raises_outside_domain(xz_vcd_path):
+    with _open(xz_vcd_path) as r:
+        with pytest.raises(RuntimeError, match='requires an active clock domain'):
+            r.load_unknown_mask('compare_xz_tb.data_0')
+
+
+def test_load_matched_waveforms_omitted_clock_uses_ambient(vcd_path):
+    with _open(vcd_path) as r:
+        by_path = r.load_matched_waveforms(
+            'compare_tb.dut.{counter,status}', clock_path='compare_tb.clk'
         )
-    assert clock == 'compare_tb.clk'
-    assert options == dict(sample_on_posedge=False, start_time=None, end_time=None)
+        with r.clock_domain(clock='compare_tb.clk'):
+            ambient = r.load_matched_waveforms('compare_tb.dut.{counter,status}')
+
+        assert set(ambient) == set(by_path)
+        for key in ambient:
+            assert np.array_equal(ambient[key].value, by_path[key].value)
 
 
-def test_domain_field_names_stay_load_api_parameters(vcd_path):
-    """Drift lock: every mergeable domain field must be a load API parameter."""
-    import inspect
-
+def test_load_matched_waveforms_omitted_clock_raises_outside_domain(vcd_path):
     with _open(vcd_path) as r:
-        load_params = set(inspect.signature(r.load_waveform).parameters)
-        domain_fields = {
-            f for f in vars(r.clock_domain(clock='compare_tb.clk')) if not f.startswith('_')
-        } - {'reader', 'clock'}
+        with pytest.raises(RuntimeError, match='requires an active clock domain'):
+            r.load_matched_waveforms('compare_tb.dut.{counter,status}')
 
-    assert domain_fields <= load_params
+
+def test_load_matched_unknown_masks_omitted_clock_uses_ambient(xz_vcd_path):
+    with _open(xz_vcd_path) as r:
+        by_path = r.load_matched_unknown_masks(
+            'compare_xz_tb.{data_0,data_1}', clock_path='compare_xz_tb.clk'
+        )
+        with r.clock_domain(clock='compare_xz_tb.clk'):
+            ambient = r.load_matched_unknown_masks('compare_xz_tb.{data_0,data_1}')
+
+        assert set(ambient) == set(by_path)
+        for key in ambient:
+            assert np.array_equal(ambient[key].value, by_path[key].value)

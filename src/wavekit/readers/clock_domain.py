@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import contextvars
+import dataclasses
 from contextlib import ContextDecorator
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from .hierarchy import Signal
 
@@ -28,6 +29,14 @@ class ClockDomain(ContextDecorator):
     def current(cls) -> ClockDomain | None:
         """Return the ambient ``ClockDomain``, or ``None`` outside a ``with`` block."""
         return cls._current.get()
+
+    def sampling_kwargs(self) -> dict[str, Any]:
+        """Return this domain's sampling fields as ``load_waveform``-style kwargs."""
+        return {
+            f.name: getattr(self, f.name)
+            for f in dataclasses.fields(self)
+            if f.name not in ('clock', '_tokens')
+        }
 
     def __enter__(self) -> ClockDomain:
         self._tokens.append(self._current.set(self))

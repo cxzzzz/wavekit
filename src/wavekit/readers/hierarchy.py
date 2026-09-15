@@ -399,16 +399,7 @@ class Signal(Node):
 
     def waveform(self, xz_value: int = 0, signed: bool = False) -> Waveform:
         """Load this signal as a ``Waveform`` using the ambient clock domain."""
-        from .clock_domain import ClockDomain
-
-        domain = ClockDomain.current()
-        if domain is None:
-            raise RuntimeError(
-                f'{self.full_name}.waveform() requires an active clock domain.\n'
-                f'  Enter one with:      with reader.clock_domain(clock=...):\n'
-                f'  Or load explicitly:  reader.load_waveform({self.full_name!r}, clock=...)'
-            )
-        return self.reader.load_waveform(self, clock=domain, xz_value=xz_value, signed=signed)
+        return self.reader.load_waveform(self, xz_value=xz_value, signed=signed)
 
     @property
     def w(self) -> Waveform:
@@ -417,18 +408,7 @@ class Signal(Node):
 
     def unknown_mask(self, include_x: bool = True, include_z: bool = True) -> Waveform:
         """Load this signal's X/Z presence using the ambient clock domain."""
-        from .clock_domain import ClockDomain
-
-        domain = ClockDomain.current()
-        if domain is None:
-            raise RuntimeError(
-                f'{self.full_name}.unknown_mask() requires an active clock domain.\n'
-                f'  Enter one with:      with reader.clock_domain(clock=...):\n'
-                f'  Or load explicitly:  reader.load_unknown_mask({self.full_name!r}, clock=...)'
-            )
-        return self.reader.load_unknown_mask(
-            self, clock=domain, include_x=include_x, include_z=include_z
-        )
+        return self.reader.load_unknown_mask(self, include_x=include_x, include_z=include_z)
 
     @property
     def m(self) -> Waveform:
