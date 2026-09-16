@@ -1,35 +1,13 @@
 # Signal query
 
-Waveform files contain a hierarchy of scopes and signals. A signal query lets
-you resolve one path, select a range, or load a family of related signals without
-writing one call for every concrete name.
+There are two ways to locate a signal: direct access when the exact path is
+known, and batch queries when names follow a family structure. Once you
+have a `Signal`, load it as a waveform to use it in analysis.
 
-## Exact paths
+## Direct access
 
-Use dotted hierarchy paths for exact lookups. A trailing range selector is
-optional and follows Verilog-style indexing and range notation, such as `[0]`
-or `[31:16]`. When omitted, the reader loads the signal's native range:
-
-```python
-with VcdReader('simulation.vcd') as reader:
-    data = reader.load_waveform(
-        'tb.dut.data[31:16]',
-        clock='tb.clk',
-    )
-```
-
-Use `get_signal()` or `get_scope()` to inspect one exact hierarchy node without loading waveform data:
-
-```python
-signal = reader.get_signal('tb.dut.data')
-scope = reader.get_scope('tb.dut')
-```
-
-
-## Dict-style access
-
-`reader[path]` returns the `Signal` or `Scope` at an exact path — whichever
-is there — and raises `KeyError` when nothing matches:
+`reader[path]` returns the `Signal` or `Scope` at an exact path, and raises
+`KeyError` when nothing matches:
 
 ```python
 signal = reader['tb.dut.data']
@@ -38,7 +16,7 @@ selected = reader['tb.dut.data[31:16]']  # trailing range selector
 ```
 
 Scopes and composite signals (structs, arrays) support the same lookup with
-relative paths, so chains and multi-component paths both work:
+relative paths:
 
 ```python
 tb = reader['tb']
@@ -47,53 +25,91 @@ signal = tb['dut.data']           # equivalent relative dotted path
 member = tb['pkt']['valid']       # struct member through a composite signal
 ```
 
-On a signal, an integer or slice key selects bits, with the same
-Verilog-style `high:low` semantics as `Waveform` indexing:
+On a signal, an integer or slice key selects bits, with the same semantics
+as Verilog:
 
 ```python
 bit = signal[7]        # one bit
 field = signal[31:16]  # a range
 ```
 
-`reader[path]` returns a `Signal`, not waveform data. Pass the signal to
-`load_waveform()` (with a clock) to sample it:
+## Load a waveform
+
+`reader[path]` returns a `Signal`, not a waveform. To get waveform data,
+enter a clock domain, then use `Signal.w` or `load_waveform()`:
 
 ```python
-wave = reader.load_waveform(reader['tb.dut.data'], clock='tb.clk')
+with VcdReader('simulation.vcd') as reader:
+    with reader.clock_domain('tb.clk'):
+        valid = reader['tb.dut.valid'].w
+        data = reader.load_waveform('tb.dut.data[7:0]')
 ```
 
-Use dict-style access when you know the concrete names you want; use the
-pattern queries in the next section when the names follow a family structure
-you want to match in bulk.
+To load a waveform outside any clock domain, or to sample a different clock
+or window just for this call, pass `clock`, edge, and window parameters
+explicitly:
 
+```python
+data = reader.load_waveform(
+    'tb.dut.data[7:0]', clock='tb.clk',
+    sample_on_posedge=True,
+    start_cycle=100, end_cycle=200,
+)
+```
 
-## Batch loading
+By default, wavekit samples on the falling edge to avoid errors caused by
+sampling during a signal transition; pass `sample_on_posedge=True` to sample
+on rising edges instead. Use `start_time`/`end_time` for a simulation-time
+window, or `start_cycle`/`end_cycle` for an absolute clock-cycle window —
+the two cannot be mixed.
 
-When a design contains a family of signals with related names, use
-`load_matched_waveforms()` to load them in one operation.
+Waveforms used together in the same calculation or pattern match must share
+the same clock source, sampling edge, and window, which is why a shared
+clock domain is usually the better fit over repeating the same parameters
+on every call.
+
+## Load a mask
+
+Loading a waveform replaces X/Z states with `xz_value` (zero by default). To
+preserve that information — for example to exclude unknown values, or to
+track which bits were X/Z — use `Signal.m` or `load_unknown_mask()`:
+
+```python
+with reader.clock_domain(clock='tb.clk'):
+    value = reader['tb.data[7:0]'].w
+    unknown = reader['tb.data[7:0]'].m   # X/Z presence mask
+    # or: unknown = reader.load_unknown_mask('tb.data[7:0]')
+    known_value = value.mask(unknown == 0)
+```
+
+`Signal.m` is the default-parameter spelling of `Signal.unknown_mask()`. The
+mask has one bit per selected source bit, marking whether that bit was X/Z
+in the source file.
+
+## Batch queries
+
+When the names follow a family structure — repeated instances, numbered
+lanes, shared prefixes — match them with one query.
 
 A query path consists of dot-separated components. Each component is either a
 fixed name for an exact match or contains a matching expression, such as a
-brace, regex, wildcard, or module-definition expression. A matching expression
-produces a capture describing what it matched.
+brace, regex, or wildcard expression. A matching expression produces a
+capture describing what it matched.
 
-The result is a dictionary with one entry per matched signal. Each key is a
-tuple of captures, ordered according to the matching expressions in the query
-path. Fixed path components do not contribute to the key, so a query without
-matching expressions uses the empty tuple `()`.
+`get_matched_signals()` returns a dictionary with one entry per matched
+signal. Each key is a tuple of captures, ordered according to the matching
+expressions in the query path. Fixed path components do not contribute to
+the key; a query without matching expressions uses the empty tuple `()`.
 
 For example, the query below matches two dimensions: the FIFO index and the
 signal type:
 
 ```python
 with VcdReader('simulation.vcd') as reader:
-    waves = reader.load_matched_waveforms(
-        'tb.fifo_{0..3}.{wr,rd}_en',
-        clock_path='tb.clk',
-    )
+    signals = reader.get_matched_signals('tb.fifo_{0..3}.{wr,rd}_en')
 
-    for key, wave in waves.items():
-        print(key, wave.signal.full_name)
+    for key, signal in signals.items():
+        print(key, signal.full_name)
 ```
 
 The output is:
@@ -106,8 +122,14 @@ The output is:
 ...
 ```
 
-The first capture identifies the FIFO index and the second identifies the
-signal type.
+To load the matched signals as waveforms in one call, use
+`load_matched_waveforms()`:
+
+```python
+with VcdReader('simulation.vcd') as reader:
+    with reader.clock_domain('tb.clk'):
+        waves = reader.load_matched_waveforms('tb.fifo_{0..3}.{wr,rd}_en')
+```
 
 ### Query syntax
 
@@ -126,35 +148,31 @@ Use the following syntax to construct query paths:
 | Direct module definition | `tb.$fifo_unit.ptr` | `ExactCapture` (FSDB) |
 | Recursive module definition | `tb.$$fifo_unit.ptr` | `ExactCapture` (FSDB) |
 
-The same query syntax is also used by `get_matched_signals()`,
-`get_matched_scopes()`, and `Reader.eval()`.
+`get_matched_scopes()`, `get_matched_nodes()`, `load_matched_unknown_masks()`,
+and `Reader.eval()` all support the same syntax.
+
+If `clock_path` matches one signal, that clock is shared by every result. If
+it matches multiple signals, wavekit selects, for each signal, the matched
+clock whose capture key is the longest prefix of the signal key.
 
 `$` and `$$` are available only for FSDB module-definition matching.
 
-`load_matched_unknown_masks()` follows the same query and result-key rules as
-`load_matched_waveforms()`. Use `get_matched_scopes()` for scope queries; a
-terminal range selector is valid for signal queries, not for scope queries.
-
-If `clock_path` matches one signal, that clock is shared by every result. If it
-matches multiple clocks, wavekit selects the matched clock whose capture key is
-the longest prefix of the signal key.
-
 ## Evaluate expressions
 
-`Reader.eval()` is convenient for simple, one-off calculations that fit in a
-single expression.
+`Reader.eval()` is convenient for one-off calculations that fit in a single
+expression.
 
-In `single` mode, every path must resolve to exactly one signal. This is the
-default mode:
+In `single` mode (the default), every path must resolve to exactly one
+signal:
 
 ```python
 occupancy = reader.eval(
-    'tb.dut.w_ptr[2:0] - tb.dut.r_ptr[2:0]',
+    '(tb.dut.w_ptr - tb.dut.r_ptr + 8) % 8',
     clock='tb.clk',
 )
 ```
 
-Waveform operations can also be called from expressions:
+Waveform operations can also be called inside expressions:
 
 ```python
 byte_count = reader.eval(
@@ -163,8 +181,8 @@ byte_count = reader.eval(
 )
 ```
 
-In `zip` mode, matching paths expand together by their capture tuples; a path
-that matches only one signal is broadcast:
+In `zip` mode, matching paths expand together by their capture tuples; a
+path that matches only one signal is broadcast to every group:
 
 ```python
 occupancies = reader.eval(

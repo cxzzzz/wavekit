@@ -1,35 +1,24 @@
 # 波形分析
 
-`Waveform` 由三个相互对齐的数组组成：
+`Waveform` 上的操作都会返回新的 `Waveform` 对象，过滤或变换时会同步保持 `.cycle` 和 `.time` 轴的对齐，方便随时追溯到原始仿真中的周期和时间。
 
-- `.value`：采样得到的信号值；
-- `.cycle`：绝对时钟周期号，从文件中的第一个采样边沿开始计为周期 0；
-- `.time`：波形文件中的时间戳，单位沿用文件的原生时间单位。
+## 算术和位运算
 
-Waveform 操作会返回新的 `Waveform` 对象。对采样点进行过滤或变换时，返回结果会保留 cycle 和 time 轴，因此仍然可以与原始仿真中的周期和时间对应。
-
-## 加载并操作波形
+`Waveform` 支持与其他 `Waveform` 或数值标量进行逐元素算术、比较、位运算和移位运算：
 
 ```python
 from wavekit import VcdReader
 
 with VcdReader('simulation.vcd') as reader:
-    write_pointer = reader.load_waveform(
-        'tb.fifo.w_ptr',
-        clock='tb.clk',
-    )
-    read_pointer = reader.load_waveform(
-        'tb.fifo.r_ptr',
-        clock='tb.clk',
-    )
+    with reader.clock_domain(clock='tb.clk'):
+        write_pointer = reader['tb.fifo.w_ptr'].w
+        read_pointer = reader['tb.fifo.r_ptr'].w
 
     depth = 8
     occupancy = (write_pointer + depth - read_pointer) % depth
 ```
 
-`Waveform` 对象支持与其他 `Waveform` 或数值标量进行逐元素算术、比较、位运算和移位运算。
-
-加载的波形默认按无符号数解释。如果信号应按有符号数解释，可以在 `load_waveform()` 中传入 `signed=True`。两个 Waveform 操作数必须具有相同的符号性；必要时，可以使用 `.as_signed()` 或 `.as_unsigned()` 转换已有波形。
+加载的波形默认按无符号数解释。如果信号应按有符号数解释，可以在 `Signal.waveform()` 或 `load_waveform()` 中传入 `signed=True`。两个 Waveform 操作数必须具有相同的符号性；必要时，可以使用 `.as_signed()` 或 `.as_unsigned()` 转换已有波形。
 
 ## 过滤和切片
 
@@ -121,18 +110,6 @@ one_per_run = data.unique_consecutive()
 compact = data.compress()
 summary = data.downsample(100)  # 每 100 个采样点求一个平均值
 ```
-
-## 保留未知值信息
-
-普通方式加载时，X/Z 状态会被 `xz_value` 替换，默认值为 0。需要保留这些状态时，可以同时加载对应的掩码：
-
-```python
-value = reader.load_waveform('tb.data[7:0]', clock='tb.clk', xz_value=0)
-unknown = reader.load_unknown_mask('tb.data[7:0]', clock='tb.clk')
-known_value = value.mask(unknown == 0)
-```
-
-掩码的每一位对应一个被选中的源信号位。无论值波形是否为有符号数，掩码都按无符号数返回。
 
 ## 提取 NumPy 结果
 
