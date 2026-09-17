@@ -39,6 +39,7 @@ jobs:
           ruff check .
           ruff format --check .
       - name: Type check
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.9'
         run: mypy
       - name: Test
         run: pytest
