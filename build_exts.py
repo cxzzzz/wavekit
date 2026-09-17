@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -8,22 +9,37 @@ from setuptools import Extension, setup
 for artifact in Path('src/wavekit').glob('**/*.so'):
     artifact.unlink()
 
+if os.environ.get('PYODIDE'):
+    compile_args = ['-fpic', '-O3']
+    link_args = ['-O3']
+    fsdb_libraries = []
+elif sys.platform == 'linux':
+    compile_args = ['-fpic', '-O3', '-march=native']
+    link_args = ['-O3', '-march=native']
+    fsdb_libraries = ['dl']
+elif sys.platform == 'darwin':
+    compile_args = ['-fpic', '-O3', '-march=native']
+    link_args = ['-O3', '-march=native']
+    fsdb_libraries = []
+else:
+    raise RuntimeError(f'Unsupported platform: {sys.platform}')
+
 extensions = [
     Extension(
         'wavekit.readers.value_change',
         sources=['src/wavekit/readers/value_change.pyx'],
         include_dirs=[np.get_include()],
-        extra_compile_args=['-fpic', '-O3', '-march=native'],
-        extra_link_args=['-O3', '-march=native'],
+        extra_compile_args=compile_args,
+        extra_link_args=link_args,
         language='c++',
     ),
     Extension(
         'wavekit.readers.fsdb.npi_fsdb_reader',
         sources=['src/wavekit/readers/fsdb/npi_fsdb_reader.pyx'],
         include_dirs=[np.get_include()],
-        libraries=['dl'] if sys.platform != 'darwin' else [],
-        extra_compile_args=['-fpic', '-O3', '-march=native'],
-        extra_link_args=['-O3', '-march=native'],
+        libraries=fsdb_libraries,
+        extra_compile_args=compile_args,
+        extra_link_args=link_args,
         language='c++',
     ),
 ]
