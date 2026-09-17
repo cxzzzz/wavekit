@@ -7,27 +7,19 @@ def verify_fifo_data_integrity():
     """
     Verifies that data written to the FIFO matches data read from the FIFO.
     This demonstrates:
-    1. Loading multi-bit bus signals.
+    1. Dict-style signal access from a scope.
     2. Using boolean masking to extract valid transactions.
     3. Comparing expected vs actual data streams (Scoreboarding).
     """
     with VcdReader('fifo_tb.vcd') as f:
-        clock = 'fifo_tb.clk'
+        tb = f['fifo_tb']
 
-        # Load signals sampled on clock edges
-        w_en = f.load_waveform('fifo_tb.w_en', clock=clock)
-        full = f.load_waveform('fifo_tb.full', clock=clock)
-        data_in = f.load_waveform('fifo_tb.data_in', clock=clock)
+        with f.clock_domain(tb['clk']):
+            valid_w_idx = (tb['w_en'].w & (~tb['full'].w)).filter(lambda x: x != 0).cycle
+            valid_w_data = tb['data_in'].w.take(valid_w_idx)
 
-        r_en = f.load_waveform('fifo_tb.r_en', clock=clock)
-        empty = f.load_waveform('fifo_tb.empty', clock=clock)
-        data_out = f.load_waveform('fifo_tb.data_out', clock=clock)
-
-        valid_w_idx = (w_en & (~full)).filter(lambda x: x != 0).cycle
-        valid_w_data = data_in.take(valid_w_idx)
-
-        valid_r_idx = (r_en & (~empty)).filter(lambda x: x != 0).cycle
-        valid_r_data = data_out.take(valid_r_idx + 1)
+            valid_r_idx = (tb['r_en'].w & (~tb['empty'].w)).filter(lambda x: x != 0).cycle
+            valid_r_data = tb['data_out'].w.take(valid_r_idx + 1)
 
         print(f'Total Valid Writes: {len(valid_w_data.value)}')
         print(f'Total Valid Reads:  {len(valid_r_data.value)}')

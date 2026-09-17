@@ -38,6 +38,18 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Add clock domains: `with r.clock_domain(clock='tb.clk')` makes
+  `Signal.w` / `Signal.m` / `Signal.waveform()` / `Signal.unknown_mask()`
+  load against an ambient sampling recipe. `clock` / `clock_path` on
+  `load_waveform`, `load_unknown_mask`, `load_matched_waveforms`, and
+  `load_matched_unknown_masks` now default to `None` and fall back to the
+  same ambient domain when omitted; an explicit `clock` always takes every
+  sampling parameter from that call, ignoring any active domain.
+- Add dict-style hierarchy access: `reader[path]` returns the `Signal` or
+  `Scope` at an exact path, nested lookups (`scope["a.b"]`) resolve relative
+  paths, and `sig[7:4]` bit-selects like `Waveform` indexing.
+- Add `Reader.get_matched_nodes()`, a kind-agnostic `get_matched_signals()` /
+  `get_matched_scopes()` counterpart.
 - Allow omitting `Waveform.slice()` bounds: `start_index` and `end_index`
   default to `None`, following Python slicing semantics
   (`wave.slice(2)`, `wave.slice(end_index=5)`).

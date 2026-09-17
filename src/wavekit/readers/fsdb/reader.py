@@ -65,6 +65,7 @@ class FsdbSignal(Signal):
             range=native_range,
             native_range=native_range,
             composite_type=composite_type,
+            reader=parent.reader,
             _npi_signal=npi_signal,
         )
 
@@ -92,13 +93,13 @@ class FsdbSignal(Signal):
 class FsdbScope(Scope):
     """FSDB-backed hierarchy scope with lazy direct-child loading."""
 
-    _npi_scope: NpiFsdbScope = field(repr=False, compare=False)
+    _npi_scope: NpiFsdbScope = field(default=None, repr=False, compare=False)
 
     @cached_property
     def children(self) -> tuple[Node, ...]:
         """Return direct child scopes and signals from this FSDB scope."""
         scopes = tuple(
-            FsdbScope(base_name=scope.name(), parent=self, _npi_scope=scope)
+            FsdbScope(base_name=scope.name(), parent=self, reader=self.reader, _npi_scope=scope)
             for scope in self._npi_scope.child_scope_list()
         )
         signals = tuple(
@@ -194,7 +195,7 @@ class FsdbReader(Reader):
     def top_scopes(self) -> tuple[FsdbScope, ...]:
         """Return immutable top-level scopes in the FSDB hierarchy."""
         return tuple(
-            FsdbScope(base_name=scope.name(), parent=None, _npi_scope=scope)
+            FsdbScope(base_name=scope.name(), parent=None, reader=self, _npi_scope=scope)
             for scope in self.file_handle.top_scope_list()
         )
 

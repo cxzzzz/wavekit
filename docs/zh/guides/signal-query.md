@@ -1,48 +1,95 @@
 # 信号查询
 
-波形文件中的层次结构由 scope 和 signal 组成。信号查询可以解析单条路径、选择信号范围，也可以一次加载一组名称有规律的信号，不必为每个具体名称单独调用 API。
+获取信号有两种方式：知道确切路径时直接访问，名字有规律时用批量查询。拿到 `Signal` 后，需要加载对应波形才能参与分析。
 
-## 精确路径
+## 直接访问
 
-使用点号分隔的层次路径进行精确查询。末尾的范围选择器是可选的，使用 Verilog 风格的索引和范围表示，例如 `[0]` 或 `[31:16]`。省略范围时，Reader 会使用信号在文件中保存的原始范围：
+`reader[path]` 返回指定路径对应的 `Signal` 或 `Scope`：
+
+```python
+signal = reader['tb.dut.data']
+scope = reader['tb.dut']
+selected = reader['tb.dut.data[31:16]']  # 末尾可以带位选择
+```
+
+scope 和复合信号（struct、array）支持同样的查找方式，可以继续用相对路径：
+
+```python
+tb = reader['tb']
+signal = tb['dut']['data']        # 一级一级往下取
+signal = tb['dut.data']           # 也可以一次写完
+member = tb['pkt']['valid']       # struct 成员同样适用
+```
+
+用整数或切片下标对信号取位，语义和 Verilog 一致：
+
+```python
+bit = signal[7]        # 取一位
+field = signal[31:16]  # 取多位
+```
+
+## 加载波形
+
+`reader[path]` 拿到的是 `Signal`，不是波形`Waveform`。要获取波形数据，先进入一个时钟域，然后使用 `Signal.w`/`load_waveform()` ：
 
 ```python
 with VcdReader('simulation.vcd') as reader:
-    data = reader.load_waveform(
-        'tb.dut.data[31:16]',
-        clock='tb.clk',
-    )
+    with reader.clock_domain('tb.clk'): 
+        valid = reader['tb.dut.valid'].w  
+        data = reader.load_waveform('tb.dut.data[7:0]')
 ```
 
-如果只需要查看单个节点的层次信息，而不需要加载采样值，可以使用 `get_signal()` 或 `get_scope()`：
+如果想在时钟域外获取波形，或者想临时指定不同的时钟/窗口，就需要显式传 `clock`、边沿、窗口等参数：
 
 ```python
-signal = reader.get_signal('tb.dut.data')
-scope = reader.get_scope('tb.dut')
+data = reader.load_waveform(
+    'tb.dut.data[7:0]', clock='tb.clk',
+    sample_on_posedge=True,
+    start_cycle=100, end_cycle=200,
+)
 ```
 
-## 批量加载
+采样默认发生在下降沿，以避免信号变化瞬间带来的采样错误；可以使用 `sample_on_posedge=True`改为上升沿采样。可以用 `start_time`/`end_time` 按仿真时间指定采样窗口，也可以用`start_cycle`/`end_cycle` 按绝对时钟周期指定，但两者不能混用。
 
-当设计中有一组名称有规律的信号时，可以使用 `load_matched_waveforms()` 一次加载它们。
+用于同一次计算或模式匹配的波形，必须使用同一个时钟源、相同的采样边沿，以及相同的采样窗口，所以更推荐使用统一的时钟域，而不是每次都重复传参。
 
-查询路径由点号分隔的多个组件组成。每个组件可以是用于精确匹配的固定名称，也可以包含大括号、正则、通配符或模块定义表达式。每个匹配表达式都会在返回结果的 key 中对应一个 capture。
+## 加载掩码
 
-返回值是一个字典，每个匹配到的信号对应一个条目。字典的 key 是由 capture 组成的 tuple，顺序与查询路径中的匹配表达式一致。固定路径组件不会进入 key，因此不含匹配表达式的查询使用空 tuple `()`。
+加载波形会把 X/Z 状态替换成 `xz_value`（默认为 0）。如果需要保留这些状态（比如需要排除 X 态，或者需要追踪哪些位是 X/Z 时），可以用 `Signal.m` 或 `load_unknown_mask()` 加载对应的掩码：
 
-例如，下面的查询会同时匹配两个维度：FIFO 索引和信号类型：
+```python
+with reader.clock_domain(clock='tb.clk'):
+    value = reader['tb.data[7:0]'].w
+    unknown = reader['tb.data[7:0]'].m   # X/Z 存在性掩码
+    # 或者：unknown = reader.load_unknown_mask('tb.data[7:0]')
+    known_value = value.mask(unknown == 0)
+```
+
+`Signal.m` 是 `Signal.unknown_mask()` 的默认参数写法。掩码的每一位对应源信号的一位，标记该位在源文件里是否为 X/Z。
+
+## 批量查询
+
+如果信号名字有规律——同一模块复制了多份、信号带编号、名字共享前缀——可以用一条
+查询把它们一起匹配出来。
+
+查询路径由点号分隔，每一级要么是固定名称（精确匹配），要么是一个匹配表达式，
+比如大括号、正则或通配符。每个匹配表达式都会在结果 key 里留下
+一个 capture，描述它具体匹配到的内容。
+
+`get_matched_signals()` 返回一个字典：每个匹配到的信号一条记录，key 是按查询路径
+顺序排好的 capture tuple（精确匹配的key不会被包含在capture tuple中）。
+
+下面这条查询同时匹配两个维度——FIFO 编号和信号类型：
 
 ```python
 with VcdReader('simulation.vcd') as reader:
-    waves = reader.load_matched_waveforms(
-        'tb.fifo_{0..3}.{wr,rd}_en',
-        clock_path='tb.clk',
-    )
+    signals = reader.get_matched_signals('tb.fifo_{0..3}.{wr,rd}_en')
 
-    for key, wave in waves.items():
-        print(key, wave.signal.full_name)
+    for key, signal in signals.items():
+        print(key, signal.full_name)
 ```
 
-输出如下：
+输出：
 
 ```text
 (BraceCapture(groups=('0',)), BraceCapture(groups=('wr',))) tb.fifo_0.wr_en
@@ -52,47 +99,53 @@ with VcdReader('simulation.vcd') as reader:
 ...
 ```
 
-第一个 capture 表示 FIFO 索引，第二个 capture 表示信号类型。
+要把匹配成功的信号一次加载成波形，可以用 `load_matched_waveforms()`:
+
+```python
+with VcdReader('simulation.vcd') as reader:
+    with reader.clock_domain('tb.clk'):
+      waves = reader.load_matched_waveforms('tb.fifo_{0..3}.{wr,rd}_en')
+```
 
 ### 查询语法
 
-使用以下语法构造查询路径：
+查询路径支持以下语法：
 
-| 语法 | 示例 | key 中保存的 capture |
+| 语法 | 示例 | 捕获的 key 组件 |
 | --- | --- | --- |
 | 精确路径 | `tb.dut.valid` | 无 capture |
 | 大括号列表 | `sig_{read,write}` | `BraceCapture` |
-| 整数范围 | `fifo_{0..3}.ptr` | 每个索引对应一个 `BraceCapture` |
-| 步进范围 | `lane_{0..6..2}.valid` | `BraceCapture`，值为 `0`、`2`、`4`、`6` |
-| 标准正则 | `tb.u0./J_([a-z]+)/` | `RegexCapture` |
-| 旧版正则 | `@([a-z]+)_valid` | `RegexCapture` |
+| 整数范围 | `fifo_{0..3}.ptr` | 每个索引一个 `BraceCapture` |
+| 步进范围 | `lane_{0..6..2}.valid` | `BraceCapture` 为 `0`、`2`、`4`、`6` |
+| 规范正则 | `tb.u0./J_([a-z]+)/` | `RegexCapture` |
+| 兼容正则 | `@([a-z]+)_valid` | `RegexCapture` |
 | 单层通配符 | `tb.*.valid` | `WildcardCapture` |
 | 递归通配符 | `tb.**.valid` | `WildcardCapture` |
-| 直接匹配模块定义 | `tb.$fifo_unit.ptr` | `ExactCapture`（仅 FSDB） |
-| 递归匹配模块定义 | `tb.$$fifo_unit.ptr` | `ExactCapture`（仅 FSDB） |
+| 直接模块定义 | `tb.$fifo_unit.ptr` | `ExactCapture`（FSDB） |
+| 递归模块定义 | `tb.$$fifo_unit.ptr` | `ExactCapture`（FSDB） |
 
-`get_matched_signals()`、`get_matched_scopes()` 和 `Reader.eval()` 也使用同一套查询语法。
+`get_matched_scopes()`、`get_matched_nodes()`、`load_matched_unknown_masks()` 和
+`Reader.eval()` 都支持上述语法。
 
-`$` 和 `$$` 仅用于 FSDB 的模块定义匹配。
+`clock_path` 只匹配到一个信号时，所有结果共用它作为时钟；匹配到多个信号时，
+每个信号会选取 key 是其最长前缀的一个时钟。
 
-`load_matched_unknown_masks()` 使用与 `load_matched_waveforms()` 相同的查询和结果 key 规则。scope 查询使用 `get_matched_scopes()`；末尾范围选择器只能用于 signal 查询，不能用于 scope 查询。
-
-如果 `clock_path` 只匹配到一个信号，该时钟会用于所有结果。如果匹配到多个时钟，wavekit 会根据每个信号的 key，选择与其匹配且前缀最长的时钟。
+`$` 和 `$$` 只有 FSDB 的模块定义匹配能用。
 
 ## 计算表达式
 
-对于只需要写一行的简单计算，`Reader.eval()` 比较方便。
+对于只需要写一行的简单计算，使用`Reader.eval()` 比较方便。
 
-在 `single` 模式下，每条路径都必须精确匹配一个信号。这是默认模式：
+`single` 模式（默认）下，表达式里的每条路径都必须对应唯一信号：
 
 ```python
 occupancy = reader.eval(
-    'tb.dut.w_ptr[2:0] - tb.dut.r_ptr[2:0]',
+    '(tb.dut.w_ptr - tb.dut.r_ptr + 8) % 8',
     clock='tb.clk',
 )
 ```
 
-表达式中也可以调用 Waveform 操作：
+表达式里也能调波形操作函数：
 
 ```python
 byte_count = reader.eval(
@@ -101,7 +154,8 @@ byte_count = reader.eval(
 )
 ```
 
-在 `zip` 模式下，wavekit 会按 capture tuple 将带匹配表达式的路径配对展开；只匹配到一个信号的路径会广播到每一组：
+`zip` 模式下，带匹配的路径按各自的 capture tuple 分组展开；只匹配到一个信号的路径
+会广播到所有组：
 
 ```python
 occupancies = reader.eval(

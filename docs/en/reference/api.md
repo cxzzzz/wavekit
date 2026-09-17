@@ -2,6 +2,9 @@
 
 ## Waveform
 
+`Waveform` is the core object for waveform analysis, holding sampled values
+together with their cycle and time axes.
+
 ::: wavekit.Waveform
 
 ## Readers
@@ -17,6 +20,9 @@ Format-specific readers share the common loading, query, and expression APIs.
 ::: wavekit.has_fsdb_support
 
 ## Pattern matching
+
+The pattern-matching API describes signal relationships across multiple
+clock cycles and performs transaction-level analysis.
 
 ::: wavekit.pattern.Pattern
 
@@ -38,6 +44,9 @@ Format-specific readers share the common loading, query, and expression APIs.
 
 ## Signal hierarchy and queries
 
+These objects represent the hierarchy, signals, ranges, and captures in
+query results within a waveform file.
+
 ::: wavekit.Node
 
 ::: wavekit.Scope
@@ -58,3 +67,11 @@ Format-specific readers share the common loading, query, and expression APIs.
 ::: wavekit.RegexCapture
 
 ::: wavekit.WildcardCapture
+
+## Clock domains
+
+`ClockDomain` bundles a clock signal with a sampling recipe (edge, time or
+cycle window) that `Signal.w`/`Signal.m` and related methods read from the
+ambient context.
+
+::: wavekit.ClockDomain

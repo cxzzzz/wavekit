@@ -172,6 +172,57 @@ def test_vcd_reader_singular_lookup_reports_missing_paths(compare_vcd_path):
             reader.get_scope('compare_tb.missing')
 
 
+def test_vcd_reader_dict_lookup(compare_vcd_path):
+    with VcdReader(str(compare_vcd_path)) as reader:
+        scope = reader['compare_tb.dut.unit_a']
+        signal = reader['compare_tb.dut.unit_a.data']
+        selected = reader['compare_tb.dut.unit_a.data[3:0]']
+
+        assert isinstance(scope, Scope)
+        assert scope.full_name == 'compare_tb.dut.unit_a'
+        assert isinstance(signal, Signal)
+        assert signal.full_name == 'compare_tb.dut.unit_a.data[7:0]'
+        assert selected.range == Range(3, 0)
+        assert selected.width == 4
+
+
+def test_vcd_reader_dict_lookup_nested(compare_vcd_path):
+    with VcdReader(str(compare_vcd_path)) as reader:
+        signal = reader['compare_tb']['dut']['unit_a']['data']
+        multi = reader['compare_tb']['dut.unit_a.data']
+        generated = reader['compare_tb']['dut']['unit_a']['gen_blk[0]']
+
+        assert signal.full_name == 'compare_tb.dut.unit_a.data[7:0]'
+        assert signal.full_name == multi.full_name
+        assert generated.full_name == 'compare_tb.dut.unit_a.gen_blk[0]'
+
+
+def test_vcd_reader_dict_lookup_missing_and_pattern_rejected(compare_vcd_path):
+    with VcdReader(str(compare_vcd_path)) as reader:
+        with pytest.raises(KeyError, match="'compare_tb.missing' not found in hierarchy"):
+            reader['compare_tb.missing']
+        with pytest.raises(KeyError, match='dict lookup requires an exact path'):
+            reader['compare_tb.dut.unit_{a,b}.data']
+
+
+def test_vcd_reader_signal_bit_selection(compare_vcd_path):
+    with VcdReader(str(compare_vcd_path)) as reader:
+        signal = reader.get_signal('compare_tb.dut.unit_a.data')
+
+        single = signal[5]
+        selected = signal[7:4]
+
+        assert single.range == Range(5, 5)
+        assert single.width == 1
+        assert selected.range == Range(7, 4)
+        assert selected.width == 4
+        assert single.full_name == 'compare_tb.dut.unit_a.data[5]'
+        with pytest.raises(ValueError, match='opposite direction'):
+            signal[4:7]
+        with pytest.raises(ValueError, match='out of native range'):
+            signal[9:8]
+
+
 def test_vcd_reader_single_load_rejects_matcher_paths(compare_vcd_path):
     with VcdReader(str(compare_vcd_path)) as reader:
         with pytest.raises(ValueError, match=r'use get_matched_signals\(\)'):

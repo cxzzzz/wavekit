@@ -8,6 +8,7 @@ import numpy as np
 
 from ..expression import evaluate_expression, parse_expression
 from ..waveform import Waveform
+from .clock_domain import ClockDomain
 from .hierarchy import Node, Scope, Signal
 from .matcher import Capture, ExactMatcher, parse_query_path
 from .value_change import value_change_to_value_array
@@ -83,10 +84,77 @@ class Reader:
         # exception wont be suppressed
         return False
 
+    def __getitem__(self, path: str) -> Node:
+        """Return the ``Signal`` or ``Scope`` at an exact dotted *path*."""
+        matched = self.get_matched_nodes(path)
+        if not matched:
+            raise KeyError(f'{path!r} not found in hierarchy')
+        if list(matched) != [()]:
+            raise KeyError(
+                f'{path!r}: dict lookup requires an exact path; '
+                'use get_matched_nodes() for pattern queries'
+            )
+        return matched[()]
+
+    def clock_domain(
+        self,
+        clock: Signal | str,
+        *,
+        sample_on_posedge: bool = False,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        start_cycle: int | None = None,
+        end_cycle: int | None = None,
+    ) -> ClockDomain:
+        """Build a reusable sampling recipe: a clock plus sampling parameters.
+
+        Use as a context manager (or decorator) so ``Signal.waveform()``/
+        ``Signal.unknown_mask()`` (and their ``.w``/``.m`` shorthands) load
+        against it.
+
+        Parameters
+        ----------
+        clock:
+            Clock signal as a ``Signal`` or full dotted path string.
+        sample_on_posedge, start_time, end_time, start_cycle, end_cycle:
+            Same sampling/windowing semantics as ``load_waveform``.
+
+        Returns
+        -------
+        ClockDomain:
+            The constructed sampling recipe.
+        """
+        resolved_clock = clock if isinstance(clock, Signal) else self.get_signal(clock)
+        return ClockDomain(
+            clock=resolved_clock,
+            sample_on_posedge=sample_on_posedge,
+            start_time=start_time,
+            end_time=end_time,
+            start_cycle=start_cycle,
+            end_cycle=end_cycle,
+        )
+
+    @staticmethod
+    def _resolve_ambient_clock(
+        clock: Signal | str | None,
+        **call_sampling: Any,
+    ) -> tuple[Signal | str, dict[str, Any]]:
+        """Resolve *clock*, falling back to the ambient domain when ``None``.
+
+        Explicit *clock* wins outright and keeps *call_sampling* as given;
+        omitted *clock* reads the ambient ``ClockDomain`` for both the
+        clock and every sampling field, raising ``RuntimeError`` if none
+        is active.
+        """
+        if clock is not None:
+            return clock, call_sampling
+        domain = ClockDomain.current()
+        return domain.clock, domain.sampling_kwargs()
+
     def load_waveform(
         self,
         signal: Signal | str,
-        clock: Signal | str,
+        clock: Signal | str | None = None,
         xz_value: int = 0,
         signed: bool = False,
         sample_on_posedge: bool = False,
@@ -111,8 +179,11 @@ class Reader:
             When a string is passed, the value is used verbatim as the full
             hierarchical path, e.g. ``"tb.dut.data[7:0]"`` or ``"tb.dut.data"``.
         clock:
-            Clock signal as a ``Signal`` or full dotted
-            path string, e.g. ``"tb.clk"``.
+            Clock signal as a ``Signal`` or full dotted path string.  If
+            omitted (``None``), uses the ambient ``ClockDomain`` — including
+            its edge and window — and raises ``RuntimeError`` if none is
+            active. An explicit *clock* always takes the sampling parameters
+            below from this call, ignoring any active domain.
         xz_value:
             Integer substituted for ``X`` and ``Z`` values in the file.
             Defaults to ``0``.
@@ -121,22 +192,25 @@ class Reader:
             signed integers.
         sample_on_posedge:
             If ``True``, sample on rising clock edges; otherwise on falling
-            edges (default).
+            edges (default).  Ignored when *clock* is omitted.
         start_time:
             Simulation time to start loading from (inclusive).  ``None`` means
             start of simulation.  Mutually exclusive with *start_cycle*.
+            Ignored when *clock* is omitted.
         end_time:
             Simulation time to stop loading at (exclusive).  ``None`` means
-            end of simulation.  Mutually exclusive with *end_cycle*.
+            end of simulation.  Mutually exclusive with *end_cycle*.  Ignored
+            when *clock* is omitted.
         start_cycle:
             Absolute clock cycle number to start loading from (inclusive).
             ``None`` means start of simulation.  Mutually exclusive with
             *start_time*.  The clock is always loaded from time 0 so cycle
             numbers are absolute and comparable across different waveforms.
+            Ignored when *clock* is omitted.
         end_cycle:
             Absolute clock cycle number to stop loading at (exclusive).
             ``None`` means end of simulation.  Mutually exclusive with
-            *end_time*.
+            *end_time*.  Ignored when *clock* is omitted.
 
         Returns
         -------
@@ -148,24 +222,31 @@ class Reader:
 
         Raises
         ------
+        RuntimeError:
+            If *clock* is omitted and no ``ClockDomain`` is active.
         ValueError:
             If both *start_time* and *start_cycle* (or both *end_time* and
             *end_cycle*) are provided simultaneously.
         """
         self._validate_xz_value(xz_value)
         resolved_signal = signal if isinstance(signal, Signal) else self.get_signal(signal)
-        resolved_clock = clock if isinstance(clock, Signal) else self.get_signal(clock)
+        resolved_clock, sampling = self._resolve_ambient_clock(
+            clock,
+            sample_on_posedge=sample_on_posedge,
+            start_time=start_time,
+            end_time=end_time,
+            start_cycle=start_cycle,
+            end_cycle=end_cycle,
+        )
+        if not isinstance(resolved_clock, Signal):
+            resolved_clock = self.get_signal(resolved_clock)
         value_mapping = {'0': 0, '1': 1, 'x': xz_value, 'z': xz_value}
         wf = self._sample_on_clock(
             resolved_signal,
             resolved_clock,
             value_mapping=value_mapping,
             signed=signed,
-            sample_on_posedge=sample_on_posedge,
-            start_time=start_time,
-            end_time=end_time,
-            start_cycle=start_cycle,
-            end_cycle=end_cycle,
+            **sampling,
         )
         wf.signal = resolved_signal
         wf.width = wf.width
@@ -175,7 +256,7 @@ class Reader:
     def load_unknown_mask(
         self,
         signal: Signal | str,
-        clock: Signal | str,
+        clock: Signal | str | None = None,
         include_x: bool = True,
         include_z: bool = True,
         sample_on_posedge: bool = False,
@@ -197,7 +278,8 @@ class Reader:
         signal:
             Full dotted signal path or ``Signal`` object.
         clock:
-            Clock signal path or ``Signal`` object.
+            Clock signal path or ``Signal`` object.  If omitted (``None``),
+            uses the ambient ``ClockDomain`` (same rules as ``load_waveform``).
         include_x:
             If ``True`` (default), mark source ``X``/``x`` bits.
         include_z:
@@ -209,9 +291,23 @@ class Reader:
         -------
         Waveform:
             Unsigned mask waveform.
+
+        Raises
+        ------
+        RuntimeError:
+            If *clock* is omitted and no ``ClockDomain`` is active.
         """
         resolved_signal = signal if isinstance(signal, Signal) else self.get_signal(signal)
-        resolved_clock = clock if isinstance(clock, Signal) else self.get_signal(clock)
+        resolved_clock, sampling = self._resolve_ambient_clock(
+            clock,
+            sample_on_posedge=sample_on_posedge,
+            start_time=start_time,
+            end_time=end_time,
+            start_cycle=start_cycle,
+            end_cycle=end_cycle,
+        )
+        if not isinstance(resolved_clock, Signal):
+            resolved_clock = self.get_signal(resolved_clock)
 
         value_mapping = {
             '0': 0,
@@ -224,11 +320,7 @@ class Reader:
             resolved_clock,
             value_mapping=value_mapping,
             signed=False,
-            sample_on_posedge=sample_on_posedge,
-            start_time=start_time,
-            end_time=end_time,
-            start_cycle=start_cycle,
-            end_cycle=end_cycle,
+            **sampling,
         )
         wf.signal = resolved_signal
         wf.signed = False
@@ -418,7 +510,7 @@ class Reader:
                 'get_signal() requires an exact path; '
                 'use get_matched_signals() for pattern queries'
             )
-        search_root = root_scope or _SearchRoot(self.top_scopes)
+        search_root = root_scope or _SearchRoot(reader=self, top_scopes=self.top_scopes)
         matched = search_root._match_path(
             steps,
             lambda node, remaining: len(remaining) > 1 or isinstance(node, Signal),
@@ -466,7 +558,7 @@ class Reader:
                 'get_scope() requires an exact path; '
                 'use get_matched_scopes() for pattern queries'
             )
-        search_root = root_scope or _SearchRoot(self.top_scopes)
+        search_root = root_scope or _SearchRoot(reader=self, top_scopes=self.top_scopes)
         matched = search_root._match_path(
             steps,
             lambda node, _remaining: isinstance(node, Scope),
@@ -474,6 +566,20 @@ class Reader:
         if not matched:
             raise ValueError(f"scope '{path}' not found")
         return cast(Scope, next(iter(matched.values())))
+
+    def get_matched_nodes(
+        self,
+        path: str,
+        root_scope: Scope | None = None,
+    ) -> dict[tuple[Capture, ...], Node]:
+        """Return all nodes whose paths match *path*, keyed by captures.
+
+        Like ``get_matched_signals`` / ``get_matched_scopes`` but returns
+        every matching node regardless of kind — signals, scopes, and
+        composite signals alike.
+        """
+        search_root = root_scope or _SearchRoot(reader=self, top_scopes=self.top_scopes)
+        return search_root.get_matched_nodes(path)
 
     def get_matched_signals(
         self,
@@ -509,7 +615,7 @@ class Reader:
             If two different signals resolve to the same key, or if using
             module matchers on a backend without ``definition`` support (VCD/FST).
         """
-        search_root = root_scope or _SearchRoot(self.top_scopes)
+        search_root = root_scope or _SearchRoot(reader=self, top_scopes=self.top_scopes)
         return search_root.get_matched_signals(path)
 
     def get_matched_scopes(
@@ -547,13 +653,13 @@ class Reader:
             module matchers on a backend without ``definition`` support (VCD/FST),
             or if the path contains a terminal signal bit-range suffix.
         """
-        search_root = root_scope or _SearchRoot(self.top_scopes)
+        search_root = root_scope or _SearchRoot(reader=self, top_scopes=self.top_scopes)
         return search_root.get_matched_scopes(path)
 
     def load_matched_waveforms(
         self,
         signal_path: str,
-        clock_path: str,
+        clock_path: str | None = None,
         xz_value: int = 0,
         signed: bool = False,
         sample_on_posedge: bool = False,
@@ -570,6 +676,9 @@ class Reader:
 
         Clock assignment rules:
 
+        * **Ambient** — if *clock_path* is omitted (``None``), every matched
+          signal uses the ambient ``ClockDomain`` (including its edge and
+          window); raises ``RuntimeError`` if none is active.
         * **Single clock** — if *clock_path* matches exactly one signal, that
           clock is broadcast to all matched signals.
         * **Multiple clocks** — for each signal key, the clock whose key is the
@@ -581,9 +690,13 @@ class Reader:
         signal_path:
             Signal query path.  See class docstring.
         clock_path:
-            Clock signal query path.  Must match at least one signal.
+            Clock signal query path.  Must match at least one signal. If
+            omitted, uses the ambient ``ClockDomain`` for every match — see
+            ``load_waveform``.
         xz_value, signed, sample_on_posedge, start_time, end_time, start_cycle, end_cycle:
-            Forwarded to ``load_waveform`` for every loaded signal.
+            Forwarded to ``load_waveform`` for every loaded signal. Ignored
+            when *clock_path* is omitted (the ambient domain's fields apply
+            instead).
         root_scope:
             If provided, both *signal_path* and *clock_path* are searched within
             this scope instead of the file's top-level scopes.
@@ -595,22 +708,24 @@ class Reader:
 
         Raises
         ------
+        RuntimeError:
+            If *clock_path* is omitted and no ``ClockDomain`` is active.
         ValueError:
             If *clock_path* matches no signals, or if no clock key is a prefix
             of a signal key.
         """
         self._validate_xz_value(xz_value)
-        clock_pairing = self._resolve_clock_pairing(signal_path, clock_path, root_scope)
-        matched_signals = self.get_matched_signals(signal_path, root_scope=root_scope)
-        load_kwargs: dict[str, Any] = dict(
-            xz_value=xz_value,
-            signed=signed,
+        resolved_clock, sampling = self._resolve_ambient_clock(
+            clock_path,
             sample_on_posedge=sample_on_posedge,
             start_time=start_time,
             end_time=end_time,
             start_cycle=start_cycle,
             end_cycle=end_cycle,
         )
+        clock_pairing = self._resolve_clock_pairing(signal_path, resolved_clock, root_scope)
+        matched_signals = self.get_matched_signals(signal_path, root_scope=root_scope)
+        load_kwargs: dict[str, Any] = dict(xz_value=xz_value, signed=signed, **sampling)
         return {
             k: self.load_waveform(sig, clock_pairing[k], **load_kwargs)
             for k, sig in matched_signals.items()
@@ -619,7 +734,7 @@ class Reader:
     def load_matched_unknown_masks(
         self,
         signal_path: str,
-        clock_path: str,
+        clock_path: str | None = None,
         include_x: bool = True,
         include_z: bool = True,
         sample_on_posedge: bool = False,
@@ -631,22 +746,25 @@ class Reader:
     ) -> dict[tuple[Capture, ...], Waveform]:
         """Batch-load X/Z mask waveforms for all signals matching *signal_path*.
 
-        Clock assignment follows ``load_matched_waveforms``: a single
-        matched clock is broadcast to all signals; otherwise the longest-prefix
-        clock key is selected for each signal key.
+        Clock assignment follows ``load_matched_waveforms``: an omitted
+        *clock_path* uses the ambient domain for every match; otherwise a
+        single matched clock is broadcast to all signals, or the
+        longest-prefix clock key is selected for each signal key.
 
         Parameters
         ----------
         signal_path:
             Signal query path.  See class docstring.
         clock_path:
-            Clock signal query path.  Must match at least one signal.
+            Clock signal query path.  Must match at least one signal. If
+            omitted, uses the ambient ``ClockDomain`` for every match.
         include_x:
             If ``True`` (default), mark source ``X``/``x`` bits.
         include_z:
             If ``True`` (default), mark source ``Z``/``z`` bits.
         sample_on_posedge, start_time, end_time, start_cycle, end_cycle:
-            Same sampling/windowing semantics as ``load_waveform``.
+            Same sampling/windowing semantics as ``load_waveform``. Ignored
+            when *clock_path* is omitted.
         root_scope:
             If provided, both *signal_path* and *clock_path* are searched within
             this scope instead of the file's top-level scopes.
@@ -655,20 +773,25 @@ class Reader:
         -------
         dict[tuple[Capture, ...], Waveform]:
             Same keys as ``get_matched_signals`` on *signal_path*.
+
+        Raises
+        ------
+        RuntimeError:
+            If *clock_path* is omitted and no ``ClockDomain`` is active.
         """
-        clock_pairing = self._resolve_clock_pairing(signal_path, clock_path, root_scope)
-        load_kwargs: dict[str, Any] = dict(
-            include_x=include_x,
-            include_z=include_z,
+        resolved_clock, sampling = self._resolve_ambient_clock(
+            clock_path,
             sample_on_posedge=sample_on_posedge,
             start_time=start_time,
             end_time=end_time,
             start_cycle=start_cycle,
             end_cycle=end_cycle,
         )
+        clock_pairing = self._resolve_clock_pairing(signal_path, resolved_clock, root_scope)
         matched_signals = self.get_matched_signals(signal_path, root_scope=root_scope)
+        mask_kwargs: dict[str, Any] = dict(include_x=include_x, include_z=include_z, **sampling)
         return {
-            k: self.load_unknown_mask(sig, clock_pairing[k], **load_kwargs)
+            k: self.load_unknown_mask(sig, clock_pairing[k], **mask_kwargs)
             for k, sig in matched_signals.items()
         }
 
@@ -680,19 +803,23 @@ class Reader:
     def _resolve_clock_pairing(
         self,
         signal_path: str,
-        clock_path: str,
+        clock: Signal | str,
         root_scope: Scope | None,
     ) -> dict[tuple[Capture, ...], Signal]:
         """Resolve signal/clock query paths into a {signal_key: clock_signal} map.
 
         Rules:
+        - A concrete clock ``Signal``: broadcast to all signals.
         - Single clock match: broadcast to all signals.
         - Multiple clock matches: longest-prefix clock key per signal key.
         - No prefix match for a signal: raise ValueError.
         """
-        matched_clocks = self.get_matched_signals(clock_path, root_scope=root_scope)
+        if isinstance(clock, Signal):
+            matched_signals = self.get_matched_signals(signal_path, root_scope=root_scope)
+            return {k: clock for k in matched_signals}
+        matched_clocks = self.get_matched_signals(clock, root_scope=root_scope)
         if not matched_clocks:
-            raise ValueError(f'clock path {clock_path!r} matched no signals')
+            raise ValueError(f'clock path {clock!r} matched no signals')
 
         matched_signals = self.get_matched_signals(signal_path, root_scope=root_scope)
 

@@ -38,18 +38,12 @@ import numpy as np
 from wavekit import VcdReader
 
 with VcdReader('simulation.vcd') as r:
-    clock = 'tb.clk'
+    fifo = r['tb.u_fifo']
+    with r.clock_domain(clock='tb.clk'):
+        w_ptr = fifo['w_ptr'].w
+        r_ptr = fifo['r_ptr'].w
+
     depth = 16
-
-    w_ptr = r.load_waveform(
-        'tb.u_fifo.w_ptr',
-        clock=clock,
-    )
-    r_ptr = r.load_waveform(
-        'tb.u_fifo.r_ptr',
-        clock=clock,
-    )
-
     occupancy = (w_ptr + depth - r_ptr) % depth
 
     print('Average occupancy:', np.mean(occupancy.value))

@@ -105,6 +105,52 @@ def test_fsdb_reader_exported(fsdb_runtime):
     assert FsdbReader.__name__ == 'FsdbReader'
 
 
+def test_fsdb_reader_clock_domain(fsdb_runtime):
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        expected = reader.load_waveform('simple_tb.data_i', clock='simple_tb.clk')
+        with reader.clock_domain(clock='simple_tb.clk'):
+            ambient = reader['simple_tb']['data_i'].w
+        assert np.array_equal(ambient.value, expected.value)
+
+        cd = reader.clock_domain(clock='simple_tb.clk')
+        with cd:
+            reused = reader['simple_tb']['data_i'].w
+        assert np.array_equal(reused.value, expected.value)
+        with pytest.raises(RuntimeError, match='requires an active clock domain'):
+            _ = reader['simple_tb']['data_i'].w
+
+
+def test_fsdb_reader_dict_lookup(fsdb_runtime):
+    # Composite children are loaded lazily from NPI and require an open reader.
+    with FsdbReader(str(fsdb_runtime)) as reader:
+        assert reader['simple_tb'].name == 'simple_tb'
+        assert reader['simple_tb.clk'].full_name == 'simple_tb.clk'
+        assert reader['simple_tb.data_i[1:0]'].range == Range(1, 0)
+
+        leaf = reader['simple_tb']['data_i']
+        assert leaf[2].range == Range(2, 2)
+        assert leaf[3:1].range == Range(3, 1)
+        assert leaf[2].full_name == 'simple_tb.data_i[2]'
+
+        member = reader['simple_tb']['pkt']['valid']
+        multi = reader['simple_tb']['pkt']['valid']
+        assert member.full_name == 'simple_tb.pkt.valid'
+        assert member.width == 1
+        assert reader['simple_tb.pkt.valid'].full_name == member.full_name
+        assert multi.full_name == member.full_name
+        with pytest.raises(KeyError, match="'missing' not found under 'simple_tb.pkt'"):
+            reader['simple_tb']['pkt']['missing']
+
+        assert reader['simple_tb.pkt_arr[0]'].full_name == 'simple_tb.pkt_arr[0]'
+        with pytest.raises(TypeError, match='does not support range selection'):
+            reader['simple_tb']['pkt_arr'][1:0]
+
+        with pytest.raises(KeyError, match="'simple_tb.missing' not found in hierarchy"):
+            reader['simple_tb.missing']
+        with pytest.raises(KeyError, match='dict lookup requires an exact path'):
+            reader['simple_tb.{clk,rst_n}']
+
+
 def _run_quiet_reader(fsdb_path, quiet=None):
     kwargs = '' if quiet is None else f', quiet={quiet}'
     code = (

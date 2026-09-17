@@ -5,8 +5,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import cached_property
-from typing import cast
+from functools import cached_property, lru_cache
+from typing import TYPE_CHECKING, cast
 
 from .matcher import (
     Capture,
@@ -18,6 +18,11 @@ from .matcher import (
     parse_query_path,
 )
 from .range import Range
+
+if TYPE_CHECKING:
+    from ..waveform import Waveform
+    from .base import Reader
+    from .clock_domain import ClockDomain
 
 
 class SignalCompositeType(Enum):
@@ -36,6 +41,7 @@ class Node(ABC):
 
     base_name: str
     parent: Node | None
+    reader: Reader = field(repr=False, compare=False)
     _recursive_match_cache: dict[Matcher, tuple[Node, ...]] = field(
         default_factory=dict,
         init=False,
@@ -49,6 +55,22 @@ class Node(ABC):
         if isinstance(self, Signal) and self.range is not None:
             return f'{self.base_name}{self.range}'
         return self.base_name
+
+    def __getitem__(self, path: str) -> Node:
+        """Return the child ``Signal`` or ``Scope`` at the relative dotted *path*."""
+        if not isinstance(path, str):
+            raise KeyError(
+                f'{self.full_name!r} lookup requires a string path, ' f'got {type(path).__name__}'
+            )
+        matched = self.get_matched_nodes(path)
+        if not matched:
+            raise KeyError(f'{path!r} not found under {self.full_name!r}')
+        if list(matched) != [()]:
+            raise KeyError(
+                f'{path!r}: dict lookup requires an exact path; '
+                'use get_matched_nodes() for pattern queries'
+            )
+        return matched[()]
 
     @property
     def is_range_selectable(self) -> bool:
@@ -268,7 +290,7 @@ class Scope(Node):
 class Signal(Node):
     """An immutable signal view, optionally narrowed by a selection range."""
 
-    range: Range | None
+    range: Range | None = None
     composite_type: SignalCompositeType | None = None
     native_range: Range | None = None
 
@@ -363,3 +385,65 @@ class Signal(Node):
             )
 
         return dataclasses.replace(self, range=selected_range)
+
+    def __getitem__(self, key: int | slice | str) -> Signal:
+        """Return a bit-selected view, or a composite member for a string path."""
+        if isinstance(key, str):
+            return cast(Signal, super().__getitem__(key))
+        if isinstance(key, slice):
+            if key.step is not None:
+                raise ValueError('bit selection does not support a step')
+            if key.start is None or key.stop is None:
+                raise ValueError('bit selection requires explicit high and low bounds')
+            return self.with_range(Range(key.start, key.stop))
+        return self.with_range(Range(key, key))
+
+    @cached_property
+    def _waveform_cache(self):
+        @lru_cache(maxsize=8)
+        def cached(domain: ClockDomain, xz_value: int, signed: bool) -> Waveform:
+            return self.reader.load_waveform(
+                self,
+                clock=domain.clock,
+                xz_value=xz_value,
+                signed=signed,
+                **domain.sampling_kwargs(),
+            )
+
+        return cached
+
+    def waveform(self, xz_value: int = 0, signed: bool = False) -> Waveform:
+        """Load this signal as a ``Waveform`` using the ambient clock domain."""
+        from .clock_domain import ClockDomain
+
+        return self._waveform_cache(ClockDomain.current(), xz_value, signed)
+
+    @property
+    def w(self) -> Waveform:
+        """Return ``waveform()`` with default parameters."""
+        return self.waveform()
+
+    @cached_property
+    def _unknown_mask_cache(self):
+        @lru_cache(maxsize=8)
+        def cached(domain: ClockDomain, include_x: bool, include_z: bool) -> Waveform:
+            return self.reader.load_unknown_mask(
+                self,
+                clock=domain.clock,
+                include_x=include_x,
+                include_z=include_z,
+                **domain.sampling_kwargs(),
+            )
+
+        return cached
+
+    def unknown_mask(self, include_x: bool = True, include_z: bool = True) -> Waveform:
+        """Load this signal's X/Z presence using the ambient clock domain."""
+        from .clock_domain import ClockDomain
+
+        return self._unknown_mask_cache(ClockDomain.current(), include_x, include_z)
+
+    @property
+    def m(self) -> Waveform:
+        """Return ``unknown_mask()`` with default parameters."""
+        return self.unknown_mask()

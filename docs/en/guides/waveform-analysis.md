@@ -1,42 +1,30 @@
 # Waveform analysis
 
-A `Waveform` contains three aligned arrays:
+Operations on a `Waveform` return new `Waveform` objects, keeping the
+`.cycle` and `.time` axes aligned when filtering or transforming samples, so
+results can always be traced back to the original simulation.
 
-- `.value`: sampled signal values;
-- `.cycle`: absolute clock-cycle numbers, starting at cycle 0 for the first
-  sampling edge in the file;
-- `.time`: timestamps in the waveform file's native time unit.
+## Arithmetic and bitwise operations
 
-Operations return new `Waveform` objects. They preserve the cycle and time axes
-when filtering or transforming samples, so analysis results can still be traced
-back to the original simulation.
-
-## Load and operate on waveforms
+Waveforms support element-wise arithmetic, comparison, bitwise, and shift
+operations with other waveforms or numeric scalars:
 
 ```python
 from wavekit import VcdReader
 
 with VcdReader('simulation.vcd') as reader:
-    write_pointer = reader.load_waveform(
-        'tb.fifo.w_ptr',
-        clock='tb.clk',
-    )
-    read_pointer = reader.load_waveform(
-        'tb.fifo.r_ptr',
-        clock='tb.clk',
-    )
+    with reader.clock_domain(clock='tb.clk'):
+        write_pointer = reader['tb.fifo.w_ptr'].w
+        read_pointer = reader['tb.fifo.r_ptr'].w
 
     depth = 8
     occupancy = (write_pointer + depth - read_pointer) % depth
 ```
 
-Waveforms support element-wise arithmetic, comparison, bitwise, and shift
-operations with other waveforms or numeric scalars.
-
 Loaded waveforms are interpreted as unsigned by default. Pass `signed=True` to
-`load_waveform()` when a signal should be interpreted as signed. Two waveform
-operands must have the same signedness. Convert an existing waveform with
-`.as_signed()` or `.as_unsigned()` when necessary.
+`Signal.waveform()` or `load_waveform()` when a signal should be interpreted
+as signed. Two waveform operands must have the same signedness. Convert an
+existing waveform with `.as_signed()` or `.as_unsigned()` when necessary.
 
 ## Filter and slice
 
@@ -139,20 +127,6 @@ one_per_run = data.unique_consecutive()
 compact = data.compress()
 summary = data.downsample(100)  # average each 100-sample chunk
 ```
-
-## Keep unknown values visible
-
-Ordinary loading replaces X/Z states with `xz_value` (zero by default). To
-preserve X/Z information, load a companion mask:
-
-```python
-value = reader.load_waveform('tb.data[7:0]', clock='tb.clk', xz_value=0)
-unknown = reader.load_unknown_mask('tb.data[7:0]', clock='tb.clk')
-known_value = value.mask(unknown == 0)
-```
-
-The mask has one bit per selected source bit. Its values are unsigned, even if
-the value waveform is signed.
 
 ## Extract NumPy results
 
