@@ -54,6 +54,15 @@ low_byte = data[7:0]
 ready = valid[0]
 ```
 
+使用 `countones()` 和 `countbits()` 统计每个采样值中为 1 或为 0 的比特数。使用 `onehot()` 和 `onehot0()` 判断恰好一个或至多一个比特为 1：
+
+```python
+set_bits = data.countones()
+zero_bits = data.countbits(0)
+one_selected = grants.onehot()
+zero_or_one_selected = grants.onehot0()
+```
+
 `split_bits()` 接受一个整数或一个宽度列表。传入整数时，信号会被拆成等宽的分组；传入列表时，可以指定每个分组的宽度。返回的分组从最低有效位到最高有效位排列：
 
 ```python
@@ -84,10 +93,11 @@ majority = Waveform.merge(
 
 ## 边沿与归约
 
-使用 `changed()` 检测任意位宽信号的值变化：
+使用 `changed()` 和 `stable()` 将每个采样值与前一个采样值比较。两者语义互补：值不同时 `changed()` 为真，值相同时 `stable()` 为真。对于第一个采样点，`changed()` 为假，`stable()` 为真：
 
 ```python
 occupancy_changes = occupancy.changed()
+occupancy_stable = occupancy.stable()
 change_cycles = occupancy_changes.cycle[occupancy_changes.value]
 ```
 
@@ -100,8 +110,6 @@ stops = valid.falling_edge()
 start_times = starts.time[starts.value]
 stop_times = stops.time[stops.value]
 ```
-
-如果不需要区分上升沿和下降沿，可以使用 `any_edge()`。
 
 使用 `unique_consecutive()` 保留每个连续区间的第一个采样点；使用 `compress()` 时，还会保留波形的最后一个采样点。需要将长波形聚合为连续的数据块时，可以使用 `downsample()`：
 

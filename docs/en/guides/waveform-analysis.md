@@ -66,6 +66,17 @@ low_byte = data[7:0]
 ready = valid[0]
 ```
 
+Use `countones()` and `countbits()` to count set or cleared bits in each
+sample. Use `onehot()` and `onehot0()` to test whether exactly one, or at most
+one, bit is set:
+
+```python
+set_bits = data.countones()
+zero_bits = data.countbits(0)
+one_selected = grants.onehot()
+zero_or_one_selected = grants.onehot0()
+```
+
 `split_bits()` accepts either an integer for equal-width groups or a list of
 explicit widths. Groups are returned from least significant to most significant:
 
@@ -98,10 +109,14 @@ majority = Waveform.merge(
 
 ## Transitions and reduction
 
-Use `changed()` to detect value changes in signals of any width:
+Use `changed()` and `stable()` to compare each sample with the previous one.
+They are complementary: the first is true when values differ, while the second
+is true when they match. At the first sample, `changed()` is false and
+`stable()` is true:
 
 ```python
 occupancy_changes = occupancy.changed()
+occupancy_stable = occupancy.stable()
 change_cycles = occupancy_changes.cycle[occupancy_changes.value]
 ```
 
@@ -115,8 +130,6 @@ stops = valid.falling_edge()
 start_times = starts.time[starts.value]
 stop_times = stops.time[stops.value]
 ```
-
-Use `any_edge()` when the transition direction does not matter.
 
 Use `unique_consecutive()` to keep the first sample of each consecutive run, or
 `compress()` to also preserve the final sample of the waveform. Use
