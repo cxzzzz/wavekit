@@ -1,14 +1,34 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
+from wavekit.readers.base import Reader
 from wavekit.readers.hierarchy import Node, Scope
 from wavekit.readers.matcher import ExactCapture, ExactMatcher, WildcardCapture
 
 
+class StubReader(Reader):
+    """Minimal Reader stub; mock trees never load waveforms."""
+
+    @property
+    def top_scopes(self) -> tuple[Scope, ...]:
+        return ()
+
+    def _load_value_changes(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def close(self):
+        pass
+
+
+_STUB_READER = StubReader()
+
+
 @dataclass(frozen=True, eq=False)
 class DefinitionScope(Scope):
-    reader: object | None = None  # mock trees never load waveforms
     module: str = ''
     _children: tuple[Node, ...] = field(default_factory=tuple)
+    reader: Reader = field(default=_STUB_READER, repr=False, compare=False)
 
     @property
     def definition(self) -> str:
