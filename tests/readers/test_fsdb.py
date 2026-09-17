@@ -113,8 +113,9 @@ def test_fsdb_reader_clock_domain(fsdb_runtime):
         assert np.array_equal(ambient.value, expected.value)
 
         cd = reader.clock_domain(clock='simple_tb.clk')
-        explicit = reader.load_waveform('simple_tb.data_i', clock=cd)
-        assert np.array_equal(explicit.value, expected.value)
+        with cd:
+            reused = reader['simple_tb']['data_i'].w
+        assert np.array_equal(reused.value, expected.value)
         with pytest.raises(RuntimeError, match='requires an active clock domain'):
             _ = reader['simple_tb']['data_i'].w
 
