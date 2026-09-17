@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.8.0 - 2026-09-18
+
 ### Changed (breaking)
 
 - Rename `Waveform.clock` to `Waveform.cycle` for the absolute clock-cycle
@@ -38,6 +40,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Add SystemVerilog-style waveform helpers: `past()`, `rose()`, `fell()`,
+  `stable()`, `countones()`, `countbits()`, `onehot()`, and `onehot0()`.
 - Add clock domains: `with r.clock_domain(clock='tb.clk')` makes
   `Signal.w` / `Signal.m` / `Signal.waveform()` / `Signal.unknown_mask()`
   load against an ambient sampling recipe. `clock` / `clock_path` on
@@ -53,6 +57,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - Allow omitting `Waveform.slice()` bounds: `start_index` and `end_index`
   default to `None`, following Python slicing semantics
   (`wave.slice(2)`, `wave.slice(end_index=5)`).
+- Add Linux, macOS arm64, and Pyodide/PyEmscripten wheel builds.
 
 ## v0.7.3 - 2026-08-28
 

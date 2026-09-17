@@ -34,8 +34,8 @@ field = signal[31:16]  # 取多位
 
 ```python
 with VcdReader('simulation.vcd') as reader:
-    with reader.clock_domain('tb.clk'): 
-        valid = reader['tb.dut.valid'].w  
+    with reader.clock_domain('tb.clk'):
+        valid = reader['tb.dut.valid'].w
         data = reader.load_waveform('tb.dut.data[7:0]')
 ```
 

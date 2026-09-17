@@ -14,12 +14,12 @@ if os.environ.get('PYODIDE'):
     link_args = ['-O3']
     fsdb_libraries = []
 elif sys.platform == 'linux':
-    compile_args = ['-fpic', '-O3', '-march=native']
-    link_args = ['-O3', '-march=native']
+    compile_args = ['-fpic', '-O3']
+    link_args = ['-O3']
     fsdb_libraries = ['dl']
 elif sys.platform == 'darwin':
-    compile_args = ['-fpic', '-O3', '-march=native']
-    link_args = ['-O3', '-march=native']
+    compile_args = ['-fpic', '-O3']
+    link_args = ['-O3']
     fsdb_libraries = []
 else:
     raise RuntimeError(f'Unsupported platform: {sys.platform}')

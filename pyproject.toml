@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "wavekit"
-version = "0.7.3"
+version = "0.8.0"
 description = "High-level digital waveform analysis in Python"
 authors = ["cxzzzz <cxz19961010@outlook.com>"]
 readme = "README.md"
@@ -15,10 +15,10 @@ include = [
 python = "^3.9"
 numpy = "^2.0.0"
 wavekit-pywellen = ">=0.25.6"
-pytest = "^8.2.2"
 lark = ">=1.2,<2"
 
 [tool.poetry.group.dev.dependencies]
+pytest = "^8.2.2"
 ruff = "^0.6.2"
 mypy = "^1.11.2"
 
