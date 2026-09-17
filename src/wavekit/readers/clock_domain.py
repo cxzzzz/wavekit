@@ -28,9 +28,18 @@ class ClockDomain(ContextDecorator):
     )
 
     @classmethod
-    def current(cls) -> ClockDomain | None:
-        """Return the ambient ``ClockDomain``, or ``None`` outside a ``with`` block."""
-        return cls._current.get()
+    def current(cls) -> ClockDomain:
+        """Return the ambient ``ClockDomain``.
+
+        Raises ``RuntimeError`` if no domain is active.
+        """
+        domain = cls._current.get()
+        if domain is None:
+            raise RuntimeError(
+                'requires an active clock domain.\n'
+                '  Enter one with:  with reader.clock_domain(clock=...):'
+            )
+        return domain
 
     def sampling_kwargs(self) -> dict[str, Any]:
         """Return this domain's sampling fields as ``load_waveform``-style kwargs."""

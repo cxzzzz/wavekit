@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import cached_property
+from functools import cached_property, lru_cache
 from typing import TYPE_CHECKING, cast
 
 from .matcher import (
@@ -22,6 +22,7 @@ from .range import Range
 if TYPE_CHECKING:
     from ..waveform import Waveform
     from .base import Reader
+    from .clock_domain import ClockDomain
 
 
 class SignalCompositeType(Enum):
@@ -397,18 +398,50 @@ class Signal(Node):
             return self.with_range(Range(key.start, key.stop))
         return self.with_range(Range(key, key))
 
+    @cached_property
+    def _waveform_cache(self):
+        @lru_cache(maxsize=8)
+        def cached(domain: ClockDomain, xz_value: int, signed: bool) -> Waveform:
+            return self.reader.load_waveform(
+                self,
+                clock=domain.clock,
+                xz_value=xz_value,
+                signed=signed,
+                **domain.sampling_kwargs(),
+            )
+
+        return cached
+
     def waveform(self, xz_value: int = 0, signed: bool = False) -> Waveform:
         """Load this signal as a ``Waveform`` using the ambient clock domain."""
-        return self.reader.load_waveform(self, xz_value=xz_value, signed=signed)
+        from .clock_domain import ClockDomain
+
+        return self._waveform_cache(ClockDomain.current(), xz_value, signed)
 
     @property
     def w(self) -> Waveform:
         """Return ``waveform()`` with default parameters."""
         return self.waveform()
 
+    @cached_property
+    def _unknown_mask_cache(self):
+        @lru_cache(maxsize=8)
+        def cached(domain: ClockDomain, include_x: bool, include_z: bool) -> Waveform:
+            return self.reader.load_unknown_mask(
+                self,
+                clock=domain.clock,
+                include_x=include_x,
+                include_z=include_z,
+                **domain.sampling_kwargs(),
+            )
+
+        return cached
+
     def unknown_mask(self, include_x: bool = True, include_z: bool = True) -> Waveform:
         """Load this signal's X/Z presence using the ambient clock domain."""
-        return self.reader.load_unknown_mask(self, include_x=include_x, include_z=include_z)
+        from .clock_domain import ClockDomain
+
+        return self._unknown_mask_cache(ClockDomain.current(), include_x, include_z)
 
     @property
     def m(self) -> Waveform:

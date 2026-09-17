@@ -149,12 +149,6 @@ class Reader:
         if clock is not None:
             return clock, call_sampling
         domain = ClockDomain.current()
-        if domain is None:
-            raise RuntimeError(
-                'requires an active clock domain when clock is omitted.\n'
-                '  Enter one with:  with reader.clock_domain(clock=...):\n'
-                '  Or pass clock explicitly.'
-            )
         return domain.clock, domain.sampling_kwargs()
 
     def load_waveform(
