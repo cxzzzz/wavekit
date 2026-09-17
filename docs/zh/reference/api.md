@@ -1,7 +1,5 @@
 # API 参考
 
-本页列出 wavekit 的主要公共 API。API 的类名、函数名和签名保持代码中的英文形式，便于与实际调用对应；具体 API 说明由源代码自动生成。
-
 ## Waveform
 
 `Waveform` 是波形分析的核心对象，包含采样值以及对应的周期和时间轴。
@@ -66,3 +64,9 @@
 ::: wavekit.RegexCapture
 
 ::: wavekit.WildcardCapture
+
+## 时钟域
+
+`ClockDomain` 打包了一个时钟信号和一套采样配置（边沿、时间或周期窗口），供 `Signal.w`/`Signal.m` 等方法在环境中读取。
+
+::: wavekit.ClockDomain

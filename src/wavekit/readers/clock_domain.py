@@ -19,7 +19,9 @@ class ClockDomain(ContextDecorator):
     end_time: int | None = None
     start_cycle: int | None = None
     end_cycle: int | None = None
-    _tokens: list[contextvars.Token] = field(default_factory=list, repr=False, compare=False)
+    _tokens: list[contextvars.Token] = field(
+        default_factory=list, init=False, repr=False, compare=False
+    )
 
     _current: ClassVar[contextvars.ContextVar[ClockDomain | None]] = contextvars.ContextVar(
         'wavekit_clock_domain', default=None

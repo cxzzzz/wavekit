@@ -29,6 +29,7 @@ __all__ = [
     'VcdReader',
     'FsdbReader',
     'FstReader',
+    'ClockDomain',
     'Node',
     'Scope',
     'Range',
