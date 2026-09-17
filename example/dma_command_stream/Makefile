@@ -1,5 +1,5 @@
 sim:
-	iverilog -o dma_tb.vvp dma_tb.sv dma_engine.sv -g2005-sv
+	iverilog -g2005-sv -o dma_tb.vvp dma_tb.sv dma_engine.sv
 	vvp dma_tb.vvp
 
 analyze:

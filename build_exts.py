@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -20,7 +21,7 @@ extensions = [
         'wavekit.readers.fsdb.npi_fsdb_reader',
         sources=['src/wavekit/readers/fsdb/npi_fsdb_reader.pyx'],
         include_dirs=[np.get_include()],
-        libraries=['dl'],
+        libraries=['dl'] if sys.platform != 'darwin' else [],
         extra_compile_args=['-fpic', '-O3', '-march=native'],
         extra_link_args=['-O3', '-march=native'],
         language='c++',
