@@ -1,5 +1,5 @@
 sim:
-	iverilog -o axi_lite_tb.vvp axi_lite_tb.sv axi_lite_master.sv axi_lite_reg_slave.sv -g2005-sv
+	iverilog -g2005-sv -o axi_lite_tb.vvp axi_lite_tb.sv axi_lite_master.sv axi_lite_reg_slave.sv
 	vvp axi_lite_tb.vvp
 
 analyze:

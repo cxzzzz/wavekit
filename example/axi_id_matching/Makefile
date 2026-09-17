@@ -1,5 +1,5 @@
 sim:
-	iverilog -o axi_read_reorder_tb.vvp axi_read_reorder_tb.sv axi_read_master.sv axi_read_reorder_slave.sv -g2005-sv
+	iverilog -g2005-sv -o axi_read_reorder_tb.vvp axi_read_reorder_tb.sv axi_read_master.sv axi_read_reorder_slave.sv
 	vvp axi_read_reorder_tb.vvp
 
 analyze:

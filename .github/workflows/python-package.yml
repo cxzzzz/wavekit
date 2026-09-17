@@ -22,10 +22,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install Poetry
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install poetry
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -34,28 +30,18 @@ jobs:
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install icarus-verilog
-      - name: Cache Poetry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pypoetry
-            ~/.cache/pip
-            .venv
-          key: ${{ runner.os }}-poetry-${{ matrix.python-version }}-${{ hashFiles('**/poetry.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-poetry-${{ matrix.python-version }}-
       - name: Install dependencies
         run: |
-          poetry config virtualenvs.in-project true
-          poetry install
+          python -m pip install --upgrade pip
+          python -m pip install . "ruff>=0.6.2,<0.7" "mypy>=1.11.2,<2"
       - name: Lint
         run: |
-          poetry run ruff check .
-          poetry run ruff format --check .
+          ruff check .
+          ruff format --check .
       - name: Type check
-        run: poetry run mypy
+        run: mypy
       - name: Test
-        run: poetry run pytest
+        run: pytest
 
   build:
     runs-on: ${{ matrix.os }}
