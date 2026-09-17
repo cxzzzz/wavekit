@@ -14,17 +14,12 @@ def verify_fifo_data_integrity():
     with VcdReader('fifo_tb.vcd') as f:
         tb = f['fifo_tb']
 
-        # Load signals sampled on clock edges
-        sigs = {
-            name: f.load_waveform(tb[name], clock=tb['clk'])
-            for name in ['w_en', 'full', 'data_in', 'r_en', 'empty', 'data_out']
-        }
+        with f.clock_domain(tb['clk']):
+            valid_w_idx = (tb['w_en'].w & (~tb['full'].w)).filter(lambda x: x != 0).cycle
+            valid_w_data = tb['data_in'].w.take(valid_w_idx)
 
-        valid_w_idx = (sigs['w_en'] & (~sigs['full'])).filter(lambda x: x != 0).cycle
-        valid_w_data = sigs['data_in'].take(valid_w_idx)
-
-        valid_r_idx = (sigs['r_en'] & (~sigs['empty'])).filter(lambda x: x != 0).cycle
-        valid_r_data = sigs['data_out'].take(valid_r_idx + 1)
+            valid_r_idx = (tb['r_en'].w & (~tb['empty'].w)).filter(lambda x: x != 0).cycle
+            valid_r_data = tb['data_out'].w.take(valid_r_idx + 1)
 
         print(f'Total Valid Writes: {len(valid_w_data.value)}')
         print(f'Total Valid Reads:  {len(valid_r_data.value)}')

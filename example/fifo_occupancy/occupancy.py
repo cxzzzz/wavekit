@@ -3,11 +3,13 @@ import numpy as np
 from wavekit import VcdReader
 
 with VcdReader('fifo_tb.vcd') as f:
-    clock = 'fifo_tb.s_fifo.clk'
+    fifo = f['fifo_tb.s_fifo']
     depth = 8
 
-    w_ptr = f.load_waveform('fifo_tb.s_fifo.w_ptr', clock=clock)
-    r_ptr = f.load_waveform('fifo_tb.s_fifo.r_ptr', clock=clock)
+    with f.clock_domain(fifo['clk']):
+        w_ptr = fifo['w_ptr'].w
+        r_ptr = fifo['r_ptr'].w
+
     fifo_water_level = (w_ptr + depth - r_ptr) % depth
     average_fifo_water_level = np.mean(fifo_water_level.value)
     print('FIFO Occupancy Analysis:')

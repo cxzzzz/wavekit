@@ -6,11 +6,11 @@ from wavekit import VcdReader
 def analyze_write_latency():
     # Analyze how long write requests are blocked (Backpressure Latency)
     with VcdReader('fifo_tb.vcd') as f:
-        clock = 'fifo_tb.s_fifo.clk'
+        fifo = f['fifo_tb.s_fifo']
 
-        # Load signals sampled on clock edges
-        w_en = f.load_waveform('fifo_tb.s_fifo.w_en', clock=clock)
-        full = f.load_waveform('fifo_tb.s_fifo.full', clock=clock)
+        with f.clock_domain(fifo['clk']):
+            w_en = fifo['w_en'].w
+            full = fifo['full'].w
 
         # Logic: Request (w_en) is blocked if FIFO is full
         # blocked mask: when both w_en and full are high
