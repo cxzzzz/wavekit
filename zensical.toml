@@ -33,6 +33,7 @@ alternate = [
 
 [project.theme]
 language = "en"
+custom_dir = "overrides"
 logo = "images/logo.svg"
 favicon = "images/favicon.svg"
 font.text = "Inter"
