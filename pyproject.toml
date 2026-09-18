@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "wavekit"
-version = "0.8.0"
+version = "0.8.1"
 description = "High-level digital waveform analysis in Python"
 authors = ["cxzzzz <cxz19961010@outlook.com>"]
 readme = "README.md"

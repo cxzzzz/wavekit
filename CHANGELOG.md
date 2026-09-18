@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.8.1 - 2026-09-18
+
+### Changed
+
+- Build the Pyodide wheel for CPython 3.14 instead of CPython 3.13.
+
 ## v0.8.0 - 2026-09-18
 
 ### Changed (breaking)
