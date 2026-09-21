@@ -22,6 +22,7 @@ nav = [
     { "API reference" = "reference/api.md" },
   ] },
   { "Examples" = "examples.md" },
+  { "Playground" = "https://cxzzzz.github.io/wavekit-playground/" },
   { "Contributing" = "contributing.md" },
 ]
 

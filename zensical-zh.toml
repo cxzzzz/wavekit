@@ -22,6 +22,7 @@ nav = [
     { "API 参考" = "reference/api.md" },
   ] },
   { "示例" = "examples.md" },
+  { "在线体验" = "https://cxzzzz.github.io/wavekit-playground/" },
   { "参与贡献" = "contributing.md" },
 ]
 

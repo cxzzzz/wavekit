@@ -16,6 +16,7 @@ wavekit 通过同一套 API 加载 VCD、FST 和 FSDB 文件，将信号按时�
 
 ## 从这里开始
 
+- [在线体验 wavekit](https://cxzzzz.github.io/wavekit-playground/)。
 - [安装 wavekit](getting-started/installation.md)。
 - 从[第一个波形教程](getting-started/first-waveform.md)开始。
 - 根据波形格式选择对应的 [Reader](guides/reader.md)。

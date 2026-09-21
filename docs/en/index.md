@@ -26,6 +26,7 @@ Its main features include:
 
 ## Start here
 
+- [Try wavekit online](https://cxzzzz.github.io/wavekit-playground/).
 - [Install wavekit](getting-started/installation.md).
 - Follow [the first waveform tutorial](getting-started/first-waveform.md).
 - Choose a [reader for your waveform format](guides/reader.md).

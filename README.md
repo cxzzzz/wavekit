@@ -13,8 +13,8 @@ It loads signals from waveform files as clock-aligned `Waveform` objects,
 allowing users to query and operate on them at the cycle and transaction levels,
 making complex hardware behavior easier to analyze.
 
-> **AI integration:** [wavekit-mcp](https://github.com/cxzzzz/wavekit-mcp) exposes wavekit analysis through
-> MCP tools for AI-assisted workflows.
+> **Quick links:** [Online playground](https://cxzzzz.github.io/wavekit-playground/) ·
+> [AI integration](https://github.com/cxzzzz/wavekit-mcp)
 
 ## Features
 

@@ -10,8 +10,8 @@
 
 **Wavekit 是一个用于高层次数字波形分析的 Python 库。** 它将数字波形中记录的信号变化转换为时钟对齐的 `Waveform` 对象，使用户可以在周期级和事务级上查询和处理这些信息，实现对复杂硬件行为的分析。
 
-> **AI 集成：** [wavekit-mcp](https://github.com/cxzzzz/wavekit-mcp) 提供 MCP Server，让 AI 工具可以调用
-> wavekit 进行波形分析。
+> **快速入口：** [在线 Playground](https://cxzzzz.github.io/wavekit-playground/) ·
+> [AI 集成](https://github.com/cxzzzz/wavekit-mcp)
 
 ## wavekit 主要功能
 
