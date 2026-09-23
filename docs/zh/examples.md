@@ -11,3 +11,4 @@
 | [DMA 命令流](https://github.com/cxzzzz/wavekit/tree/main/example/dma_command_stream/) | 提取长度可变的读写命令 | 编程式模式；Python 控制流 | `make -C example/dma_command_stream all` |
 | [Scoreboard](https://github.com/cxzzzz/wavekit/tree/main/example/scoreboard/) | 检查 FIFO 读写数据的完整性和顺序 | 波形过滤；索引提取；与 NumPy 交互 | `make -C example/scoreboard all` |
 | [多 cluster 水位](https://github.com/cxzzzz/wavekit/tree/main/example/multi_cluster_occupancy/) | 对比一组 cluster 下各 FIFO 的占用率 | 批量信号查询；跨层级作用域匹配 | `make -C example/multi_cluster_occupancy all` |
+| [FIFO 回归对比](https://github.com/cxzzzz/wavekit/tree/main/example/fifo_regression_diff/) | 对比两次仿真的 FIFO 读出数据 | 模式提取；与 NumPy 交互 | `make -C example/fifo_regression_diff all` |
