@@ -3,8 +3,15 @@ name: Documentation
 on:
   push:
     branches: ['main']
+    tags: ['v*']
   pull_request:
     branches: ['main']
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'Deploy to GitHub Pages after building'
+        type: boolean
+        default: false
 permissions:
   contents: read
 
@@ -47,7 +54,9 @@ jobs:
           path: site
 
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: |
+      startsWith(github.ref, 'refs/tags/v') ||
+      inputs.deploy == true
     needs: build
     runs-on: ubuntu-latest
     permissions:
