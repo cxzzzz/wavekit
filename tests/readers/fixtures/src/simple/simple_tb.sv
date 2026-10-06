@@ -1,3 +1,4 @@
+// wavekit-fixture: vcs fsdb
 module simple_tb;
   typedef struct packed {
     logic       valid;
@@ -40,7 +41,7 @@ module simple_tb;
     string fsdb_file;
 
     if (!$value$plusargs("fsdbfile=%s", fsdb_file)) begin
-      fsdb_file = "tests/testdata/simple.fsdb";
+      fsdb_file = "tests/readers/fixtures/generated/simple.fsdb";
     end
 
     $fsdbDumpfile(fsdb_file);

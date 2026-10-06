@@ -6,12 +6,12 @@ from wavekit import ClockDomain, FstReader, VcdReader
 
 @pytest.fixture()
 def vcd_path():
-    return 'tests/readers/fixtures/vcd/compare.vcd'
+    return 'tests/readers/fixtures/generated/compare.vcd'
 
 
 @pytest.fixture()
 def xz_vcd_path():
-    return 'tests/readers/fixtures/vcd/compare_xz.vcd'
+    return 'tests/readers/fixtures/generated/compare_xz.vcd'
 
 
 def _open(path):
@@ -147,7 +147,7 @@ def test_waveform_and_unknown_mask_signal_level_options(xz_vcd_path):
 
 
 def test_clock_domain_on_fst_reader():
-    with FstReader('tests/readers/fixtures/fst/compare.fst') as r:
+    with FstReader('tests/readers/fixtures/generated/compare.fst') as r:
         expected = r.load_waveform('compare_tb.dut.counter', clock='compare_tb.clk')
         with r.clock_domain(clock='compare_tb.clk'):
             ambient = r['compare_tb.dut.counter'].w

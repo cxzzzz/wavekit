@@ -40,32 +40,32 @@ def _assert_same_waveform(actual, expected):
 
 @pytest.fixture()
 def vcd_path():
-    return Path(__file__).resolve().parent / 'fixtures' / 'vcd' / 'jtag.vcd'
+    return Path(__file__).resolve().parent / 'fixtures' / 'recorded' / 'jtag.vcd'
 
 
 @pytest.fixture()
 def compare_vcd_path():
-    return Path(__file__).resolve().parent / 'fixtures' / 'vcd' / 'compare.vcd'
+    return Path(__file__).resolve().parent / 'fixtures' / 'generated' / 'compare.vcd'
 
 
 @pytest.fixture()
 def compare_fst_path():
-    return Path(__file__).resolve().parent / 'fixtures' / 'fst' / 'compare.fst'
+    return Path(__file__).resolve().parent / 'fixtures' / 'generated' / 'compare.fst'
 
 
 @pytest.fixture()
 def compare_xz_vcd_path():
-    return Path(__file__).resolve().parent / 'fixtures' / 'vcd' / 'compare_xz.vcd'
+    return Path(__file__).resolve().parent / 'fixtures' / 'generated' / 'compare_xz.vcd'
 
 
 @pytest.fixture()
 def unknown_vcd_path():
-    return Path(__file__).resolve().parent / 'fixtures' / 'vcd' / 'unknown_states.vcd'
+    return Path(__file__).resolve().parent / 'fixtures' / 'recorded' / 'unknown_states.vcd'
 
 
 @pytest.fixture()
 def nonzero_vcd_path():
-    return Path(__file__).resolve().parent / 'fixtures' / 'vcd' / 'nonzero_ranges.vcd'
+    return Path(__file__).resolve().parent / 'fixtures' / 'recorded' / 'nonzero_ranges.vcd'
 
 
 # ------------------------------------------------------------------

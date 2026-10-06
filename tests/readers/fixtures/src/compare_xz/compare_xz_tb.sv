@@ -1,3 +1,5 @@
+// wavekit-fixture: iverilog vcd fst
+// wavekit-fixture: vcs fsdb
 module compare_xz_tb;
 
   logic clk;

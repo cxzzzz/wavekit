@@ -38,31 +38,23 @@ def _assert_same_waveform(actual, expected):
 
 
 @pytest.fixture()
-def fst_path():
-    path = Path(__file__).resolve().parent / 'fixtures' / 'fst' / 'counter.fst'
-    if not path.exists():
-        pytest.skip('counter.fst fixture is unavailable')
-    return path
-
-
-@pytest.fixture()
 def compare_fst_path():
-    return Path(__file__).resolve().parent / 'fixtures' / 'fst' / 'compare.fst'
+    return Path(__file__).resolve().parent / 'fixtures' / 'generated' / 'compare.fst'
 
 
 @pytest.fixture()
 def compare_vcd_path():
-    return Path(__file__).resolve().parent / 'fixtures' / 'vcd' / 'compare.vcd'
+    return Path(__file__).resolve().parent / 'fixtures' / 'generated' / 'compare.vcd'
 
 
 @pytest.fixture()
 def compare_xz_fst_path():
-    return Path(__file__).resolve().parent / 'fixtures' / 'fst' / 'compare_xz.fst'
+    return Path(__file__).resolve().parent / 'fixtures' / 'generated' / 'compare_xz.fst'
 
 
 @pytest.fixture()
 def unknown_fst_path():
-    path = Path(__file__).resolve().parent / 'fixtures' / 'fst' / 'unknown_states.fst'
+    path = Path(__file__).resolve().parent / 'fixtures' / 'recorded' / 'unknown_states.fst'
     if not path.exists():
         pytest.skip('unknown_states.fst fixture is unavailable')
     return path
@@ -70,7 +62,7 @@ def unknown_fst_path():
 
 @pytest.fixture()
 def nonzero_fst_path():
-    path = Path(__file__).resolve().parent / 'fixtures' / 'fst' / 'nonzero_ranges.fst'
+    path = Path(__file__).resolve().parent / 'fixtures' / 'recorded' / 'nonzero_ranges.fst'
     if not path.exists():
         pytest.skip('nonzero_ranges.fst fixture is unavailable')
     return path
@@ -416,30 +408,34 @@ def test_fst_load_waveform_signal_object(compare_fst_path):
     assert w.signed is True
 
 
-def test_fst_load_waveform_subrange_name(fst_path):
-    with FstReader(str(fst_path)) as reader:
-        w = reader.load_waveform('tb.dut.counter[1:0]', clock='tb.clk')
-    assert w.signal.full_name == 'tb.dut.counter[1:0]'
+def test_fst_load_waveform_subrange_name(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        w = reader.load_waveform('compare_tb.dut.counter[1:0]', clock='compare_tb.clk')
+    assert w.signal.full_name == 'compare_tb.dut.counter[1:0]'
     assert w.width == 2
 
 
-def test_fst_reader_load_waveform_without_range(fst_path):
-    with FstReader(str(fst_path)) as reader:
-        counter = reader.load_waveform('tb.dut.counter', clock='tb.clk', sample_on_posedge=True)
+def test_fst_reader_load_waveform_without_range(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        counter = reader.load_waveform(
+            'compare_tb.dut.counter', clock='compare_tb.clk', sample_on_posedge=True
+        )
 
-    assert counter.signal.full_name == 'tb.dut.counter[3:0]'
+    assert counter.signal.full_name == 'compare_tb.dut.counter[3:0]'
     assert counter.width == 4
     assert counter.signed is False
-    assert np.array_equal(counter.time[:5], np.array([10, 30, 50, 70, 90], dtype=np.uint64))
+    assert np.array_equal(counter.time[:5], np.array([5, 15, 25, 35, 45], dtype=np.uint64))
     assert np.array_equal(counter.cycle[:5], np.arange(5, dtype=np.uint64))
-    assert np.array_equal(counter.value[:5], np.array([0, 0, 0, 0, 0], dtype=np.uint64))
-    assert counter.value[5] == 1
+    assert np.array_equal(counter.value[:5], np.array([0, 1, 2, 3, 4], dtype=np.uint64))
+    assert counter.value[5] == 5
 
 
-def test_fst_reader_subrange_load(fst_path):
-    with FstReader(str(fst_path)) as reader:
-        low_bits = reader.load_waveform('tb.dut.counter[1:0]', clock='tb.clk')
-        matched_low_bits = reader.load_matched_waveforms('tb.dut.counter[1:0]', 'tb.clk')[()]
+def test_fst_reader_subrange_load(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        low_bits = reader.load_waveform('compare_tb.dut.counter[1:0]', clock='compare_tb.clk')
+        matched_low_bits = reader.load_matched_waveforms(
+            'compare_tb.dut.counter[1:0]', 'compare_tb.clk'
+        )[()]
 
     assert low_bits.width == 2
     assert np.all(low_bits.value < 4)
@@ -447,10 +443,10 @@ def test_fst_reader_subrange_load(fst_path):
     assert np.array_equal(matched_low_bits.value, low_bits.value)
 
 
-def test_fst_reader_midrange_load(fst_path):
-    with FstReader(str(fst_path)) as reader:
-        full = reader.load_waveform('tb.dut.counter[3:0]', clock='tb.clk')
-        high_bits = reader.load_waveform('tb.dut.counter[3:2]', clock='tb.clk')
+def test_fst_reader_midrange_load(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        full = reader.load_waveform('compare_tb.dut.counter[3:0]', clock='compare_tb.clk')
+        high_bits = reader.load_waveform('compare_tb.dut.counter[3:2]', clock='compare_tb.clk')
 
     assert high_bits.width == 2
     assert np.array_equal(high_bits.value, (full.value >> 2) & 0x3)
@@ -487,21 +483,23 @@ def test_fst_load_matched_waveforms_regex(compare_fst_path):
     assert all(wave.width == 8 for wave in waves.values())
 
 
-def test_fst_reader_load_matched_waveforms_regex_does_not_match_native_ranges(fst_path):
-    with FstReader(str(fst_path)) as reader:
-        waves = reader.load_matched_waveforms(r'tb.dut./(counter\[3:0\]|overflow)/', 'tb.clk')
+def test_fst_reader_load_matched_waveforms_regex_does_not_match_native_ranges(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        waves = reader.load_matched_waveforms(
+            r'compare_tb.dut./(counter\[3:0\]|rst_n)/', 'compare_tb.clk'
+        )
 
-    assert _capture_groups(waves) == {('overflow',)}
+    assert _capture_groups(waves) == {('rst_n',)}
     assert {wave.width for wave in waves.values()} == {1}
 
 
 def test_fst_reader_load_matched_waveforms_regex_without_groups_does_not_match_native_ranges(
-    fst_path,
+    compare_fst_path,
 ):
-    with FstReader(str(fst_path)) as reader:
+    with FstReader(str(compare_fst_path)) as reader:
         waves = reader.load_matched_waveforms(
-            r'tb.dut./(?:counter\[3:0\]|overflow)/',
-            'tb.clk',
+            r'compare_tb.dut./(?:counter\[3:0\]|rst_n)/',
+            'compare_tb.clk',
         )
         assert len(waves) == 1
 
@@ -516,34 +514,34 @@ def test_fst_load_matched_waveforms_uses_signal_range(compare_fst_path):
     assert wave.width == 8
 
 
-def test_fst_reader_load_matched_waveforms(fst_path):
-    with FstReader(str(fst_path)) as reader:
-        waves = reader.load_matched_waveforms('tb.dut.{counter,overflow}', 'tb.clk')
+def test_fst_reader_load_matched_waveforms(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
+        waves = reader.load_matched_waveforms('compare_tb.dut.{counter,status}', 'compare_tb.clk')
 
-    assert _capture_groups(waves) == {('counter',), ('overflow',)}
+    assert _capture_groups(waves) == {('counter',), ('status',)}
     assert _by_group(waves, 'counter').width == 4
-    assert _by_group(waves, 'overflow').width == 1
+    assert _by_group(waves, 'status').width == 16
 
 
-def test_fst_reader_module_name_matching_is_unsupported(fst_path):
-    with FstReader(str(fst_path)) as reader:
+def test_fst_reader_module_name_matching_is_unsupported(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
         with pytest.raises(ValueError):
-            reader.get_matched_signals('tb.$dut.counter[3:0]')
+            reader.get_matched_signals('compare_tb.$dut.counter[3:0]')
 
 
-def test_fst_reader_clock_path_error(fst_path):
-    with FstReader(str(fst_path)) as reader:
+def test_fst_reader_clock_path_error(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
         with pytest.raises(Exception):
-            reader.load_matched_waveforms('tb.dut.counter[3:0]', 'tb.no_clock')
+            reader.load_matched_waveforms('compare_tb.dut.counter[3:0]', 'compare_tb.no_clock')
 
 
-def test_fst_reader_clock_path_key_mismatch_error(fst_path):
+def test_fst_reader_clock_path_key_mismatch_error(compare_fst_path):
     # clock brace expansion yields different keys than the signal pattern
-    with FstReader(str(fst_path)) as reader:
+    with FstReader(str(compare_fst_path)) as reader:
         with pytest.raises(Exception, match='no clock key is a prefix'):
             reader.load_matched_waveforms(
-                'tb.dut.{counter,overflow}',  # keys: {('counter',), ('overflow',)}
-                'tb.{clk,reset}',  # keys: {('clk',), ('reset',)} — mismatch
+                'compare_tb.dut.{counter,status}',  # keys: {('counter',), ('status',)}
+                'compare_tb.{clk,rst_n}',  # keys: {('clk',), ('rst_n',)} — mismatch
             )
 
 
@@ -940,12 +938,16 @@ def test_fst_load_waveform_window_cycle(compare_fst_path):
     assert np.array_equal(windowed.value, full.value[10:20])
 
 
-def test_fst_reader_mutually_exclusive_errors(fst_path):
-    with FstReader(str(fst_path)) as reader:
+def test_fst_reader_mutually_exclusive_errors(compare_fst_path):
+    with FstReader(str(compare_fst_path)) as reader:
         with pytest.raises(ValueError, match='mutually exclusive'):
-            reader.load_waveform('tb.dut.counter[3:0]', clock='tb.clk', start_time=0, start_cycle=0)
+            reader.load_waveform(
+                'compare_tb.dut.counter[3:0]', clock='compare_tb.clk', start_time=0, start_cycle=0
+            )
         with pytest.raises(ValueError, match='mutually exclusive'):
-            reader.load_waveform('tb.dut.counter[3:0]', clock='tb.clk', end_time=10, end_cycle=1)
+            reader.load_waveform(
+                'compare_tb.dut.counter[3:0]', clock='compare_tb.clk', end_time=10, end_cycle=1
+            )
 
 
 # ------------------------------------------------------------------

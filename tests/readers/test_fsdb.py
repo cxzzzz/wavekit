@@ -51,17 +51,17 @@ def _assert_same_waveform(actual, expected):
 
 @pytest.fixture(scope='module')
 def simple_fsdb_path():
-    path = Path(__file__).resolve().parent / 'fixtures' / 'fsdb' / 'simple.fsdb'
+    path = Path(__file__).resolve().parent / 'fixtures' / 'generated' / 'simple.fsdb'
     if not path.exists():
         pytest.skip(
-            'simple.fsdb fixture is unavailable; run tests/readers/fixtures/fsdb/build_fsdb.sh'
+            'simple.fsdb fixture is unavailable; run build_fsdb.local.sh'
         )
     return path
 
 
 @pytest.fixture(scope='module')
 def compare_fsdb_path():
-    path = Path(__file__).resolve().parent / 'fixtures' / 'fsdb' / 'compare.fsdb'
+    path = Path(__file__).resolve().parent / 'fixtures' / 'generated' / 'compare.fsdb'
     if not path.exists():
         pytest.skip('compare.fsdb fixture is unavailable')
     return path
@@ -69,7 +69,7 @@ def compare_fsdb_path():
 
 @pytest.fixture(scope='module')
 def compare_xz_fsdb_path():
-    path = Path(__file__).resolve().parent / 'fixtures' / 'fsdb' / 'compare_xz.fsdb'
+    path = Path(__file__).resolve().parent / 'fixtures' / 'generated' / 'compare_xz.fsdb'
     if not path.exists():
         pytest.skip('compare_xz.fsdb fixture is unavailable')
     return path

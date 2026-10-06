@@ -1,3 +1,5 @@
+// wavekit-fixture: verilator vcd fst
+// wavekit-fixture: vcs fsdb
 module compare_tb;
 
   logic clk;
