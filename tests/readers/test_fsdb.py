@@ -53,9 +53,7 @@ def _assert_same_waveform(actual, expected):
 def simple_fsdb_path():
     path = Path(__file__).resolve().parent / 'fixtures' / 'generated' / 'simple.fsdb'
     if not path.exists():
-        pytest.skip(
-            'simple.fsdb fixture is unavailable; run build_fsdb.local.sh'
-        )
+        pytest.skip('simple.fsdb fixture is unavailable; run build_fsdb.local.sh')
     return path
 
 
