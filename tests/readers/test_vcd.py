@@ -512,6 +512,15 @@ def test_vcd_load_waveform_signed(compare_vcd_path):
     assert w.width == 8
 
 
+def test_vcd_load_waveform_signed_values(compare_vcd_path):
+    path = 'compare_tb.dut.counter'
+    with VcdReader(str(compare_vcd_path)) as reader:
+        signed = reader.load_waveform(path, clock='compare_tb.clk', signed=True)
+        expected = reader.load_waveform(path, clock='compare_tb.clk').as_signed()
+    assert signed.value.min() < 0
+    assert np.array_equal(signed.value, expected.value)
+
+
 def test_vcd_load_waveform_signed_default(compare_vcd_path):
     with VcdReader(str(compare_vcd_path)) as reader:
         w = reader.load_waveform('compare_tb.dut.unit_a.data[7:0]', clock='compare_tb.clk')

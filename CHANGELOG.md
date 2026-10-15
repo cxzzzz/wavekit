@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Fixed
+
+- `load_waveform(signed=True)` and the other `signed=` loaders now apply the
+  two's-complement conversion, so values match `.as_signed()` instead of
+  keeping the raw unsigned bit pattern (#26).
+
 ## v0.8.1 - 2026-09-18
 
 ### Changed

@@ -348,13 +348,8 @@ class Reader:
             clock_offset=clock_offset,
         )
 
-        return Waveform(
-            value=value,
-            cycle=clock,
-            time=time,
-            width=width,
-            signed=signed,
-        )
+        wf = Waveform(value=value, cycle=clock, time=time, width=width)
+        return wf.as_signed() if signed else wf
 
     @abstractmethod
     def _load_value_changes(
