@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.8.2 - 2026-10-15
+
 ### Fixed
 
 - `load_waveform(signed=True)` and the other `signed=` loaders now apply the
