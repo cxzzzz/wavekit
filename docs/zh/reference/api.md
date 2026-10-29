@@ -67,6 +67,6 @@
 
 ## 时钟域
 
-`ClockDomain` 打包了一个时钟信号和一套采样配置（边沿、时间或周期窗口），供 `Signal.w`/`Signal.m` 等方法在环境中读取。
+`ClockDomain` 打包了一个时钟信号和一套采样配置（边沿、复位、时间或周期窗口），供 `Signal.w`/`Signal.m` 等方法在环境中读取。
 
 ::: wavekit.ClockDomain
