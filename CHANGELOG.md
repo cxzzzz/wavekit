@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.8.3 - 2026-10-29
+
 ### Added
 
 - `clock_domain(reset=..., reset_active_level='high'|'low')` and the matching
