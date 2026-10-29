@@ -53,6 +53,13 @@ data = reader.load_waveform(
 
 用于同一次计算或模式匹配的波形，必须使用同一个时钟源、相同的采样边沿，以及相同的采样窗口，所以更推荐使用统一的时钟域，而不是每次都重复传参。
 
+时钟域还可以带上 reset，在域内加载的所有波形会丢掉 reset 有效期间的样本。必须同时指定有效电平：
+
+```python
+with reader.clock_domain('tb.clk', reset='tb.rst_n', reset_active_level='low'):
+    data = reader['tb.dut.data[7:0]'].w
+```
+
 ## 加载掩码
 
 加载波形会把 X/Z 状态替换成 `xz_value`（默认为 0）。如果需要保留这些状态（比如需要排除 X 态，或者需要追踪哪些位是 X/Z 时），可以用 `Signal.m` 或 `load_unknown_mask()` 加载对应的掩码：
@@ -128,7 +135,8 @@ with VcdReader('simulation.vcd') as reader:
 `Reader.eval()` 都支持上述语法。
 
 `clock_path` 只匹配到一个信号时，所有结果共用它作为时钟；匹配到多个信号时，
-每个信号会选取 key 是其最长前缀的一个时钟。
+每个信号会选取 key 是其最长前缀的一个时钟。`reset_path` 按同样的规则配对，
+`reset_active_level` 对整次调用生效。
 
 `$` 和 `$$` 只有 FSDB 的模块定义匹配能用。
 

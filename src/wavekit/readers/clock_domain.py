@@ -4,14 +4,14 @@ import contextvars
 import dataclasses
 from contextlib import ContextDecorator
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 from .hierarchy import Signal
 
 
 @dataclass(eq=False)
 class ClockDomain(ContextDecorator):
-    """A clock signal paired with its sampling edge and time/cycle window."""
+    """A clock signal paired with its sampling edge, time/cycle window and reset."""
 
     clock: Signal
     sample_on_posedge: bool = False
@@ -19,6 +19,8 @@ class ClockDomain(ContextDecorator):
     end_time: int | None = None
     start_cycle: int | None = None
     end_cycle: int | None = None
+    reset: Signal | None = None
+    reset_active_level: Literal['high', 'low'] | None = None
     _tokens: list[contextvars.Token] = field(
         default_factory=list, init=False, repr=False, compare=False
     )
@@ -42,11 +44,15 @@ class ClockDomain(ContextDecorator):
         return domain
 
     def sampling_kwargs(self) -> dict[str, Any]:
-        """Return this domain's sampling fields as ``load_waveform``-style kwargs."""
+        """Return this domain's sampling fields as ``load_waveform``-style kwargs.
+
+        The ``clock`` and ``reset`` signals are excluded because loaders resolve
+        and pair them separately.
+        """
         return {
             f.name: getattr(self, f.name)
             for f in dataclasses.fields(self)
-            if f.name not in ('clock', '_tokens')
+            if f.name not in ('clock', 'reset', '_tokens')
         }
 
     def __enter__(self) -> ClockDomain:

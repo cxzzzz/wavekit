@@ -7,6 +7,14 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+
+- `clock_domain(reset=..., reset_active_level='high'|'low')` and the matching
+  `load_waveform` / `load_unknown_mask` parameters drop the samples taken while
+  reset is active. `load_matched_waveforms`, `load_matched_unknown_masks`
+  (`reset_path=`) and `eval` (`reset=`) pair a reset query with the matched
+  signals the same way as the clock.
+
 ## v0.8.2 - 2026-10-15
 
 ### Fixed

@@ -68,6 +68,14 @@ the same clock source, sampling edge, and window, which is why a shared
 clock domain is usually the better fit over repeating the same parameters
 on every call.
 
+A clock domain can also carry a reset. Every waveform loaded in the domain
+drops the samples taken while reset is active; the active level is required:
+
+```python
+with reader.clock_domain('tb.clk', reset='tb.rst_n', reset_active_level='low'):
+    data = reader['tb.dut.data[7:0]'].w
+```
+
 ## Load a mask
 
 Loading a waveform replaces X/Z states with `xz_value` (zero by default). To
@@ -153,7 +161,8 @@ and `Reader.eval()` all support the same syntax.
 
 If `clock_path` matches one signal, that clock is shared by every result. If
 it matches multiple signals, wavekit selects, for each signal, the matched
-clock whose capture key is the longest prefix of the signal key.
+clock whose capture key is the longest prefix of the signal key. `reset_path`
+is paired by the same rules, and `reset_active_level` applies to the whole call.
 
 `$` and `$$` are available only for FSDB module-definition matching.
 

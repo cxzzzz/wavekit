@@ -70,8 +70,8 @@ query results within a waveform file.
 
 ## Clock domains
 
-`ClockDomain` bundles a clock signal with a sampling recipe (edge, time or
-cycle window) that `Signal.w`/`Signal.m` and related methods read from the
+`ClockDomain` bundles a clock signal with a sampling recipe (edge, reset, time
+or cycle window) that `Signal.w`/`Signal.m` and related methods read from the
 ambient context.
 
 ::: wavekit.ClockDomain
