@@ -405,6 +405,7 @@ class Signal(Node):
             return self.reader.load_waveform(
                 self,
                 clock=domain.clock,
+                reset=domain.reset,
                 xz_value=xz_value,
                 signed=signed,
                 **domain.sampling_kwargs(),
@@ -430,6 +431,7 @@ class Signal(Node):
             return self.reader.load_unknown_mask(
                 self,
                 clock=domain.clock,
+                reset=domain.reset,
                 include_x=include_x,
                 include_z=include_z,
                 **domain.sampling_kwargs(),

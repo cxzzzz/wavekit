@@ -105,6 +105,8 @@ class Reader:
         end_time: int | None = None,
         start_cycle: int | None = None,
         end_cycle: int | None = None,
+        reset: Signal | str | None = None,
+        reset_active_level: Literal['high', 'low'] | None = None,
     ) -> ClockDomain:
         """Build a reusable sampling recipe: a clock plus sampling parameters.
 
@@ -118,6 +120,8 @@ class Reader:
             Clock signal as a ``Signal`` or full dotted path string.
         sample_on_posedge, start_time, end_time, start_cycle, end_cycle:
             Same sampling/windowing semantics as ``load_waveform``.
+        reset, reset_active_level:
+            Same reset semantics as ``load_waveform``.
 
         Returns
         -------
@@ -125,6 +129,9 @@ class Reader:
             The constructed sampling recipe.
         """
         resolved_clock = clock if isinstance(clock, Signal) else self.get_signal(clock)
+        resolved_reset = (
+            reset if reset is None or isinstance(reset, Signal) else self.get_signal(reset)
+        )
         return ClockDomain(
             clock=resolved_clock,
             sample_on_posedge=sample_on_posedge,
@@ -132,24 +139,27 @@ class Reader:
             end_time=end_time,
             start_cycle=start_cycle,
             end_cycle=end_cycle,
+            reset=resolved_reset,
+            reset_active_level=reset_active_level,
         )
 
     @staticmethod
     def _resolve_ambient_clock(
         clock: Signal | str | None,
+        reset: Signal | str | None,
         **call_sampling: Any,
-    ) -> tuple[Signal | str, dict[str, Any]]:
-        """Resolve *clock*, falling back to the ambient domain when ``None``.
+    ) -> tuple[Signal | str, Signal | str | None, dict[str, Any]]:
+        """Resolve *clock* and *reset*, falling back to the ambient domain when *clock* is ``None``.
 
-        Explicit *clock* wins outright and keeps *call_sampling* as given;
-        omitted *clock* reads the ambient ``ClockDomain`` for both the
-        clock and every sampling field, raising ``RuntimeError`` if none
-        is active.
+        Explicit *clock* wins outright and keeps *reset* and *call_sampling* as
+        given; omitted *clock* reads the ambient ``ClockDomain`` for the clock,
+        the reset and every sampling field, raising ``RuntimeError`` if none is
+        active.
         """
         if clock is not None:
-            return clock, call_sampling
+            return clock, reset, call_sampling
         domain = ClockDomain.current()
-        return domain.clock, domain.sampling_kwargs()
+        return domain.clock, domain.reset, domain.sampling_kwargs()
 
     def load_waveform(
         self,
@@ -162,6 +172,8 @@ class Reader:
         end_time: int | None = None,
         start_cycle: int | None = None,
         end_cycle: int | None = None,
+        reset: Signal | str | None = None,
+        reset_active_level: Literal['high', 'low'] | None = None,
     ) -> Waveform:
         """Load a single signal as a clock-synchronised ``Waveform``.
 
@@ -211,6 +223,15 @@ class Reader:
             Absolute clock cycle number to stop loading at (exclusive).
             ``None`` means end of simulation.  Mutually exclusive with
             *end_time*.  Ignored when *clock* is omitted.
+        reset:
+            Optional reset signal as a ``Signal`` or full dotted path string.
+            Samples taken while reset is active are dropped; ``.cycle`` keeps
+            absolute cycle numbers. X/Z on the reset signal counts as active.
+            Ignored when *clock* is omitted.
+        reset_active_level:
+            ``'high'`` if reset is active while the signal is 1, ``'low'`` if
+            active while it is 0. Required when *reset* is given.  Ignored
+            when *clock* is omitted.
 
         Returns
         -------
@@ -226,26 +247,32 @@ class Reader:
             If *clock* is omitted and no ``ClockDomain`` is active.
         ValueError:
             If both *start_time* and *start_cycle* (or both *end_time* and
-            *end_cycle*) are provided simultaneously.
+            *end_cycle*) are provided simultaneously, or if *reset* is given
+            without a valid *reset_active_level*.
         """
         self._validate_xz_value(xz_value)
         resolved_signal = signal if isinstance(signal, Signal) else self.get_signal(signal)
-        resolved_clock, sampling = self._resolve_ambient_clock(
+        resolved_clock, resolved_reset, sampling = self._resolve_ambient_clock(
             clock,
+            reset,
             sample_on_posedge=sample_on_posedge,
             start_time=start_time,
             end_time=end_time,
             start_cycle=start_cycle,
             end_cycle=end_cycle,
+            reset_active_level=reset_active_level,
         )
         if not isinstance(resolved_clock, Signal):
             resolved_clock = self.get_signal(resolved_clock)
+        if resolved_reset is not None and not isinstance(resolved_reset, Signal):
+            resolved_reset = self.get_signal(resolved_reset)
         value_mapping = {'0': 0, '1': 1, 'x': xz_value, 'z': xz_value}
         wf = self._sample_on_clock(
             resolved_signal,
             resolved_clock,
             value_mapping=value_mapping,
             signed=signed,
+            reset=resolved_reset,
             **sampling,
         )
         wf.signal = resolved_signal
@@ -264,6 +291,8 @@ class Reader:
         end_time: int | None = None,
         start_cycle: int | None = None,
         end_cycle: int | None = None,
+        reset: Signal | str | None = None,
+        reset_active_level: Literal['high', 'low'] | None = None,
     ) -> Waveform:
         """Load source X/Z presence as an unsigned bitmask waveform.
 
@@ -286,6 +315,8 @@ class Reader:
             If ``True`` (default), mark source ``Z``/``z`` bits.
         sample_on_posedge, start_time, end_time, start_cycle, end_cycle:
             Same sampling/windowing semantics as ``load_waveform``.
+        reset, reset_active_level:
+            Same reset semantics as ``load_waveform``.
 
         Returns
         -------
@@ -298,16 +329,20 @@ class Reader:
             If *clock* is omitted and no ``ClockDomain`` is active.
         """
         resolved_signal = signal if isinstance(signal, Signal) else self.get_signal(signal)
-        resolved_clock, sampling = self._resolve_ambient_clock(
+        resolved_clock, resolved_reset, sampling = self._resolve_ambient_clock(
             clock,
+            reset,
             sample_on_posedge=sample_on_posedge,
             start_time=start_time,
             end_time=end_time,
             start_cycle=start_cycle,
             end_cycle=end_cycle,
+            reset_active_level=reset_active_level,
         )
         if not isinstance(resolved_clock, Signal):
             resolved_clock = self.get_signal(resolved_clock)
+        if resolved_reset is not None and not isinstance(resolved_reset, Signal):
+            resolved_reset = self.get_signal(resolved_reset)
 
         value_mapping = {
             '0': 0,
@@ -320,6 +355,7 @@ class Reader:
             resolved_clock,
             value_mapping=value_mapping,
             signed=False,
+            reset=resolved_reset,
             **sampling,
         )
         wf.signal = resolved_signal
@@ -389,17 +425,39 @@ class Reader:
         end_time: int | None,
         start_cycle: int | None,
         end_cycle: int | None,
+        reset: Signal | None = None,
+        reset_active_level: Literal['high', 'low'] | None = None,
     ) -> Waveform:
         """Sample *signal* on every *clock* edge and return a raw Waveform.
 
         Subclasses provide ``_load_value_changes`` for format-specific I/O.
         The returned Waveform is a simple value array — naming is handled by
-        the caller.
+        the caller. Samples taken while *reset* is active are dropped.
         """
         if start_time is not None and start_cycle is not None:
             raise ValueError('start_time and start_cycle are mutually exclusive')
         if end_time is not None and end_cycle is not None:
             raise ValueError('end_time and end_cycle are mutually exclusive')
+
+        keep = None
+        if reset is not None:
+            if reset_active_level not in ('high', 'low'):
+                raise ValueError(
+                    f"reset_active_level must be 'high' or 'low', got {reset_active_level!r}"
+                )
+            active = int(reset_active_level == 'high')
+            reset_wf = self._sample_on_clock(
+                reset,
+                clock,
+                {'0': 0, '1': 1, 'x': active, 'z': active},
+                False,
+                sample_on_posedge,
+                start_time,
+                end_time,
+                start_cycle,
+                end_cycle,
+            )
+            keep = reset_wf.value != active
 
         # Load clock value changes for absolute cycle computation
         clock_mapping = {'0': 0, '1': 1, 'x': 0, 'z': 0}
@@ -465,7 +523,7 @@ class Reader:
             clock_offset=clock_offset,
         )
 
-        return result
+        return result if keep is None else result.mask(keep)
 
     def get_signal(
         self,
@@ -663,6 +721,8 @@ class Reader:
         start_cycle: int | None = None,
         end_cycle: int | None = None,
         root_scope: Scope | None = None,
+        reset_path: str | None = None,
+        reset_active_level: Literal['high', 'low'] | None = None,
     ) -> dict[tuple[Capture, ...], Waveform]:
         """Batch-load all signals matching *signal_path*, each paired with its clock.
 
@@ -680,6 +740,8 @@ class Reader:
           longest prefix of the signal key is selected. If no clock key is a
           prefix, raises ``ValueError``.
 
+        *reset_path* is paired with the matched signals by the same rules.
+
         Parameters
         ----------
         signal_path:
@@ -693,8 +755,14 @@ class Reader:
             when *clock_path* is omitted (the ambient domain's fields apply
             instead).
         root_scope:
-            If provided, both *signal_path* and *clock_path* are searched within
-            this scope instead of the file's top-level scopes.
+            If provided, all paths are searched within this scope instead of
+            the file's top-level scopes.
+        reset_path:
+            Reset signal query path, paired with the matched signals like
+            *clock_path*. Ignored when *clock_path* is omitted.
+        reset_active_level:
+            ``'high'`` or ``'low'``, shared by every matched reset. Required
+            when *reset_path* is given.
 
         Returns
         -------
@@ -710,19 +778,26 @@ class Reader:
             of a signal key.
         """
         self._validate_xz_value(xz_value)
-        resolved_clock, sampling = self._resolve_ambient_clock(
+        resolved_clock, resolved_reset, sampling = self._resolve_ambient_clock(
             clock_path,
+            reset_path,
             sample_on_posedge=sample_on_posedge,
             start_time=start_time,
             end_time=end_time,
             start_cycle=start_cycle,
             end_cycle=end_cycle,
+            reset_active_level=reset_active_level,
         )
-        clock_pairing = self._resolve_clock_pairing(signal_path, resolved_clock, root_scope)
+        clock_pairing = self._resolve_pairing(signal_path, resolved_clock, root_scope)
+        reset_pairing = (
+            self._resolve_pairing(signal_path, resolved_reset, root_scope, 'reset')
+            if resolved_reset is not None
+            else {}
+        )
         matched_signals = self.get_matched_signals(signal_path, root_scope=root_scope)
         load_kwargs: dict[str, Any] = dict(xz_value=xz_value, signed=signed, **sampling)
         return {
-            k: self.load_waveform(sig, clock_pairing[k], **load_kwargs)
+            k: self.load_waveform(sig, clock_pairing[k], reset=reset_pairing.get(k), **load_kwargs)
             for k, sig in matched_signals.items()
         }
 
@@ -738,13 +813,16 @@ class Reader:
         start_cycle: int | None = None,
         end_cycle: int | None = None,
         root_scope: Scope | None = None,
+        reset_path: str | None = None,
+        reset_active_level: Literal['high', 'low'] | None = None,
     ) -> dict[tuple[Capture, ...], Waveform]:
         """Batch-load X/Z mask waveforms for all signals matching *signal_path*.
 
         Clock assignment follows ``load_matched_waveforms``: an omitted
         *clock_path* uses the ambient domain for every match; otherwise a
         single matched clock is broadcast to all signals, or the
-        longest-prefix clock key is selected for each signal key.
+        longest-prefix clock key is selected for each signal key. *reset_path*
+        is paired the same way.
 
         Parameters
         ----------
@@ -761,8 +839,10 @@ class Reader:
             Same sampling/windowing semantics as ``load_waveform``. Ignored
             when *clock_path* is omitted.
         root_scope:
-            If provided, both *signal_path* and *clock_path* are searched within
-            this scope instead of the file's top-level scopes.
+            If provided, all paths are searched within this scope instead of
+            the file's top-level scopes.
+        reset_path, reset_active_level:
+            Same reset semantics as ``load_matched_waveforms``.
 
         Returns
         -------
@@ -774,19 +854,28 @@ class Reader:
         RuntimeError:
             If *clock_path* is omitted and no ``ClockDomain`` is active.
         """
-        resolved_clock, sampling = self._resolve_ambient_clock(
+        resolved_clock, resolved_reset, sampling = self._resolve_ambient_clock(
             clock_path,
+            reset_path,
             sample_on_posedge=sample_on_posedge,
             start_time=start_time,
             end_time=end_time,
             start_cycle=start_cycle,
             end_cycle=end_cycle,
+            reset_active_level=reset_active_level,
         )
-        clock_pairing = self._resolve_clock_pairing(signal_path, resolved_clock, root_scope)
+        clock_pairing = self._resolve_pairing(signal_path, resolved_clock, root_scope)
+        reset_pairing = (
+            self._resolve_pairing(signal_path, resolved_reset, root_scope, 'reset')
+            if resolved_reset is not None
+            else {}
+        )
         matched_signals = self.get_matched_signals(signal_path, root_scope=root_scope)
         mask_kwargs: dict[str, Any] = dict(include_x=include_x, include_z=include_z, **sampling)
         return {
-            k: self.load_unknown_mask(sig, clock_pairing[k], **mask_kwargs)
+            k: self.load_unknown_mask(
+                sig, clock_pairing[k], reset=reset_pairing.get(k), **mask_kwargs
+            )
             for k, sig in matched_signals.items()
         }
 
@@ -795,48 +884,51 @@ class Reader:
         if xz_value not in (0, 1):
             raise ValueError('xz_value must be 0 or 1')
 
-    def _resolve_clock_pairing(
+    def _resolve_pairing(
         self,
         signal_path: str,
-        clock: Signal | str,
+        source: Signal | str,
         root_scope: Scope | None,
+        kind: str = 'clock',
     ) -> dict[tuple[Capture, ...], Signal]:
-        """Resolve signal/clock query paths into a {signal_key: clock_signal} map.
+        """Resolve signal/*source* query paths into a {signal_key: source_signal} map.
+
+        *source* is the clock or reset query and *kind* names it in error messages.
 
         Rules:
-        - A concrete clock ``Signal``: broadcast to all signals.
-        - Single clock match: broadcast to all signals.
-        - Multiple clock matches: longest-prefix clock key per signal key.
+        - A concrete ``Signal``: broadcast to all signals.
+        - Single match: broadcast to all signals.
+        - Multiple matches: longest-prefix key per signal key.
         - No prefix match for a signal: raise ValueError.
         """
-        if isinstance(clock, Signal):
+        if isinstance(source, Signal):
             matched_signals = self.get_matched_signals(signal_path, root_scope=root_scope)
-            return {k: clock for k in matched_signals}
-        matched_clocks = self.get_matched_signals(clock, root_scope=root_scope)
-        if not matched_clocks:
-            raise ValueError(f'clock path {clock!r} matched no signals')
+            return {k: source for k in matched_signals}
+        matched_sources = self.get_matched_signals(source, root_scope=root_scope)
+        if not matched_sources:
+            raise ValueError(f'{kind} path {source!r} matched no signals')
 
         matched_signals = self.get_matched_signals(signal_path, root_scope=root_scope)
 
-        if len(matched_clocks) == 1:
-            clock_signal = next(iter(matched_clocks.values()))
-            return {k: clock_signal for k in matched_signals}
+        if len(matched_sources) == 1:
+            source_signal = next(iter(matched_sources.values()))
+            return {k: source_signal for k in matched_signals}
 
-        clock_keys = list(matched_clocks.keys())
+        source_keys = list(matched_sources.keys())
         pairing: dict[tuple[Capture, ...], Signal] = {}
         for sig_key in matched_signals:
             best_len = -1
-            best_clock_key: tuple[Capture, ...] | None = None
-            for ck in clock_keys:
-                if sig_key[: len(ck)] == ck and len(ck) > best_len:
-                    best_len = len(ck)
-                    best_clock_key = ck
-            if best_clock_key is None:
+            best_source_key: tuple[Capture, ...] | None = None
+            for sk in source_keys:
+                if sig_key[: len(sk)] == sk and len(sk) > best_len:
+                    best_len = len(sk)
+                    best_source_key = sk
+            if best_source_key is None:
                 raise ValueError(
-                    f'no clock key is a prefix of signal key {sig_key!r}; '
-                    f'available clock keys: {clock_keys!r}'
+                    f'no {kind} key is a prefix of signal key {sig_key!r}; '
+                    f'available {kind} keys: {source_keys!r}'
                 )
-            pairing[sig_key] = matched_clocks[best_clock_key]
+            pairing[sig_key] = matched_sources[best_source_key]
         return pairing
 
     @abstractmethod
@@ -866,6 +958,8 @@ class Reader:
         end_cycle: int | None = None,
         mode: Literal['single', 'zip'] = 'single',
         root_scope: Scope | None = None,
+        reset: str | None = None,
+        reset_active_level: Literal['high', 'low'] | None = None,
     ) -> Waveform | dict[tuple[Capture, ...], Waveform]:
         """Evaluate a waveform expression containing physical signal paths.
 
@@ -885,6 +979,9 @@ class Reader:
             paths.
         root_scope:
             If provided, resolve paths within this scope.
+        reset, reset_active_level:
+            Forwarded to ``load_matched_waveforms`` as ``reset_path`` and
+            ``reset_active_level`` for every path.
 
         Returns
         -------
@@ -902,6 +999,8 @@ class Reader:
             start_cycle=start_cycle,
             end_cycle=end_cycle,
             root_scope=root_scope,
+            reset_path=reset,
+            reset_active_level=reset_active_level,
         )
 
         loaded_per_path: list[tuple[str, str, dict[tuple[Capture, ...], Waveform]]] = []
