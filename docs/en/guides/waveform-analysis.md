@@ -141,6 +141,26 @@ compact = data.compress()
 summary = data.downsample(100)  # average each 100-sample chunk
 ```
 
+## Aggregate
+
+Aggregation methods reduce a waveform to a plain Python number. `sum()`,
+`prod()`, `min()`, `max()`, `mean()`, `std()`, `var()`, `median()`,
+`percentile(q)`, `quantile(q)`, `any()`, and `all()` match NumPy; `len()`
+counts samples and `at(i)` returns the value at index `i`.
+
+```python
+fire = valid & ready
+print(f'Handshakes: {fire.sum()}, rate: {fire.mean():.2%}')
+print(f'Peak occupancy: {occupancy.max()}, p95: {occupancy.percentile(95)}')
+print(f'First active value: {data.mask(valid).at(0)}')
+```
+
+The result works directly in waveform operations:
+
+```python
+outliers = latency.mask(latency > 2 * latency.mean())
+```
+
 ## Extract NumPy results
 
 Use `.value` when handing data to NumPy or another analysis library:
@@ -148,8 +168,8 @@ Use `.value` when handing data to NumPy or another analysis library:
 ```python
 import numpy as np
 
-print(f'Average active value: {np.mean(active.value):.2f}')
-print(f'Maximum active value: {np.max(active.value)}')
+counts, edges = np.histogram(active.value, bins=16)
+gaps = np.diff(active.cycle)  # cycles between consecutive active samples
 ```
 
 Keep the `Waveform` itself until you no longer need cycle or timestamp context.

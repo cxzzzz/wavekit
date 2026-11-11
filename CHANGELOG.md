@@ -7,6 +7,13 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+
+- `Waveform` aggregation methods that return plain Python scalars: `sum`,
+  `prod`, `min`, `max`, `mean`, `std`, `var`, `median`, `percentile`,
+  `quantile`, `any`, `all` (same semantics as NumPy), plus `len` and `at`.
+  They are also available in expressions, e.g. `mean(x)`.
+
 ## v0.8.3 - 2026-10-29
 
 ### Added

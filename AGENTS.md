@@ -246,6 +246,19 @@ Every operation returns a **new** `Waveform`; none mutate in place.
 | `wave.falling_edge()` | True at 1->0 transitions on a 1-bit waveform |
 | `wave.any_edge()` | True at either transition on a 1-bit waveform |
 
+### Aggregation
+
+These return a plain Python scalar instead of a `Waveform`, usable directly in
+Waveform arithmetic and comparisons, e.g. `latency > 2 * latency.mean()`.
+
+| Method | Description |
+|--------|-------------|
+| `wave.sum()` `wave.prod()` `wave.min()` `wave.max()` `wave.mean()` `wave.median()` `wave.any()` `wave.all()` | Same as the NumPy function of the same name |
+| `wave.std(ddof=0)` / `wave.var(ddof=0)` | Standard deviation / variance |
+| `wave.percentile(q)` / `wave.quantile(q)` | `q` in 0-100 / 0-1 |
+| `wave.len()` | Number of samples |
+| `wave.at(i)` | Sample value at position `i`; negative indices count from the end |
+
 ### Arithmetic operators
 
 `+`, `-`, `*`, `//`, `%`, `**`, `/` work between two `Waveform`s or a
@@ -484,8 +497,8 @@ with VcdReader("sim.vcd") as r:
     # Only active write cycles
     active_occ = occ.mask(wr == 1)
 
-    print("Mean occupancy during writes:", np.mean(active_occ.value))
-    print("Max occupancy:", np.max(occ.value))
+    print("Mean occupancy during writes:", active_occ.mean())
+    print("Max occupancy:", occ.max())
 
     # Detect write bursts (rising edge of wr_en)
     burst_starts = wr.rising_edge()
