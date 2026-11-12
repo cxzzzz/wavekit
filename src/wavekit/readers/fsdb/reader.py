@@ -128,8 +128,7 @@ class FsdbReader(Reader):
     """
 
     def __init__(self, file: str, *, quiet: bool = True):
-        super().__init__()
-        self.file = file
+        super().__init__(file)
         try:
             self.file_handle = NpiFsdbReader(file, quiet=quiet)
         except Exception as exc:

@@ -21,7 +21,7 @@ class StubReader(Reader):
         pass
 
 
-_STUB_READER = StubReader()
+_STUB_READER = StubReader(__file__)
 
 
 @dataclass(frozen=True, eq=False)

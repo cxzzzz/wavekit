@@ -19,6 +19,15 @@ with FsdbReader('simulation.fsdb') as reader:
 
 ```
 
+`wavekit.open(path)` 按扩展名选择 Reader，其余关键字参数原样传给它：
+
+```python
+import wavekit
+
+with wavekit.open('simulation.fst') as reader:  # 得到 FstReader
+    ...
+```
+
 `FsdbReader` 需要 Verdi NPI 运行时（`libNPI.so`）。打开 FSDB 文件前，请先阅读 [FSDB 安装和运行时配置](../getting-started/installation.md)。
 
 ## 层级结构

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
 from importlib import metadata
+from typing import Any
+
+from .readers.base import Reader
 
 try:
     __version__ = metadata.version('wavekit')
@@ -71,3 +76,38 @@ else:
     def has_fsdb_support() -> bool:
         """Check whether the Verdi FSDB runtime library is installed."""
         return _fsdb_runtime_available()
+
+
+def open(file: str, **kwargs: Any) -> Reader:
+    """Open a waveform file with the reader for its file extension.
+
+    Parameters
+    ----------
+    file:
+        Path to a ``.vcd``, ``.fst``, or ``.fsdb`` file.
+    **kwargs:
+        Passed to the reader, e.g. ``quiet`` for ``FsdbReader``.
+
+    Returns
+    -------
+    Reader
+        A ``VcdReader``, ``FstReader``, or ``FsdbReader``.
+
+    Raises
+    ------
+    ValueError:
+        If the extension is not supported.
+    FileNotFoundError:
+        If *file* does not exist.
+    """
+    readers: dict[str, Callable[..., Reader]] = {
+        '.vcd': VcdReader,
+        '.fst': FstReader,
+        '.fsdb': FsdbReader,
+    }
+    reader = readers.get(os.path.splitext(file)[1].lower())
+    if reader is None:
+        raise ValueError(
+            f"unsupported waveform file '{file}': expected one of {', '.join(readers)}"
+        )
+    return reader(file, **kwargs)

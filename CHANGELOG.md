@@ -13,6 +13,14 @@ and this project follows [Semantic Versioning](https://semver.org/).
   `prod`, `min`, `max`, `mean`, `std`, `var`, `median`, `percentile`,
   `quantile`, `any`, `all` (same semantics as NumPy), plus `len` and `at`.
   They are also available in expressions, e.g. `mean(x)`.
+- `wavekit.open(path)` opens a waveform with the reader for its extension
+  (`.vcd`, `.fst`, or `.fsdb`).
+
+### Fixed
+
+- Opening a missing file now raises `FileNotFoundError`. `VcdReader` and
+  `FstReader` used to abort with an uncatchable backend panic, and `FsdbReader`
+  reported it as a runtime setup failure.
 
 ## v0.8.3 - 2026-10-29
 
