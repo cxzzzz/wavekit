@@ -1598,12 +1598,24 @@ class Waveform:
 
     @expression_function
     def std(self, ddof: int = 0) -> float:
-        """Return the standard deviation, like ``numpy.std``."""
+        """Return the standard deviation of the sample values, like ``numpy.std``.
+
+        Parameters
+        ----------
+        ddof:
+            Delta degrees of freedom: the divisor is ``len - ddof``.
+        """
         return np.asarray(np.std(self.value, ddof=ddof)).item()
 
     @expression_function
     def var(self, ddof: int = 0) -> float:
-        """Return the variance, like ``numpy.var``."""
+        """Return the variance of the sample values, like ``numpy.var``.
+
+        Parameters
+        ----------
+        ddof:
+            Delta degrees of freedom: the divisor is ``len - ddof``.
+        """
         return np.asarray(np.var(self.value, ddof=ddof)).item()
 
     @expression_function
@@ -1613,12 +1625,24 @@ class Waveform:
 
     @expression_function
     def percentile(self, q: float) -> float:
-        """Return the *q*-th percentile (0-100), like ``numpy.percentile``."""
+        """Return the *q*-th percentile of the sample values, like ``numpy.percentile``.
+
+        Parameters
+        ----------
+        q:
+            Percentile to compute, between 0 and 100 inclusive.
+        """
         return np.asarray(np.percentile(self.value, q)).item()
 
     @expression_function
     def quantile(self, q: float) -> float:
-        """Return the *q*-th quantile (0-1), like ``numpy.quantile``."""
+        """Return the *q*-th quantile of the sample values, like ``numpy.quantile``.
+
+        Parameters
+        ----------
+        q:
+            Quantile to compute, between 0 and 1 inclusive.
+        """
         return np.asarray(np.quantile(self.value, q)).item()
 
     @expression_function
@@ -1637,9 +1661,17 @@ class Waveform:
         return len(self.value)
 
     @expression_function
-    def at(self, index: int) -> Any:
+    def at(self, index: int) -> int | float:
         """Return the sample value at position *index*, like ``value[index]``.
 
-        Negative indices count from the end.
+        Parameters
+        ----------
+        index:
+            Sample position; negative values count from the end.
+
+        Raises
+        ------
+        IndexError:
+            If *index* is out of range.
         """
         return np.asarray(self.value[index]).item()
