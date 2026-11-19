@@ -19,6 +19,8 @@ Format-specific readers share the common loading, query, and expression APIs.
 
 ::: wavekit.has_fsdb_support
 
+::: wavekit.open
+
 ## Pattern matching
 
 The pattern-matching API describes signal relationships across multiple

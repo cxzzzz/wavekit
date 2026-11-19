@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import errno
+import os
 from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
@@ -73,8 +75,10 @@ class Reader:
     dictionary value type depends on the API.
     """
 
-    def __init__(self):
-        pass
+    def __init__(self, file: str):
+        if not os.path.isfile(file):
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), file)
+        self.file = file
 
     def __enter__(self):
         return self

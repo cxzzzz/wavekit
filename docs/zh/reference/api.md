@@ -18,6 +18,8 @@
 
 ::: wavekit.has_fsdb_support
 
+::: wavekit.open
+
 ## 模式匹配
 
 模式匹配 API 用于描述跨多个时钟周期的信号关系，并执行事务级分析。

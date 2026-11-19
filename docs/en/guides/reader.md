@@ -21,6 +21,16 @@ with FsdbReader('simulation.fsdb') as reader:
     print(signal.name, signal.width)    # data 8
 ```
 
+`wavekit.open(path)` picks the reader from the file extension and passes extra
+keyword arguments to it:
+
+```python
+import wavekit
+
+with wavekit.open('simulation.fst') as reader:  # an FstReader
+    ...
+```
+
 `FsdbReader` requires the Verdi NPI runtime (`libNPI.so`). See the
 [FSDB installation and runtime setup](../getting-started/installation.md)
 before opening an FSDB file.

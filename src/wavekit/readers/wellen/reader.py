@@ -140,8 +140,7 @@ class WellenReader(Reader):
     _EXPECTED_FORMAT: str | None = None
 
     def __init__(self, file: str):
-        super().__init__()
-        self.file = file
+        super().__init__(file)
         self.file_handle = pywellen.Waveform(file)
         fmt = self.file_handle.file_format
         if self._EXPECTED_FORMAT is not None and fmt != self._EXPECTED_FORMAT:
