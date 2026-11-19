@@ -1570,3 +1570,108 @@ class Waveform:
         Alias of ``back()``; see there for the padding options.
         """
         return self.back(n, pad, pad_value)
+
+    @expression_function
+    def sum(self) -> int | float:
+        """Return the sum of all sample values, like ``numpy.sum``."""
+        return np.asarray(np.sum(self.value)).item()
+
+    @expression_function
+    def prod(self) -> int | float:
+        """Return the product of all sample values, like ``numpy.prod``."""
+        return np.asarray(np.prod(self.value)).item()
+
+    @expression_function
+    def min(self) -> int | float:
+        """Return the smallest sample value, like ``numpy.min``."""
+        return np.asarray(np.min(self.value)).item()
+
+    @expression_function
+    def max(self) -> int | float:
+        """Return the largest sample value, like ``numpy.max``."""
+        return np.asarray(np.max(self.value)).item()
+
+    @expression_function
+    def mean(self) -> float:
+        """Return the arithmetic mean of the sample values, like ``numpy.mean``."""
+        return np.asarray(np.mean(self.value)).item()
+
+    @expression_function
+    def std(self, ddof: int = 0) -> float:
+        """Return the standard deviation of the sample values, like ``numpy.std``.
+
+        Parameters
+        ----------
+        ddof:
+            Delta degrees of freedom: the divisor is ``len - ddof``.
+        """
+        return np.asarray(np.std(self.value, ddof=ddof)).item()
+
+    @expression_function
+    def var(self, ddof: int = 0) -> float:
+        """Return the variance of the sample values, like ``numpy.var``.
+
+        Parameters
+        ----------
+        ddof:
+            Delta degrees of freedom: the divisor is ``len - ddof``.
+        """
+        return np.asarray(np.var(self.value, ddof=ddof)).item()
+
+    @expression_function
+    def median(self) -> float:
+        """Return the median of the sample values, like ``numpy.median``."""
+        return np.asarray(np.median(self.value)).item()
+
+    @expression_function
+    def percentile(self, q: float) -> float:
+        """Return the *q*-th percentile of the sample values, like ``numpy.percentile``.
+
+        Parameters
+        ----------
+        q:
+            Percentile to compute, between 0 and 100 inclusive.
+        """
+        return np.asarray(np.percentile(self.value, q)).item()
+
+    @expression_function
+    def quantile(self, q: float) -> float:
+        """Return the *q*-th quantile of the sample values, like ``numpy.quantile``.
+
+        Parameters
+        ----------
+        q:
+            Quantile to compute, between 0 and 1 inclusive.
+        """
+        return np.asarray(np.quantile(self.value, q)).item()
+
+    @expression_function
+    def any(self) -> bool:
+        """Return whether any sample value is non-zero, like ``numpy.any``."""
+        return np.asarray(np.any(self.value)).item()
+
+    @expression_function
+    def all(self) -> bool:
+        """Return whether every sample value is non-zero, like ``numpy.all``."""
+        return np.asarray(np.all(self.value)).item()
+
+    @expression_function
+    def len(self) -> int:
+        """Return the number of samples."""
+        return len(self.value)
+
+    @expression_function
+    def at(self, index: int) -> int | float:
+        """Return the sample value at position *index*, like ``value[index]``.
+
+        Parameters
+        ----------
+        index:
+            Sample position; negative values count from the end.
+
+        Raises
+        ------
+        IndexError:
+            If *index* is out of range.
+        """
+        return np.asarray(self.value[index]).item()

@@ -119,6 +119,23 @@ compact = data.compress()
 summary = data.downsample(100)  # 每 100 个采样点求一个平均值
 ```
 
+## 聚合
+
+聚合方法把波形归约成一个普通的 Python 数值。`sum()`、`prod()`、`min()`、`max()`、`mean()`、`std()`、`var()`、`median()`、`percentile(q)`、`quantile(q)`、`any()`、`all()` 与 NumPy 一致；`len()` 返回采样点个数，`at(i)` 返回第 `i` 个值。
+
+```python
+fire = valid & ready
+print(f'Handshakes: {fire.sum()}, rate: {fire.mean():.2%}')
+print(f'Peak occupancy: {occupancy.max()}, p95: {occupancy.percentile(95)}')
+print(f'First active value: {data.mask(valid).at(0)}')
+```
+
+结果可以直接参与波形运算：
+
+```python
+outliers = latency.mask(latency > 2 * latency.mean())
+```
+
 ## 提取 NumPy 结果
 
 需要将数据交给 NumPy 或其他分析库时，使用 `.value`：
@@ -126,8 +143,8 @@ summary = data.downsample(100)  # 每 100 个采样点求一个平均值
 ```python
 import numpy as np
 
-print(f'Average active value: {np.mean(active.value):.2f}')
-print(f'Maximum active value: {np.max(active.value)}')
+counts, edges = np.histogram(active.value, bins=16)
+gaps = np.diff(active.cycle)  # 相邻两个有效采样点之间的周期数
 ```
 
 在还需要周期或时间信息时，保留 `Waveform` 对象，不要过早取出 `.value`。
